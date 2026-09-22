@@ -1,0 +1,287 @@
+Project A2MaTeX_marketplace_release {
+  database_type: 'PostgreSQL'
+  Note: '''Marketplace & Release module view.
+
+Tables in the primary module group are complete. Tables in reference_stubs are intentionally reduced cross-module projections used only to preserve readable relationships in dbdiagram.io.
+
+The canonical schema remains 10-database-design.dbml.'''
+}
+
+// ============================================================
+
+Enum UserStatus {
+  ACTIVE
+  INACTIVE
+  BANNED
+}
+
+Enum PublisherStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  CLOSED
+}
+
+Enum ProjectStatus {
+  ACTIVE
+  ARCHIVED
+  SUSPENDED
+}
+
+Enum StorageObjectStatus {
+  PENDING
+  AVAILABLE
+  QUARANTINED
+  DELETED
+}
+
+Enum SubmissionStatus {
+  SUBMITTED
+  VALIDATING
+  BUILDING
+  SANDBOXING
+  IN_REVIEW
+  CHANGES_REQUESTED
+  REJECTED
+  ESCALATED
+  APPROVED
+  SIGNING
+  PUBLISHED
+  CANCELLED
+  FAILED
+}
+
+Enum ArtifactKind {
+  CANDIDATE
+  SIGNED
+}
+
+Enum ArtifactStatus {
+  CREATED
+  VERIFIED
+  SIGNED
+  PUBLISHED
+  QUARANTINED
+  REVOKED
+  DELETED
+}
+
+Enum ProductStatus {
+  DRAFT
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+
+Enum ProductVersionStatus {
+  DRAFT
+  APPROVED
+  PUBLISHED
+  DEPRECATED
+  REVOKED
+}
+
+Enum ListingStatus {
+  DRAFT
+  PUBLISHED
+  HIDDEN
+  SUSPENDED
+}
+
+Enum CredentialOwnerType {
+  CUSTOMER
+  PUBLISHER
+}
+
+// ============================================================
+
+Table Product {
+  id uuid [pk, default: `gen_random_uuid()`]
+  publisherId uuid [not null, ref: > Publisher.id]
+  projectId uuid [not null, unique, ref: - Project.id]
+  slug varchar(140) [not null, unique]
+  name varchar(180) [not null]
+  shortDescription varchar(500)
+  status ProductStatus [not null, default: 'DRAFT']
+  currentPublishedVersionId uuid [note: 'Application-maintained pointer; FK added after ProductVersion exists.']
+  createdByUserId uuid [not null, ref: > User.id]
+  createdAt timestamptz [not null, default: `now()`]
+  updatedAt timestamptz [not null, default: `now()`]
+
+  indexes {
+    (publisherId, status) [name: 'idx_products_publisher_status']
+  }
+
+  Note: 'Stable marketplace identity for one Registered Project. Product metadata may change; each published Product Version is immutable.'
+}
+
+Table ProductListing {
+  id uuid [pk, default: `gen_random_uuid()`]
+  productId uuid [not null, unique, ref: - Product.id]
+  status ListingStatus [not null, default: 'DRAFT']
+  title varchar(180) [not null]
+  summary varchar(500) [not null]
+  description text [not null]
+  supportUrl text
+  privacyUrl text
+  iconObjectId uuid [ref: >? StorageObject.id]
+  pricingType varchar(32) [not null, default: 'FREE', note: 'UAT supports FREE or ADMIN_GRANT; full commerce is later scope.']
+  priceMinor bigint
+  currency char(3)
+  publishedAt timestamptz
+  updatedAt timestamptz [not null, default: `now()`]
+
+  Note: 'Mutable customer-facing listing. Technical Product Version data and signed Artifact remain separate and immutable.'
+}
+
+Table ProductVersion {
+  id uuid [pk, default: `gen_random_uuid()`]
+  productId uuid [not null, ref: > Product.id]
+  submissionId uuid [not null, unique, ref: - Submission.id]
+  revisionId uuid [not null, ref: > WorkflowRevision.id]
+  signedArtifactId uuid [not null, unique, ref: - Artifact.id]
+  version varchar(64) [not null]
+  status ProductVersionStatus [not null, default: 'APPROVED']
+  runtimeVersionRange varchar(120) [not null]
+  permissionScopeHash char(64) [not null, note: 'Detects capability/domain/credential changes requiring renewed Customer consent.']
+  releaseNotes text
+  publishedAt timestamptz
+  deprecatedAt timestamptz
+  revokedAt timestamptz
+  createdAt timestamptz [not null, default: `now()`]
+
+  indexes {
+    (productId, version) [unique, name: 'uq_product_versions_version']
+    (productId, status, publishedAt) [name: 'idx_product_versions_publish_state']
+  }
+
+  Note: 'Immutable release record that connects the reviewed Revision, approved Submission, and signed .apkg. Status can deprecate or revoke availability without changing content.'
+}
+
+Table ProductVersionCapability {
+  productVersionId uuid [not null, ref: > ProductVersion.id]
+  capabilityId uuid [not null, ref: > CapabilityDefinition.id]
+  purpose text [not null]
+  configurationHash char(64) [not null]
+  isRequired boolean [not null, default: true]
+
+  indexes {
+    (productVersionId, capabilityId) [pk]
+  }
+
+  Note: 'Effective reviewed capability manifest copied to the published Product Version for fast disclosure and Runtime verification.'
+}
+
+Table ProductVersionDomain {
+  id uuid [pk, default: `gen_random_uuid()`]
+  productVersionId uuid [not null, ref: > ProductVersion.id]
+  scheme varchar(16) [not null, default: 'https']
+  hostPattern varchar(255) [not null]
+  port int
+  purpose text
+
+  indexes {
+    (productVersionId, scheme, hostPattern, port) [unique, name: 'uq_product_version_domains']
+  }
+
+  Note: 'Effective reviewed network allowlist shipped in the Product Version manifest.'
+}
+
+Table ProductVersionCredentialSlot {
+  id uuid [pk, default: `gen_random_uuid()`]
+  productVersionId uuid [not null, ref: > ProductVersion.id]
+  slotKey varchar(160) [not null]
+  providerKey varchar(120) [not null]
+  ownerType CredentialOwnerType [not null]
+  requiredScopes jsonb [not null]
+  purpose text [not null]
+  isRequired boolean [not null, default: true]
+
+  indexes {
+    (productVersionId, slotKey) [unique, name: 'uq_product_version_credential_slots']
+  }
+
+  Note: 'Versioned credential-slot contract shown to Customers and checked before execution. Contains no token values.'
+}
+
+// ============================================================
+
+Table Artifact {
+  id uuid [pk]
+  status ArtifactStatus
+  kind ArtifactKind
+  payloadHash char(64)
+  packageHash char(64)
+
+  Note: 'Reference stub for a table owned by another module. Only identity fields are shown here; use the owning module file for the complete definition.'
+}
+
+Table CapabilityDefinition {
+  id uuid [pk]
+  displayName varchar(160)
+  key varchar(160)
+  createdAt timestamptz
+
+  Note: 'Reference stub for a table owned by another module. Only identity fields are shown here; use the owning module file for the complete definition.'
+}
+
+Table Project {
+  id uuid [pk]
+  name varchar(180)
+  projectKey varchar(100)
+  status ProjectStatus
+  createdAt timestamptz
+
+  Note: 'Reference stub for a table owned by another module. Only identity fields are shown here; use the owning module file for the complete definition.'
+}
+
+Table Publisher {
+  id uuid [pk]
+  displayName varchar(180)
+  slug varchar(120)
+  status PublisherStatus
+  createdAt timestamptz
+
+  Note: 'Reference stub for a table owned by another module. Only identity fields are shown here; use the owning module file for the complete definition.'
+}
+
+Table StorageObject {
+  id uuid [pk]
+  objectKey text
+  status StorageObjectStatus
+  contentHash char(64)
+  createdAt timestamptz
+
+  Note: 'Reference stub for a table owned by another module. Only identity fields are shown here; use the owning module file for the complete definition.'
+}
+
+Table Submission {
+  id uuid [pk]
+  status SubmissionStatus
+  targetVersion varchar(64)
+
+  Note: 'Reference stub for a table owned by another module. Only identity fields are shown here; use the owning module file for the complete definition.'
+}
+
+Table User {
+  id uuid [pk]
+  username varchar(255)
+  email text
+  status UserStatus
+  createdAt timestamptz
+
+  Note: 'Reference stub for a table owned by another module. Only identity fields are shown here; use the owning module file for the complete definition.'
+}
+
+Table WorkflowRevision {
+  id uuid [pk]
+  revisionNumber int
+  semanticHash char(64)
+  createdAt timestamptz
+
+  Note: 'Reference stub for a table owned by another module. Only identity fields are shown here; use the owning module file for the complete definition.'
+}
+
+// ============================================================
+
+Ref: Product.currentPublishedVersionId >? ProductVersion.id

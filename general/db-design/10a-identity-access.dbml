@@ -1,0 +1,229 @@
+Project A2MaTeX_identity_access {
+  database_type: 'PostgreSQL'
+  Note: '''Identity & Access module view.
+
+Tables in the primary module group are complete. Tables in reference_stubs are intentionally reduced cross-module projections used only to preserve readable relationships in dbdiagram.io.
+
+The canonical schema remains 10-database-design.dbml.'''
+}
+
+// ============================================================
+
+Enum UserStatus {
+  ACTIVE
+  INACTIVE
+  BANNED
+}
+
+Enum RoleStatus {
+  ACTIVE
+  INACTIVE
+}
+
+Enum VerificationCodeType {
+  REGISTER
+  FORGOT_PASSWORD
+  LOGIN
+  DISABLE_2FA
+}
+
+Enum HTTPMethod {
+  GET
+  POST
+  PUT
+  DELETE
+  PATCH
+  OPTIONS
+  HEAD
+}
+
+Enum LauncherDeviceStatus {
+  ACTIVE
+  BLOCKED
+  RETIRED
+}
+
+// ============================================================
+
+Table User {
+  id uuid [pk, default: `gen_random_uuid()`]
+  username varchar(255) [not null]
+  email text [not null]
+  password varchar(255) [not null, note: 'Existing password hash field. Application code must never store plaintext passwords.']
+  status UserStatus [not null, default: 'INACTIVE']
+  createdAt timestamptz [not null, default: `now()`]
+  updatedAt timestamptz
+  deletedAt timestamptz
+
+  indexes {
+    `lower(username)` [unique, name: 'User_username_idx', note: 'PostgreSQL migration keeps the partial predicate WHERE deletedAt IS NULL.']
+    `lower(email)` [unique, name: 'User_email_idx', note: 'PostgreSQL migration keeps the partial predicate WHERE deletedAt IS NULL.']
+  }
+
+  Note: 'Existing user table. Kept unchanged so the new A2MaTeX modules can reference User.id directly.'
+}
+
+Table Profile {
+  id uuid [pk, default: `gen_random_uuid()`]
+  userId uuid [not null, ref: - User.id]
+  fullName varchar(255) [not null]
+  avatarStaticId uuid
+  bio text
+  website text
+  twitter text
+  linkedin text
+  github text
+  instagram text
+  gender varchar(20)
+  birthday date
+  address text
+  phone text
+  email text
+  createdAt timestamptz [not null, default: `now()`]
+  updatedAt timestamptz
+  deletedAt timestamptz
+  createdById uuid [not null, ref: > User.id]
+  updatedById uuid [ref: >? User.id]
+  deletedById uuid [ref: >? User.id]
+
+  indexes {
+    userId [unique, name: 'Profile_userId_idx', note: 'PostgreSQL migration keeps the partial predicate WHERE deletedAt IS NULL.']
+  }
+
+  Note: 'Existing one-to-one user profile and public/social information.'
+}
+
+Table VerificationCode {
+  id uuid [pk, default: `gen_random_uuid()`]
+  email varchar(500) [not null]
+  code varchar(50) [not null]
+  type VerificationCodeType [not null]
+  expiresAt timestamptz [not null]
+  createdAt timestamptz [not null, default: `now()`]
+  updatedAt timestamptz
+  deletedAt timestamptz
+
+  indexes {
+    (email, type) [unique, name: 'VerificationCode_email_type_idx', note: 'PostgreSQL migration keeps the partial predicate WHERE deletedAt IS NULL.']
+  }
+
+  Note: 'Existing verification-code table for registration, login, password recovery, and 2FA disable flows.'
+}
+
+Table Device {
+  id uuid [pk, default: `gen_random_uuid()`]
+  userId uuid [ref: -? User.id]
+  userAgent text [not null]
+  ip text [not null]
+  lastActive timestamptz [not null]
+  isActive boolean [not null, default: true]
+  createdAt timestamptz [not null, default: `now()`]
+  updatedAt timestamptz
+  deletedAt timestamptz
+
+  indexes {
+    userId [unique, name: 'Device_userId_idx', note: 'Existing partial unique index WHERE deletedAt IS NULL. This currently permits one non-deleted Device per user.']
+  }
+
+  Note: 'Existing authentication device/session context. Launcher-specific cryptographic and version metadata is added in LauncherDevice without changing this table.'
+}
+
+Table RefreshToken {
+  id uuid [pk, default: `gen_random_uuid()`]
+  token text [not null, note: 'Existing field retained. Security hardening may later migrate this value to a one-way token hash.']
+  userId uuid [ref: >? User.id]
+  deviceId uuid [ref: >? Device.id]
+  expiresAt timestamptz [not null]
+  createdAt timestamptz [not null, default: `now()`]
+  updatedAt timestamptz
+  deletedAt timestamptz
+
+  indexes {
+    token [unique, name: 'RefreshToken_token_idx', note: 'PostgreSQL migration keeps the partial predicate WHERE deletedAt IS NULL.']
+  }
+
+  Note: 'Existing refresh-token table. It remains separate from the A2MaTeX LicenseLease used to authorize Product execution.'
+}
+
+Table Permission {
+  id uuid [pk, default: `gen_random_uuid()`]
+  name varchar(500) [not null]
+  module varchar(100) [not null]
+  description text [not null]
+  path varchar(1000) [not null]
+  method HTTPMethod [not null]
+  createdById uuid [not null, ref: > User.id]
+  updatedById uuid [ref: >? User.id]
+  deletedById uuid [ref: >? User.id]
+  createdAt timestamptz [not null, default: `now()`]
+  updatedAt timestamptz
+  deletedAt timestamptz
+
+  Note: 'Existing API/RBAC permission. It is intentionally separate from CapabilityDefinition, which controls .apkg Runtime hardware/network access.'
+}
+
+Table Role {
+  id uuid [pk, default: `gen_random_uuid()`]
+  name varchar(500) [not null]
+  description text
+  status RoleStatus
+  createdById uuid [not null, ref: > User.id]
+  updatedById uuid [ref: >? User.id]
+  deletedById uuid [ref: >? User.id]
+  createdAt timestamptz [not null, default: `now()`]
+  updatedAt timestamptz
+  deletedAt timestamptz
+
+  Note: 'Existing RBAC role.'
+}
+
+Table RolePermission {
+  id uuid [pk, default: `gen_random_uuid()`]
+  roleId uuid [not null, ref: > Role.id]
+  permissionId uuid [not null, ref: > Permission.id]
+  createdAt timestamptz [not null, default: `now()`]
+  updatedAt timestamptz
+  deletedAt timestamptz
+
+  indexes {
+    (roleId, permissionId) [unique, name: 'RolePermission_roleId_permissionId_idx', note: 'PostgreSQL migration keeps the partial predicate WHERE deletedAt IS NULL.']
+  }
+
+  Note: 'Existing Role-Permission association.'
+}
+
+Table UserRole {
+  id uuid [pk, default: `gen_random_uuid()`]
+  userId uuid [not null, ref: > User.id]
+  roleId uuid [not null, ref: > Role.id]
+  createdAt timestamptz [not null, default: `now()`]
+  updatedAt timestamptz
+  deletedAt timestamptz
+
+  indexes {
+    (userId, roleId) [unique, name: 'UserRole_userId_roleId_idx', note: 'PostgreSQL migration keeps the partial predicate WHERE deletedAt IS NULL.']
+  }
+
+  Note: 'Existing User-Role association.'
+}
+
+Table LauncherDevice {
+  id uuid [pk, default: `gen_random_uuid()`]
+  deviceId uuid [not null, unique, ref: - Device.id, note: 'One-to-one extension of the existing Device row.']
+  installationId varchar(160) [not null, unique, note: 'Stable Launcher installation identity; not a hardware serial number.']
+  devicePublicKey text [note: 'Optional public key used to bind signed License Leases to this installation.']
+  platform varchar(32) [not null, default: 'ANDROID']
+  osVersion varchar(64)
+  launcherVersion varchar(64)
+  model varchar(160)
+  status LauncherDeviceStatus [not null, default: 'ACTIVE']
+  firstSeenAt timestamptz [not null, default: `now()`]
+  lastSeenAt timestamptz
+  lastTrustedServerTime timestamptz [note: 'Used to detect suspicious device-clock rollback for offline License validation.']
+  blockedAt timestamptz
+  blockedReason text
+  createdAt timestamptz [not null, default: `now()`]
+  updatedAt timestamptz
+
+  Note: 'A2MaTeX-specific extension of Device. It adds Launcher identity and trust data without modifying the existing authentication schema.'
+}

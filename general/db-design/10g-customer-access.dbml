@@ -1,0 +1,382 @@
+Project A2MaTeX_customer_access {
+  database_type: 'PostgreSQL'
+  Note: '''Customer Access module view.
+
+Tables in the primary module group are complete. Tables in reference_stubs are intentionally reduced cross-module projections used only to preserve readable relationships in dbdiagram.io.
+
+The canonical schema remains 10-database-design.dbml.'''
+}
+
+// ============================================================
+
+Enum UserStatus {
+  ACTIVE
+  INACTIVE
+  BANNED
+}
+
+Enum PublisherStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  CLOSED
+}
+
+Enum SigningKeyStatus {
+  ACTIVE
+  RETIRED
+  COMPROMISED
+  REVOKED
+}
+
+Enum ProductStatus {
+  DRAFT
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+
+Enum ProductVersionStatus {
+  DRAFT
+  APPROVED
+  PUBLISHED
+  DEPRECATED
+  REVOKED
+}
+
+Enum EntitlementStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  EXPIRED
+  REVOKED
+  REFUNDED
+}
+
+Enum EntitlementSource {
+  FREE
+  ADMIN_GRANT
+  PURCHASE
+  PROMOTION
+}
+
+Enum LauncherDeviceStatus {
+  ACTIVE
+  BLOCKED
+  RETIRED
+}
+
+Enum InstallationStatus {
+  DOWNLOADING
+  VERIFYING
+  INSTALLED
+  ACTIVE
+  UPDATE_AVAILABLE
+  FAILED
+  REMOVED
+}
+
+Enum PermissionDecision {
+  ALLOWED
+  DENIED
+  REVOKED
+}
+
+Enum CredentialOwnerType {
+  CUSTOMER
+  PUBLISHER
+}
+
+Enum CredentialStatus {
+  CONNECTING
+  ACTIVE
+  EXPIRED
+  REVOKED
+  DISCONNECTED
+  ERROR
+}
+
+Enum LeaseStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+  SUPERSEDED
+}
+
+// ============================================================
+
+Table Entitlement {
+  id uuid [pk, default: `gen_random_uuid()`]
+  userId uuid [not null, ref: > User.id]
+  productId uuid [not null, ref: > Product.id]
+  source EntitlementSource [not null]
+  planCode varchar(80) [not null, default: 'STANDARD']
+  status EntitlementStatus [not null, default: 'PENDING']
+  startsAt timestamptz [not null]
+  expiresAt timestamptz
+  featureSnapshot jsonb [not null, note: 'Features granted by this entitlement, copied into a Lease when issued.']
+  externalOrderRef varchar(255) [note: 'Nullable until real payment is implemented.']
+  grantedByUserId uuid [ref: >? User.id]
+  createdAt timestamptz [not null, default: `now()`]
+  updatedAt timestamptz [not null, default: `now()`]
+
+  indexes {
+    (userId, productId, status) [name: 'idx_entitlements_user_product_status']
+    (status, expiresAt) [name: 'idx_entitlements_expiry']
+  }
+
+  Note: 'Durable server-side business right to use a Product. It is distinct from a short-lived signed License Lease. Migrations should prevent unintended overlapping ACTIVE grants for the same user and Product while still allowing renewal history.'
+}
+
+Table EntitlementEvent {
+  id uuid [pk, default: `gen_random_uuid()`]
+  entitlementId uuid [not null, ref: > Entitlement.id]
+  eventType varchar(80) [not null]
+  fromStatus EntitlementStatus
+  toStatus EntitlementStatus
+  actorUserId uuid [ref: >? User.id]
+  reason text
+  metadataJson jsonb
+  createdAt timestamptz [not null, default: `now()`]
+
+  indexes {
+    (entitlementId, createdAt) [name: 'idx_entitlement_events_time']
+  }
+
+  Note: 'Append-only Entitlement lifecycle history used for support, audit, and future commerce integration.'
+}
+
+Table DeviceProductInstallation {
+  id uuid [pk, default: `gen_random_uuid()`]
+  launcherDeviceId uuid [not null, ref: > LauncherDevice.id]
+  productId uuid [not null, ref: > Product.id]
+  installedVersionId uuid [ref: >? ProductVersion.id]
+  activeVersionId uuid [ref: >? ProductVersion.id]
+  previousVersionIds jsonb [note: 'Small ordered list for status synchronization; authoritative package files remain local.']
+  status InstallationStatus [not null]
+  installedPackageHash char(64)
+  verifiedAt timestamptz
+  lastSeenAt timestamptz
+  createdAt timestamptz [not null, default: `now()`]
+  updatedAt timestamptz [not null, default: `now()`]
+
+  indexes {
+    (launcherDeviceId, productId) [unique, name: 'uq_device_product_installations']
+    (productId, status) [name: 'idx_installations_product_status']
+  }
+
+  Note: 'Server-visible installation metadata for Library/support. Launcher private storage remains authoritative for local package files.'
+}
+
+Table ProductPermissionGrant {
+  id uuid [pk, default: `gen_random_uuid()`]
+  userId uuid [not null, ref: > User.id]
+  launcherDeviceId uuid [not null, ref: > LauncherDevice.id]
+  productId uuid [not null, ref: > Product.id]
+  capabilityId uuid [not null, ref: > CapabilityDefinition.id]
+  decision PermissionDecision [not null]
+  consentedProductVersionId uuid [not null, ref: > ProductVersion.id]
+  consentedScopeHash char(64) [not null, note: 'A new scope hash requires renewed consent and must not inherit ALLOWED automatically.']
+  purposeSnapshot text [not null]
+  decidedAt timestamptz [not null, default: `now()`]
+  revokedAt timestamptz
+  updatedAt timestamptz [not null, default: `now()`]
+
+  indexes {
+    (userId, launcherDeviceId, productId, capabilityId) [unique, name: 'uq_product_permission_grants_scope']
+    (launcherDeviceId, productId, decision) [name: 'idx_product_permission_grants_runtime']
+  }
+
+  Note: 'Current A2MaTeX Product-level grant. It complements Android OS permission; it never overrides the OS.'
+}
+
+Table PermissionGrantEvent {
+  id uuid [pk, default: `gen_random_uuid()`]
+  permissionGrantId uuid [not null, ref: > ProductPermissionGrant.id]
+  fromDecision PermissionDecision
+  toDecision PermissionDecision [not null]
+  actorUserId uuid [not null, ref: > User.id]
+  source varchar(40) [not null, note: 'LAUNCHER, ADMIN, RUNTIME, or SYSTEM.']
+  reason text
+  createdAt timestamptz [not null, default: `now()`]
+
+  indexes {
+    (permissionGrantId, createdAt) [name: 'idx_permission_grant_events_time']
+  }
+
+  Note: 'Append-only history used to propagate and audit grants or revocation during execution.'
+}
+
+Table CredentialProvider {
+  id uuid [pk, default: `gen_random_uuid()`]
+  key varchar(120) [not null, unique]
+  displayName varchar(160) [not null]
+  authType varchar(40) [not null, note: 'Examples: OAUTH2_PKCE, API_TOKEN, PUBLISHER_BACKEND.']
+  authorizationConfig jsonb [note: 'Non-secret provider endpoints and supported scopes.']
+  isActive boolean [not null, default: true]
+  createdAt timestamptz [not null, default: `now()`]
+  updatedAt timestamptz [not null, default: `now()`]
+
+  Note: 'Registry of supported Customer or Publisher credential providers. It contains provider metadata, never client secrets unless referenced indirectly.'
+}
+
+Table CredentialConnection {
+  id uuid [pk, default: `gen_random_uuid()`]
+  providerId uuid [not null, ref: > CredentialProvider.id]
+  ownerType CredentialOwnerType [not null]
+  ownerUserId uuid [ref: >? User.id, note: 'Required for CUSTOMER ownership.']
+  ownerPublisherId uuid [ref: >? Publisher.id, note: 'Required for PUBLISHER ownership.']
+  externalSubjectHash char(64) [note: 'Hashed provider account identity used to distinguish connections without exposing the raw subject.']
+  displayLabel varchar(180) [not null]
+  grantedScopes jsonb [not null]
+  secretRef varchar(255) [not null, unique, note: 'Opaque reference into Credential Vault; never the token itself.']
+  status CredentialStatus [not null]
+  tokenExpiresAt timestamptz
+  lastRefreshedAt timestamptz
+  lastErrorCode varchar(120)
+  connectedAt timestamptz
+  disconnectedAt timestamptz
+  createdAt timestamptz [not null, default: `now()`]
+  updatedAt timestamptz [not null, default: `now()`]
+
+  indexes {
+    (ownerUserId, status) [name: 'idx_credential_connections_customer']
+    (ownerPublisherId, status) [name: 'idx_credential_connections_publisher']
+  }
+
+  Note: 'Credential metadata and Vault reference. A CHECK must require exactly one owner column matching ownerType.'
+}
+
+Table CredentialBinding {
+  id uuid [pk, default: `gen_random_uuid()`]
+  userId uuid [not null, ref: > User.id]
+  launcherDeviceId uuid [not null, ref: > LauncherDevice.id]
+  productId uuid [not null, ref: > Product.id]
+  slotKey varchar(160) [not null]
+  credentialConnectionId uuid [not null, ref: > CredentialConnection.id]
+  boundForVersionId uuid [not null, ref: > ProductVersion.id]
+  status varchar(32) [not null, default: 'ACTIVE']
+  boundAt timestamptz [not null, default: `now()`]
+  disconnectedAt timestamptz
+  updatedAt timestamptz [not null, default: `now()`]
+
+  indexes {
+    (userId, launcherDeviceId, productId, slotKey) [unique, name: 'uq_credential_bindings_slot']
+    (credentialConnectionId, status) [name: 'idx_credential_bindings_connection']
+  }
+
+  Note: 'Binds a Product credential slot to an opaque Credential Connection. Runtime validates provider, scopes, ownership, and current Product Version contract.'
+}
+
+Table LicenseLease {
+  id uuid [pk, default: `gen_random_uuid()`]
+  leaseJti uuid [not null, unique, note: 'Public token identifier used for lookup or revocation; not the complete token.']
+  entitlementId uuid [not null, ref: > Entitlement.id]
+  userId uuid [not null, ref: > User.id]
+  productId uuid [not null, ref: > Product.id]
+  launcherDeviceId uuid [not null, ref: > LauncherDevice.id]
+  issuedForVersionId uuid [not null, ref: > ProductVersion.id]
+  versionConstraint varchar(120) [not null]
+  packagePayloadHash char(64) [not null]
+  featureSnapshot jsonb [not null]
+  tokenHash char(64) [not null, unique, note: 'Hash of the serialized signed Lease; raw Lease is returned to Launcher and not persisted.']
+  signingKeyId uuid [not null, ref: > SigningKey.id]
+  status LeaseStatus [not null, default: 'ACTIVE']
+  issuedAt timestamptz [not null]
+  refreshAfter timestamptz [not null]
+  offlineUntil timestamptz [not null]
+  entitlementExpiresAt timestamptz
+  supersededByLeaseId uuid [ref: >? LicenseLease.id]
+  revokedAt timestamptz
+  revokeReason text
+
+  indexes {
+    (launcherDeviceId, productId, status) [name: 'idx_license_leases_runtime_lookup']
+    (entitlementId, issuedAt) [name: 'idx_license_leases_entitlement_time']
+    (status, offlineUntil) [name: 'idx_license_leases_expiry']
+  }
+
+  Note: 'Signed bounded execution authorization. The Lease snapshots features, version constraint, package hash, and offline window so Launcher can verify locally.'
+}
+
+Table LicenseLeaseEvent {
+  id uuid [pk, default: `gen_random_uuid()`]
+  licenseLeaseId uuid [not null, ref: > LicenseLease.id]
+  eventType varchar(80) [not null]
+  actorUserId uuid [ref: >? User.id]
+  reason text
+  createdAt timestamptz [not null, default: `now()`]
+
+  indexes {
+    (licenseLeaseId, createdAt) [name: 'idx_license_lease_events_time']
+  }
+
+  Note: 'Append-only issue, refresh, supersede, expire, and revoke event history for support and security investigation.'
+}
+
+// ============================================================
+
+Table CapabilityDefinition {
+  id uuid [pk]
+  displayName varchar(160)
+  key varchar(160)
+  createdAt timestamptz
+
+  Note: 'Reference stub for a table owned by another module. Only identity fields are shown here; use the owning module file for the complete definition.'
+}
+
+Table LauncherDevice {
+  id uuid [pk]
+  status LauncherDeviceStatus
+  createdAt timestamptz
+
+  Note: 'Reference stub for a table owned by another module. Only identity fields are shown here; use the owning module file for the complete definition.'
+}
+
+Table Product {
+  id uuid [pk]
+  name varchar(180)
+  slug varchar(140)
+  status ProductStatus
+  createdAt timestamptz
+
+  Note: 'Reference stub for a table owned by another module. Only identity fields are shown here; use the owning module file for the complete definition.'
+}
+
+Table ProductVersion {
+  id uuid [pk]
+  version varchar(64)
+  status ProductVersionStatus
+  publishedAt timestamptz
+  createdAt timestamptz
+
+  Note: 'Reference stub for a table owned by another module. Only identity fields are shown here; use the owning module file for the complete definition.'
+}
+
+Table Publisher {
+  id uuid [pk]
+  displayName varchar(180)
+  slug varchar(120)
+  status PublisherStatus
+  createdAt timestamptz
+
+  Note: 'Reference stub for a table owned by another module. Only identity fields are shown here; use the owning module file for the complete definition.'
+}
+
+Table SigningKey {
+  id uuid [pk]
+  status SigningKeyStatus
+  createdAt timestamptz
+
+  Note: 'Reference stub for a table owned by another module. Only identity fields are shown here; use the owning module file for the complete definition.'
+}
+
+Table User {
+  id uuid [pk]
+  username varchar(255)
+  email text
+  status UserStatus
+  createdAt timestamptz
+
+  Note: 'Reference stub for a table owned by another module. Only identity fields are shown here; use the owning module file for the complete definition.'
+}

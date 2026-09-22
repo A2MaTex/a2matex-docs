@@ -15,7 +15,7 @@ replace repository-specific `AGENTS.md` instructions.
 | Android permission, credential, entitlement, lease | `05-permissions-credentials-and-license.md` |
 | Entity/state/limit/retention/error naming | `06-domain-model-and-policies.md` |
 | UAT implementation plan or acceptance | `08-uat-plan.md` |
-| Database work | Read `06` and `08`, then use the separate Database Design document when created |
+| Database work | Read `06-domain-model-and-policies.md`, `08-uat-plan.md`, and `10-database-design.dbml` |
 | SDS/API work | Read all affected domain documents, then use the separate SDS/API document when created |
 
 ## 3. Non-negotiable invariants
@@ -39,6 +39,9 @@ explicitly changes the product decision:
 13. Arbitrary cycles are forbidden; loops use Loop Controller.
 14. Node count is not a paywall.
 15. UAT supports restricted TypeScript only.
+16. Large binaries live in object storage; PostgreSQL stores metadata, hashes, and references.
+17. Immutable Revision, decision, Artifact, signature, and audit rows are append-only.
+18. Credential tables store only metadata and opaque Vault references, never raw secrets.
 
 ## 4. How to handle ambiguity
 
@@ -127,4 +130,3 @@ Before completing a documentation change:
 - Confirm a new mutable object does not weaken Revision/Artifact immutability.
 - Confirm a new offline behavior states its Lease/revocation limitation.
 - Confirm feature/use-case IDs are stable and unique.
-

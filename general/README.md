@@ -31,17 +31,18 @@ protected area of the Web Platform, not a fifth product.
 
 ## Document map
 
-| File | Read when working on |
-|---|---|
-| [01-system-context.md](01-system-context.md) | Product goals, actors, scope, principles, and system-wide flow |
-| [02-four-platforms.md](02-four-platforms.md) | Responsibility and boundaries of each product |
-| [03-workflow-and-runtime.md](03-workflow-and-runtime.md) | Graph, nodes, branching, merge, loop, TypeScript, scheduler, execution |
-| [04-build-review-and-apkg.md](04-build-review-and-apkg.md) | Revision, validation, build, review, signing, package, install, update |
-| [05-permissions-credentials-and-license.md](05-permissions-credentials-and-license.md) | Capabilities, Android permissions, credentials, entitlement, offline lease |
-| [06-domain-model-and-policies.md](06-domain-model-and-policies.md) | Conceptual entities, states, limits, retention, analytics, error taxonomy |
-| [07-features-and-use-cases.md](07-features-and-use-cases.md) | Feature inventory, use-case inventory, and critical scenario details |
-| [08-uat-plan.md](08-uat-plan.md) | UAT boundary, five-week delivery plan, acceptance flows, risks, backlog |
-| [09-codex-working-guide.md](09-codex-working-guide.md) | How Codex should navigate and update this documentation |
+| File                                                                                   | Read when working on                                                                                       |
+| -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| [01-system-context.md](01-system-context.md)                                           | Product goals, actors, scope, principles, and system-wide flow                                             |
+| [02-four-platforms.md](02-four-platforms.md)                                           | Responsibility and boundaries of each product                                                              |
+| [03-workflow-and-runtime.md](03-workflow-and-runtime.md)                               | Graph, nodes, branching, merge, loop, TypeScript, scheduler, execution                                     |
+| [04-build-review-and-apkg.md](04-build-review-and-apkg.md)                             | Revision, validation, build, review, signing, package, install, update                                     |
+| [05-permissions-credentials-and-license.md](05-permissions-credentials-and-license.md) | Capabilities, Android permissions, credentials, entitlement, offline lease                                 |
+| [06-domain-model-and-policies.md](06-domain-model-and-policies.md)                     | Conceptual entities, states, limits, retention, analytics, error taxonomy                                  |
+| [07-features-and-use-cases.md](07-features-and-use-cases.md)                           | Feature inventory, use-case inventory, and critical scenario details                                       |
+| [08-uat-plan.md](08-uat-plan.md)                                                       | UAT boundary, five-week delivery plan, acceptance flows, risks, backlog                                    |
+| [09-codex-working-guide.md](09-codex-working-guide.md)                                 | How Codex should navigate and update this documentation                                                    |
+| [10-database-design.dbml](10-database-design.dbml)                                     | PostgreSQL logical design with table/field notes, relationships, indexes, states, and retention boundaries |
 
 ## Source-of-truth rules
 
@@ -80,4 +81,3 @@ These living documents are the input to, not a replacement for:
 - API contracts.
 - Threat model and security test plan.
 - QA test cases and UAT scripts.
-
