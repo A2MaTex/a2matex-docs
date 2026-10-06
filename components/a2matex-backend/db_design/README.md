@@ -8,7 +8,7 @@ Backend là source of truth cho dữ liệu cloud. Database local của Studio, 
 
 | File | Nhóm domain | Nội dung chính |
 | --- | --- | --- |
-| `01_identity_publisher_installation.md` | Identity và access | Auth/RBAC hiện có, Publisher, Terms, Windows Installation |
+| `01_identity_publisher_installation.md` | Identity, access và Launcher distribution | Auth/RBAC hiện có, Publisher, Terms, Launcher Release |
 | `02_studio_project_workflow.md` | Studio cloud data | Node Catalog, Project Draft, Workflow Revision, Asset |
 | `03_product_submission_release.md` | Marketplace publishing | Product, Listing, Taxonomy, Submission, Scan, Review, ProductRelease |
 | `04_commerce_entitlement_execution.md` | Customer ownership và execution authorization | Offer, Order, Payment, Entitlement, Lease, Execution Report, Product Report |

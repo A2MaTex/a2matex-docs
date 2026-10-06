@@ -8,7 +8,6 @@ Nhóm này quản lý quyền sử dụng Product của customer:
 ProductOffer
 → free acquisition hoặc Order/Payment
 → Entitlement
-→ Installation assignment
 → ExecutionLease
 → Runtime validation
 → ExecutionReport
@@ -43,7 +42,6 @@ CREATE TABLE "ProductOffer" (
     currency CHAR(3),
     "priceMinor" BIGINT CHECK ("priceMinor" IS NULL OR "priceMinor" >= 0),
     "durationDays" INTEGER CHECK ("durationDays" IS NULL OR "durationDays" > 0),
-    "maxInstallations" INTEGER NOT NULL DEFAULT 1 CHECK ("maxInstallations" > 0),
     "maxConcurrentDevices" INTEGER NOT NULL DEFAULT 1 CHECK ("maxConcurrentDevices" > 0),
 
     -- Mock JSON:
@@ -116,7 +114,6 @@ CREATE TABLE "OrderItem" (
     --   "currency": "USD",
     --   "priceMinor": 999,
     --   "durationDays": 30,
-    --   "maxInstallations": 1,
     --   "maxConcurrentDevices": 3
     -- }
     "offerSnapshot" JSONB NOT NULL,
@@ -194,7 +191,6 @@ CREATE TABLE "Entitlement" (
     "grantSource" "EntitlementGrantSource" NOT NULL,
     "startsAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
     "expiresAt" TIMESTAMPTZ,
-    "maxInstallations" INTEGER NOT NULL CHECK ("maxInstallations" > 0),
     "maxConcurrentDevices" INTEGER NOT NULL CHECK ("maxConcurrentDevices" > 0),
 
     -- Mock JSON: immutable snapshot of effective usage rights.
@@ -230,38 +226,11 @@ WHERE status = 'ACTIVE';
 
 Expiration time vẫn phải được kiểm tra bằng `expiresAt > now()`; partial index không thể tự chuyển status theo thời gian. Worker/lazy update có thể chuyển record sang `EXPIRED`.
 
-## 5. Entitlement Installation assignment
+## 5. Execution Lease
 
 ### Trách nhiệm
 
-`EntitlementInstallation` cho biết Product entitlement được dùng trên Windows Installation nào. Đây là nơi enforce `maxInstallations` trong transaction/application policy.
-
-```sql
-CREATE TABLE "EntitlementInstallation" (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    "entitlementId" UUID NOT NULL REFERENCES "Entitlement" (id),
-    "installationId" UUID NOT NULL REFERENCES "Installation" (id),
-    "assignedAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
-    "releasedAt" TIMESTAMPTZ,
-    "createdById" UUID NOT NULL REFERENCES "User" (id)
-);
-
-CREATE UNIQUE INDEX "EntitlementInstallation_active_pair_idx"
-ON "EntitlementInstallation" ("entitlementId", "installationId")
-WHERE "releasedAt" IS NULL;
-
-CREATE INDEX "EntitlementInstallation_installation_active_idx"
-ON "EntitlementInstallation" ("installationId")
-WHERE "releasedAt" IS NULL;
-```
-
-DB unique index chống mapping trùng; transaction phải lock Entitlement và count active assignments trước khi insert.
-
-## 6. Execution Lease
-
-### Trách nhiệm
-
-`ExecutionLease` là authorization tạm thời cho một production execution trên một Installation. Backend chỉ lưu token hash.
+`ExecutionLease` là authorization tạm thời cho một production execution của customer. Backend không gắn lease với Launcher installation và chỉ lưu token hash.
 
 ```sql
 CREATE TYPE "ExecutionLeaseStatus" AS ENUM (
@@ -278,7 +247,6 @@ CREATE TABLE "ExecutionLease" (
     "customerId" UUID NOT NULL REFERENCES "User" (id),
     "productId" UUID NOT NULL REFERENCES "Product" (id),
     "productReleaseId" UUID NOT NULL REFERENCES "ProductRelease" (id),
-    "installationId" UUID NOT NULL REFERENCES "Installation" (id),
     "tokenHash" TEXT NOT NULL UNIQUE,
     status "ExecutionLeaseStatus" NOT NULL DEFAULT 'ACTIVE',
     "requestedDeviceCount" INTEGER NOT NULL CHECK ("requestedDeviceCount" > 0),
@@ -288,7 +256,6 @@ CREATE TABLE "ExecutionLease" (
     -- {
     --   "schemaVersion": "1.0",
     --   "entitlementStatus": "ACTIVE",
-    --   "installationStatus": "ACTIVE",
     --   "productStatus": "ACTIVE",
     --   "releaseStatus": "PUBLISHED",
     --   "capabilities": ["android.device.control"]
@@ -320,14 +287,11 @@ CREATE INDEX "ExecutionLease_active_entitlement_idx"
 ON "ExecutionLease" ("entitlementId", "expiresAt")
 WHERE status = 'ACTIVE';
 
-CREATE INDEX "ExecutionLease_active_installation_idx"
-ON "ExecutionLease" ("installationId", "expiresAt")
-WHERE status = 'ACTIVE';
 ```
 
 Issue/renew lease phải serialize concurrency decision bằng transaction lock hoặc distributed lock. Runtime receives plaintext lease token and workflow key only in memory; neither plaintext value is stored here.
 
-## 7. Execution Report
+## 6. Execution Report
 
 ### Trách nhiệm
 
@@ -371,7 +335,7 @@ CREATE TABLE "ExecutionReport" (
 
 Unique `executionId` giúp endpoint report idempotent.
 
-## 8. Product Report và moderation
+## 7. Product Report và moderation
 
 ### Trách nhiệm
 
@@ -418,14 +382,13 @@ CREATE INDEX "ProductReport_status_createdAt_idx"
 ON "ProductReport" (status, "createdAt");
 ```
 
-## 9. Quan hệ chính
+## 8. Quan hệ chính
 
 ```text
 Product
 ├── ProductOffer[]
 ├── OrderItem[] ── Order ── PaymentTransaction[]
 ├── Entitlement[]
-│   ├── EntitlementInstallation[] ── Installation
 │   └── ExecutionLease[] ── ProductRelease
 │       └── ExecutionReport
 └── ProductReport[]

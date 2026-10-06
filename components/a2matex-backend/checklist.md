@@ -28,9 +28,9 @@ Backend là source of truth cho dữ liệu cloud và cung cấp API cho Web Mar
 - [x] **Auth Module** — login, logout, access/refresh token và session.
 - [x] **User/Profile Module** — thông tin customer, profile công khai và trạng thái tài khoản.
 - [x] **RBAC Module** — role và permission; resource ownership vẫn được kiểm tra trong domain service tương ứng.
-- [ ] **Publisher Module** — `PublisherAccount`, self-activation, block/unblock và shared publisher access policy.
-- [ ] **Terms Module** — versioned terms, publish/archive và immutable terms acceptance.
-- [ ] **Installation Module** — quản lý bản cài Launcher trên máy Windows; không quản lý LDPlayer/ADB device.
+- [x] **Publisher Module** — `PublisherAccount`, self-activation, block/unblock và shared publisher access policy.
+- [x] **Terms Module** — versioned terms, publish/archive và immutable terms acceptance.
+- [x] **Launcher Release Module** — quản lý version, Static package và active Launcher release để public download.
 
 ## 1.2. Studio project và workflow definition
 
@@ -74,13 +74,13 @@ Nếu admin yêu cầu thay đổi, publisher sửa project trong Studio, lưu d
 
 ## 1.4. Distribution, entitlement và execution authorization
 
-- [ ] **Product Offer Module** — free/paid offer, thời hạn, installation limit và concurrent device limit.
+- [ ] **Product Offer Module** — free/paid offer, thời hạn và concurrent device limit.
 - [ ] **Entitlement Module** — quyền dài hạn của customer đối với Product.
 - [ ] **Manual Grant Use Case** — admin cấp entitlement cho UAT/MVP; nằm trong Entitlement Module.
 - [ ] **Download Authorization Service** — kiểm tra entitlement và cấp presigned package download URL.
-- [ ] **Launcher API** — My Products, release metadata, compatibility và installation operations.
+- [ ] **Launcher API** — My Products, Product release metadata và compatibility.
 - [ ] **Execution Lease Module** — issue, validate, renew, expire và revoke lease.
-- [ ] **Lease Concurrency Policy** — giới hạn installation, active lease và requested device count khi cấp/renew lease.
+- [ ] **Lease Concurrency Policy** — giới hạn active lease và requested device count khi cấp/renew lease.
 - [ ] **Runtime API** — validate lease, trả capability grant và workflow decryption key tạm thời.
 - [ ] **Execution Report Module** — nhận idempotent run summary từ Runtime Agent.
 
@@ -95,7 +95,7 @@ MVP ưu tiên free Product và manual entitlement grant. Không để payment pr
 ## 1.6. Moderation và supporting capabilities — giữ đơn giản
 
 - [ ] **Product Report/Moderation Module** — customer gửi report, admin xem và resolve với reason.
-- [ ] **Audit Log Module** — ghi các mutation nhạy cảm: publisher status, review, release, entitlement, installation và moderation.
+- [ ] **Audit Log Module** — ghi các mutation nhạy cảm: publisher status, review, release, entitlement và moderation.
 - [ ] **Job Queue** — scan, package build, cleanup và retry.
 - [ ] **Transactional Outbox** — chỉ áp dụng cho transaction cần phát job/event không được phép mất.
 - [ ] **Idempotency** — áp dụng cho activate publisher, save/finalize revision, submission, grant, lease và execution report khi cần.
@@ -116,6 +116,7 @@ Web Marketplace Frontend không sở hữu business rule. Frontend hiển thị 
 - [ ] Product detail, offer và compatibility.
 - [ ] Public publisher profile.
 - [ ] Category cơ bản.
+- [ ] Download active Launcher release.
 - [ ] Login/register entry points.
 
 ## 2.2. Customer Portal
@@ -123,7 +124,6 @@ Web Marketplace Frontend không sở hữu business rule. Frontend hiển thị 
 - [ ] My Products và entitlement status.
 - [ ] Product acquisition/purchase entry.
 - [ ] Order/ownership history cơ bản.
-- [ ] Registered installations.
 - [ ] Open Product in Launcher.
 - [ ] Submit Product report.
 
@@ -145,8 +145,8 @@ Web Marketplace Frontend không sở hữu business rule. Frontend hiển thị 
 - [ ] Submission queue và review detail.
 - [ ] Scan findings, feedback, request changes, approve và reject.
 - [ ] Product/release suspend hoặc disable.
+- [ ] Launcher Release list, detail, create, update và activate.
 - [ ] Category/tag management tối thiểu.
-- [ ] User và Installation management.
 - [ ] Manual entitlement grant/revoke.
 - [ ] Product report resolution.
 - [ ] Audit log view cơ bản.
@@ -191,7 +191,6 @@ Studio chịu trách nhiệm tạo project automation và lưu project lên Back
 # 4. Launcher
 
 - [ ] Login/logout/refresh session.
-- [ ] Register và cập nhật Installation.
 - [ ] My Products từ Backend.
 - [ ] Download package bằng presigned URL.
 - [ ] Verify package hash, manifest và compatibility.
@@ -225,7 +224,7 @@ Launcher không gọi ADB trực tiếp và không giữ execution state làm so
 - [ ] Production package verification, lease validation và in-memory decryption.
 - [ ] Idempotent execution summary sync về Backend.
 
-Runtime Agent quản lý LDPlayer/ADB device và execution detail trên máy customer. Backend chỉ quản lý Windows Installation, lease và execution summary cloud.
+Runtime Agent quản lý LDPlayer/ADB device và execution detail trên máy customer. Backend quản lý Launcher release, lease và execution summary cloud nhưng không đăng ký Launcher installation.
 
 ---
 
@@ -257,7 +256,7 @@ Customer
 Customer xem/nhận/mua Product trên Web
 → Backend cấp Entitlement
 → customer mở Launcher
-→ Launcher register Installation và tải package
+→ Launcher tải Product package
 → Launcher verify package và chọn Runtime devices
 → Launcher request execution lease
 → Runtime validate lease và decrypt Runtime IR trong memory
@@ -299,7 +298,7 @@ Database ownership, entity relation, constraint, indexes, retention và detailed
 7. Admin Review + request changes/approve/reject.
 8. ProductRelease + package/encryption + publish.
 9. Free acquisition/manual Entitlement + My Products.
-10. Installation + package download/verification.
+10. Launcher Release management + Launcher/Product package download/verification.
 11. Execution Lease + Launcher/Runtime integration.
 12. Runtime execution + event monitor + execution summary.
 13. Minimal moderation, audit, notification và operational hardening.

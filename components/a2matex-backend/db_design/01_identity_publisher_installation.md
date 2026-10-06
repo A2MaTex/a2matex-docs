@@ -1,4 +1,4 @@
-# 01 — Identity, Publisher, Terms và Installation
+# 01 — Identity, Publisher, Terms và Launcher Release
 
 ## 1. Trách nhiệm nhóm
 
@@ -7,9 +7,9 @@ Nhóm này trả lời bốn câu hỏi:
 1. User là ai và session nào đang đăng nhập?
 2. User có role/permission nào?
 3. User có đủ điều kiện thực hiện nghiệp vụ Publisher không?
-4. Launcher installation nào thuộc user và có được phép download/request lease không?
+4. Launcher package version nào đang active để người dùng tải xuống?
 
-`Device` hiện có là **Auth Device/session context**. `Installation` là một bản cài Launcher ổn định trên máy Windows. LDPlayer/ADB device thuộc Runtime Agent, không lưu trong Backend PostgreSQL.
+`Device` hiện có chỉ là **Auth Device/session context**. Backend không đăng ký Launcher installation hoặc gắn Launcher version với user trong MVP hiện tại. LDPlayer/ADB device thuộc Runtime Agent, không lưu trong Backend PostgreSQL.
 
 ## 2. Auth, User và RBAC — schema đã có
 
@@ -169,65 +169,36 @@ CREATE TABLE "PublisherTermsAcceptance" (
 );
 ```
 
-## 5. Windows Launcher Installation
+## 5. Launcher Release
 
 ### Trách nhiệm
 
-`Installation` là định danh ổn định của một Launcher install. Nó là input cho download authorization, entitlement installation limit và execution lease.
+`LauncherRelease` xác định Launcher package nào đang được phát hành. File vật lý được lưu qua `Static` và Object Storage; bảng này chỉ lưu version, release notes và active release hiện tại.
 
 ```sql
-CREATE TYPE "InstallationStatus" AS ENUM (
-    'ACTIVE',
-    'INACTIVE',
-    'BLOCKED'
-);
-
-CREATE TABLE "Installation" (
+CREATE TABLE "LauncherRelease" (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    "userId" UUID NOT NULL REFERENCES "User" (id),
-    "clientKey" UUID NOT NULL UNIQUE,
-    name VARCHAR(255) NOT NULL,
-    platform VARCHAR(50) NOT NULL DEFAULT 'WINDOWS',
-    "osVersion" VARCHAR(255),
-    "launcherVersion" VARCHAR(100) NOT NULL,
-    "runtimeVersion" VARCHAR(100),
-    "machineFingerprintHash" TEXT,
-    status "InstallationStatus" NOT NULL DEFAULT 'ACTIVE',
-    "statusReason" TEXT,
-    "lastSeenAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
-    "blockedAt" TIMESTAMPTZ,
-    "blockedById" UUID REFERENCES "User" (id),
-
-    -- Mock JSON:
-    -- {
-    --   "schemaVersion": "1.0",
-    --   "architecture": "x64",
-    --   "runtimeMode": "production",
-    --   "supportedPackageFormats": ["a2m/1.0"]
-    -- }
-    -- Dùng cho compatibility/risk metadata không cần query quan hệ.
-    "clientMetadata" JSONB NOT NULL DEFAULT '{}'::JSONB,
-
+    version VARCHAR(100) NOT NULL,
+    "staticId" UUID NOT NULL REFERENCES "Static" (id),
+    "releaseNotes" TEXT,
+    "isActive" BOOLEAN NOT NULL DEFAULT FALSE,
+    "publishedAt" TIMESTAMPTZ,
     "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
     "updatedAt" TIMESTAMPTZ,
-    "deletedAt" TIMESTAMPTZ,
-    "createdById" UUID NOT NULL REFERENCES "User" (id),
-    "updatedById" UUID REFERENCES "User" (id),
-
-    CONSTRAINT "Installation_clientMetadata_object_check"
-        CHECK (jsonb_typeof("clientMetadata") = 'object'),
-    CONSTRAINT "Installation_blocked_fields_check" CHECK (
-        status <> 'BLOCKED'
-        OR ("statusReason" IS NOT NULL AND "blockedAt" IS NOT NULL AND "blockedById" IS NOT NULL)
-    )
+    "deletedAt" TIMESTAMPTZ
 );
-
-CREATE INDEX "Installation_userId_status_idx"
-ON "Installation" ("userId", status)
-WHERE "deletedAt" IS NULL;
 ```
 
-`clientKey` không phải credential. Mọi request vẫn cần access token và ownership check.
+Không cần enum cho module này. Backend kiểm tra business constraints:
+
+- Release mới được tạo ở trạng thái inactive.
+- Tại một thời điểm chỉ có một release chưa bị xóa được active.
+- Activate phải deactivate release hiện tại trước rồi activate release được chọn trong cùng transaction.
+- Release cũ được giữ lại để rollback.
+- `staticId` phải trỏ tới một `Static` chưa bị xóa.
+- Current release API trả `staticId`; client tạm thời tải package qua Static get-file API hiện có.
+
+API contract chi tiết nằm tại `../auth_identity/launcher_release.md`.
 
 ## 6. Quan hệ chính
 
@@ -236,15 +207,18 @@ User
 ├── Profile
 ├── Device[]                    # auth sessions
 ├── UserRole[]
-├── PublisherAccount
-│   └── PublisherTermsAcceptance[] → Term
-└── Installation[]              # Launcher installations
+└── PublisherAccount
+    └── PublisherTermsAcceptance[] → Term
+
+LauncherRelease
+└── Static                       # Launcher package trên Object Storage
 ```
 
 ## 7. Không lưu trong nhóm này
 
 - LDPlayer instance hoặc ADB serial.
 - Raw machine fingerprint.
+- Launcher installation hoặc client key.
 - Lease token plaintext.
 - Runtime node/execution state.
 - Public publisher data copy tách khỏi Profile.
