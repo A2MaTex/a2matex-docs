@@ -34,12 +34,23 @@ Backend là source of truth cho dữ liệu cloud và cung cấp API cho Web Mar
 
 ## 1.2. Studio project và workflow definition
 
-- [ ] **Node Catalog Module** — node definition, version, config/input/output schema, capability và Runtime handler compatibility.
-- [ ] **Project Module** — cloud project và mutable project draft do Studio lưu/sync lên Backend.
-- [ ] **Workflow Revision Module** — tạo immutable revision từ một phiên bản project draft khi publisher submit trên Web.
+- [x] **Node Catalog Module** — system-owned current node definitions, config/input/output schema, capability và Runtime compatibility. Xem [`studio_project_workflow/node_catalog.md`](studio_project_workflow/node_catalog.md).
+- [x] **Project Module** — Publisher-owned cloud project container, metadata, ownership và archive lifecycle đã triển khai, migrate, gán permission và smoke-test CRUD; các case nhiều user còn được theo dõi trong spec. Xem [`studio_project_workflow/project_module.md`](studio_project_workflow/project_module.md).
+- [x] **Project Draft Module** — mutable workflow draft do Studio lưu/sync lên Backend; migration,
+      permission, optimistic concurrency và compiled HTTP behavior đã được verify. Studio conflict-tab UX
+      được để lại cho client integration. Xem
+      [`studio_project_workflow/project_draft.md`](studio_project_workflow/project_draft.md).
+- [ ] **Workflow Revision Module** — tạo immutable revision từ một phiên bản project draft khi
+      publisher submit trên Web; contract draft để review tại
+      [`studio_project_workflow/workflow_revision.md`](studio_project_workflow/workflow_revision.md).
 - [ ] **Asset Module** — metadata và ownership của template image, OCR resource, icon, screenshot và video.
 - [ ] **Storage Service** — upload lifecycle, Object Storage object key và presigned URL.
-- [ ] **Workflow Validation Service** — kiểm tra Editor Graph, Runtime IR, node, edge, binding và schema.
+- [x] **Basic Workflow Validation Service** — engine nội dung độc lập cho Editor Graph schema v1,
+      topology, active node, source port và static config; test API và submission worker dùng chung
+      service contract, với diagnostics có giới hạn và deterministic. Xem
+      [`studio_project_workflow/workflow_validation.md`](studio_project_workflow/workflow_validation.md).
+- [ ] **Advanced Workflow Validation** — kiểm tra binding, conditional/loop/error semantics và
+      Runtime IR consistency trong các phase tiếp theo.
 
 Studio chỉ lưu và đồng bộ project. Studio không gửi Product Submission trực tiếp.
 
@@ -49,7 +60,7 @@ Studio chỉ lưu và đồng bộ project. Studio không gửi Product Submissi
 - [ ] **Product Listing Module** — name, slug, descriptions, media, visibility và current release reference.
 - [ ] **Taxonomy Module** — category, tag và featured placement ở mức tối thiểu cho MVP.
 - [ ] **Submission Module** — nhận project được chọn trên Web, tạo immutable Workflow Revision và tạo Submission tham chiếu revision đó.
-- [ ] **Automated Scanner Service** — capability, graph/IR, node version, code node, asset và policy scan.
+- [ ] **Automated Scanner Service** — capability, graph/IR, node catalog contract/hash, code node, asset và policy scan.
 - [ ] **Review Module** — scan result, admin feedback, request changes, approve và reject.
 - [ ] **Release Module** — version và immutable `ProductRelease`.
 - [ ] **Package Builder Service** — chuẩn hóa Runtime IR, tạo manifest và đóng gói `.a2m`.
@@ -62,12 +73,14 @@ Luồng tạo submission trên Web:
 ```text
 Publisher mở Publisher Portal
 → chọn project đã được Studio lưu trên Backend
-→ xem project summary, validation result và capability
+→ xem project summary và local validation/test summary mang tính tham khảo
 → tự review project theo checklist
 → nhập/chọn Product data, Listing data và Release metadata
 → xác nhận submit
 → Backend tạo immutable Workflow Revision từ đúng draft version
 → Backend tạo Submission tham chiếu revision
+→ Backend đẩy background job validate Workflow Revision
+→ lưu cloud validation result; chỉ tiếp tục scan/build khi pipeline cho phép
 ```
 
 Nếu admin yêu cầu thay đổi, publisher sửa project trong Studio, lưu draft mới rồi tạo submission mới trên Web. Submission và revision cũ không bị ghi đè.
@@ -240,10 +253,11 @@ Customer
 → tạo/phát triển project trong Studio
 → Studio save/sync project và assets lên Backend
 → Publisher chọn project trên Web
-→ tự review validation/capability
+→ tự review project và local validation/test summary
 → nhập Product, Listing và Release data
 → submit
 → Backend tạo immutable Workflow Revision và Submission
+→ background cloud validation
 → automated scan
 → admin review
 → build/package/encrypt ProductRelease
@@ -270,7 +284,7 @@ Customer xem/nhận/mua Product trên Web
 # 7. Cross-platform contracts cần chốt trước implementation
 
 - [ ] Editor Graph schema và schema version.
-- [ ] Node Definition, node type/version và capability vocabulary.
+- [x] Node Definition, unique node `type`, capability vocabulary và Runtime compatibility cho MVP.
 - [ ] Runtime IR schema và compiler contract.
 - [ ] Project draft version/conflict contract.
 - [ ] Workflow Revision immutable snapshot contract.
@@ -291,16 +305,17 @@ Database ownership, entity relation, constraint, indexes, retention và detailed
 
 1. Chốt cross-platform JSON/API contracts cần cho vertical slice.
 2. Publisher Account + Terms + Web activation UI.
-3. Node Catalog contract tối thiểu.
-4. Project draft + Asset upload + Studio save/sync.
-5. Product identity/listing tối thiểu + Web project selection/self-review.
-6. Workflow Revision + Submission + scan/validation.
-7. Admin Review + request changes/approve/reject.
-8. ProductRelease + package/encryption + publish.
-9. Free acquisition/manual Entitlement + My Products.
-10. Launcher Release management + Launcher/Product package download/verification.
-11. Execution Lease + Launcher/Runtime integration.
-12. Runtime execution + event monitor + execution summary.
-13. Minimal moderation, audit, notification và operational hardening.
+3. Node Catalog contract tối thiểu. **Đã hoàn thành ở Backend.**
+4. Project cloud container + ownership + archive lifecycle.
+5. Project Draft + Asset upload + Studio save/sync.
+6. Product identity/listing tối thiểu + Web project selection/self-review.
+7. Workflow Revision + Submission + scan/validation.
+8. Admin Review + request changes/approve/reject.
+9. ProductRelease + package/encryption + publish.
+10. Free acquisition/manual Entitlement + My Products.
+11. Launcher Release management + Launcher/Product package download/verification.
+12. Execution Lease + Launcher/Runtime integration.
+13. Runtime execution + event monitor + execution summary.
+14. Minimal moderation, audit, notification và operational hardening.
 
 Payment production, advanced search, recommendations, rating/review, coupon, payout, publisher team, arbitrary code node và remote execution control không thuộc critical path của MVP đầu tiên.

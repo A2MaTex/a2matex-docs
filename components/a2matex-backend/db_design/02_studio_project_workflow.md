@@ -4,7 +4,7 @@
 
 Nhóm này lưu phần cloud của Studio:
 
-- Backend công bố Node Catalog có version.
+- Backend công bố Node Catalog hiện hành do hệ thống sở hữu; mỗi `type` có một definition mutable trong MVP.
 - Studio tạo/sync mutable Project Draft.
 - Asset binary nằm trong Object Storage; PostgreSQL lưu metadata và ownership.
 - Khi publisher submit trên Web, Backend chốt đúng draft version thành immutable Workflow Revision.
@@ -29,11 +29,16 @@ CREATE TABLE "Capability" (
 );
 ```
 
-Ví dụ code:
+Capability đã có trong Node Catalog MVP:
 
 ```text
 android.device.control
 android.screen.capture
+```
+
+Capability dự kiến cho các phase sau:
+
+```text
 android.ui.observe
 network.http
 connector.google_sheets.write
@@ -43,12 +48,15 @@ connector.google_sheets.write
 
 ### Trách nhiệm
 
-`NodeDefinition` là identity ổn định của node type. `NodeDefinitionVersion` là immutable contract cho một version cụ thể.
+Feature contract và trạng thái triển khai: [`../studio_project_workflow/node_catalog.md`](../studio_project_workflow/node_catalog.md).
+
+`NodeDefinition.type` là identity ổn định và unique. MVP chỉ lưu definition hiện hành; chưa có
+`NodeDefinitionVersion`, node-level version, `$schema`, hoặc schema version lồng trong các JSON field.
+System catalog publisher có quyền cập nhật definition và dùng `contentHash` để nhận biết thay đổi.
 
 ```sql
 CREATE TYPE "NodeDefinitionStatus" AS ENUM (
     'ACTIVE',
-    'DEPRECATED',
     'DISABLED'
 );
 
@@ -56,89 +64,26 @@ CREATE TABLE "NodeDefinition" (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     type VARCHAR(255) NOT NULL UNIQUE,
     name VARCHAR(255) NOT NULL,
-    category VARCHAR(100) NOT NULL,
     description TEXT NOT NULL,
+    category VARCHAR(100) NOT NULL,
     status "NodeDefinitionStatus" NOT NULL DEFAULT 'ACTIVE',
-    "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
-    "updatedAt" TIMESTAMPTZ,
-    "deletedAt" TIMESTAMPTZ
-);
-
-CREATE TABLE "NodeDefinitionVersion" (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    "nodeDefinitionId" UUID NOT NULL REFERENCES "NodeDefinition" (id),
-    version INTEGER NOT NULL CHECK (version > 0),
     "runtimeHandler" VARCHAR(255) NOT NULL,
     "minimumRuntimeVersion" VARCHAR(100) NOT NULL,
     "defaultTimeoutMs" INTEGER NOT NULL CHECK ("defaultTimeoutMs" > 0),
-
-    -- Mock JSON Schema:
-    -- {
-    --   "$schema": "https://json-schema.org/draft/2020-12/schema",
-    --   "type": "object",
-    --   "required": ["target"],
-    --   "properties": {
-    --     "target": {"$ref": "a2matex://schemas/interaction-target/1.0"}
-    --   },
-    --   "additionalProperties": false
-    -- }
     "configSchema" JSONB NOT NULL,
-
-    -- Mock JSON Schema:
-    -- {
-    --   "type": "object",
-    --   "properties": {
-    --     "x": {"type": "number"},
-    --     "y": {"type": "number"}
-    --   },
-    --   "additionalProperties": false
-    -- }
     "inputSchema" JSONB NOT NULL,
-
-    -- Mock JSON Schema:
-    -- {
-    --   "type": "object",
-    --   "required": ["dispatched"],
-    --   "properties": {
-    --     "dispatched": {"type": "boolean"},
-    --     "durationMs": {"type": "integer"}
-    --   }
-    -- }
     "outputSchema" JSONB NOT NULL,
-
-    -- Mock JSON:
-    -- {
-    --   "schemaVersion": "1.0",
-    --   "ports": [
-    --     {"key": "success", "kind": "CONTROL"},
-    --     {"key": "error", "kind": "ERROR"}
-    --   ]
-    -- }
     "outputPorts" JSONB NOT NULL,
-
-    -- Mock JSON:
-    -- {
-    --   "schemaVersion": "1.0",
-    --   "icon": "tap",
-    --   "fieldOrder": ["target", "timeoutMs"],
-    --   "customEditors": {"target": "interaction-target-picker"}
-    -- }
-    "editorHints" JSONB NOT NULL DEFAULT '{}'::JSONB,
-
-    -- Mock JSON:
-    -- {
-    --   "schemaVersion": "1.0",
-    --   "supported": ["STOP", "RETRY_THEN_STOP", "ERROR_BRANCH"]
-    -- }
-    "supportedErrorPolicies" JSONB NOT NULL DEFAULT '{}'::JSONB,
-
-    "publishedAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+    "editorHints" JSONB NOT NULL,
+    "supportedErrorPolicies" JSONB NOT NULL,
+    "contentHash" VARCHAR(64) NOT NULL,
     "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
-    "createdById" UUID NOT NULL REFERENCES "User" (id),
+    "updatedAt" TIMESTAMPTZ,
+    "deletedAt" TIMESTAMPTZ,
 
-    CONSTRAINT "NodeDefinitionVersion_node_version_key"
-        UNIQUE ("nodeDefinitionId", version),
-    CONSTRAINT "NodeDefinitionVersion_json_objects_check" CHECK (
+    CONSTRAINT "NodeDefinition_contentHash_check"
+        CHECK ("contentHash" ~ '^[0-9a-f]{64}$'),
+    CONSTRAINT "NodeDefinition_json_objects_check" CHECK (
         jsonb_typeof("configSchema") = 'object'
         AND jsonb_typeof("inputSchema") = 'object'
         AND jsonb_typeof("outputSchema") = 'object'
@@ -148,23 +93,57 @@ CREATE TABLE "NodeDefinitionVersion" (
     )
 );
 
+CREATE INDEX "NodeDefinition_status_type_idx"
+ON "NodeDefinition" (status, type);
+
 CREATE TABLE "NodeDefinitionCapability" (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    "nodeDefinitionVersionId" UUID NOT NULL REFERENCES "NodeDefinitionVersion" (id),
+    "nodeDefinitionId" UUID NOT NULL REFERENCES "NodeDefinition" (id),
     "capabilityId" UUID NOT NULL REFERENCES "Capability" (id),
     "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT "NodeDefinitionCapability_version_capability_key"
-        UNIQUE ("nodeDefinitionVersionId", "capabilityId")
+    "updatedAt" TIMESTAMPTZ,
+    "deletedAt" TIMESTAMPTZ,
+    CONSTRAINT "NodeDefinitionCapability_node_capability_key"
+        UNIQUE ("nodeDefinitionId", "capabilityId")
 );
+
+CREATE INDEX "NodeDefinitionCapability_capabilityId_idx"
+ON "NodeDefinitionCapability" ("capabilityId");
 ```
 
-Không sửa một `NodeDefinitionVersion` đã publish. Thay đổi schema/handler contract tạo version mới.
+Publication validate toàn bộ source trước transaction, upsert definition theo `type`, đồng bộ capability,
+và đổi các definition bị xóa khỏi source thành `DISABLED`. Studio chỉ nhận node `ACTIVE` tương thích với
+`runtimeVersion`; `contentHash` toàn catalog hỗ trợ ETag/cache. Immutable node version và exact historical
+resolution được hoãn đến khi MVP chứng minh cần thiết.
 
 ## 4. Cloud Project và mutable Draft
 
 ### Trách nhiệm
 
-`Project` là container cloud của Studio thuộc Publisher. `ProjectDraft` giữ snapshot mutable mới nhất với optimistic version để chống ghi đè giữa nhiều Studio session.
+Project phase hiện tại: [`../studio_project_workflow/project_module.md`](../studio_project_workflow/project_module.md).
+Project Draft contract: [`../studio_project_workflow/project_draft.md`](../studio_project_workflow/project_draft.md).
+
+`Project` là container cloud thuộc đúng một `PublisherAccount`. Phase Project hiện tại chỉ triển khai
+metadata, ownership và archive lifecycle; `ProjectDraft` là phase kế tiếp và giữ snapshot mutable mới
+nhất với optimistic version để chống ghi đè giữa nhiều Studio session.
+
+Quy tắc Project MVP: tên được trim, dài `1..255`, unique không phân biệt hoa thường theo
+`PublisherAccount`; description nullable, được trim,
+dài tối đa `4.000` ký tự và kết quả rỗng được lưu thành `NULL`; `ARCHIVED` vẫn đọc được nhưng không
+được sửa; không có public delete, unarchive hoặc Redis lock cho CRUD thông thường.
+Các giới hạn text và normalize được enforce bởi strict Zod API contract; phase này không lặp lại
+chúng bằng database check constraint.
+
+Authorization tách ownership khỏi capability: `PublisherAccount` không bị xóa khi publisher bị block
+và tiếp tục làm ownership anchor. Khi block, Publisher `UserRole` bị soft-delete nhưng Customer role
+được giữ lại; Customer có permission `OWN` để list/read project thuộc PublisherAccount của chính user.
+Permission create không có scope và chỉ gán cho Publisher role; ownership luôn được suy ra từ
+authenticated user và PublisherAccount `ACTIVE` của user đó. Publisher role `OWN` cho phép
+update/archive, còn Admin permission có scope `NULL` để list/read/update/archive không giới hạn
+owner. Scope `NULL` thắng `OWN` khi một user có nhiều role. Repository nhận typed access predicate;
+chỉ `OWN` mới thêm `publisherAccountId` vào query. Mutation `OWN` yêu cầu PublisherAccount `ACTIVE`;
+Admin không cần resolve hoặc kiểm tra trạng thái PublisherAccount của owner nhưng vẫn tuân theo
+lifecycle của Project.
 
 ```sql
 CREATE TYPE "ProjectStatus" AS ENUM (
@@ -174,25 +153,29 @@ CREATE TYPE "ProjectStatus" AS ENUM (
 
 CREATE TABLE "Project" (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    "publisherAccountId" UUID NOT NULL REFERENCES "PublisherAccount" (id),
+    "publisherAccountId" UUID NOT NULL REFERENCES "PublisherAccount" (id) ON DELETE NO ACTION,
     name VARCHAR(255) NOT NULL,
     description TEXT,
     status "ProjectStatus" NOT NULL DEFAULT 'ACTIVE',
     "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
     "updatedAt" TIMESTAMPTZ,
     "deletedAt" TIMESTAMPTZ,
-    "createdById" UUID NOT NULL REFERENCES "User" (id),
-    "updatedById" UUID REFERENCES "User" (id)
+    "createdById" UUID NOT NULL REFERENCES "User" (id) ON DELETE NO ACTION,
+    "updatedById" UUID REFERENCES "User" (id) ON DELETE NO ACTION,
+    "deletedById" UUID REFERENCES "User" (id) ON DELETE NO ACTION
 );
 
 CREATE INDEX "Project_publisherAccountId_status_idx"
 ON "Project" ("publisherAccountId", status)
 WHERE "deletedAt" IS NULL;
 
+CREATE UNIQUE INDEX "Project_publisherAccountId_name_ci_key"
+ON "Project" ("publisherAccountId", lower(btrim(name)));
+
 CREATE TABLE "ProjectDraft" (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    "projectId" UUID NOT NULL UNIQUE REFERENCES "Project" (id),
-    version BIGINT NOT NULL DEFAULT 1 CHECK (version > 0),
+    "projectId" UUID NOT NULL UNIQUE REFERENCES "Project" (id) ON DELETE NO ACTION,
+    version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
 
     -- Mock JSON: editable Studio graph, including editor-only position metadata.
     -- {
@@ -202,7 +185,6 @@ CREATE TABLE "ProjectDraft" (
     --     {
     --       "id": "tap_01",
     --       "type": "android.tap",
-    --       "version": 1,
     --       "config": {},
     --       "bindings": {},
     --       "editor": {"x": 420, "y": 180}
@@ -212,9 +194,8 @@ CREATE TABLE "ProjectDraft" (
     -- }
     "editorGraph" JSONB NOT NULL,
 
-    -- Mock JSON Schema:
+    -- Mock Backend-owned input schema envelope:
     -- {
-    --   "$schema": "https://json-schema.org/draft/2020-12/schema",
     --   "type": "object",
     --   "required": ["accountName"],
     --   "properties": {"accountName": {"type": "string"}}
@@ -249,9 +230,15 @@ CREATE TABLE "ProjectDraft" (
     -- }
     "testSummary" JSONB NOT NULL DEFAULT '{}'::JSONB,
 
-    "contentHash" TEXT,
+    "contentHash" VARCHAR(64) NOT NULL,
     "savedAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
-    "savedById" UUID NOT NULL REFERENCES "User" (id),
+    "savedById" UUID NOT NULL REFERENCES "User" (id) ON DELETE NO ACTION,
+    "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+    "updatedAt" TIMESTAMPTZ,
+    "deletedAt" TIMESTAMPTZ,
+
+    CONSTRAINT "ProjectDraft_contentHash_check"
+        CHECK ("contentHash" ~ '^[0-9a-f]{64}$'),
 
     CONSTRAINT "ProjectDraft_json_objects_check" CHECK (
         jsonb_typeof("editorGraph") = 'object'
@@ -263,7 +250,20 @@ CREATE TABLE "ProjectDraft" (
 );
 ```
 
-Save contract dùng `projectId + expectedVersion`. Update thành công tăng `version`. Web submission phải gửi exact draft version đã self-review.
+Draft được tạo lazy: `expectedVersion = 0` chỉ dùng cho lần save đầu và tạo version `1`; các lần
+save sau gửi version hiện tại. Conditional update chỉ tăng version khi content hash thay đổi. Retry
+cùng content hash là idempotent; stale version với content khác trả conflict cùng current version.
+Backend canonicalize năm field content và tự tính SHA-256; Studio không gửi hash/audit field. Tổng
+canonical UTF-8 content tối đa 1 MiB. API `GET` trả content và metadata đồng bộ nhưng không expose
+`savedById`; API `PUT` chỉ trả `id`, `version`, `contentHash`, `savedAt` để Studio tiếp tục optimistic
+save mà không echo toàn bộ payload. Conflict trả `details.currentVersion`. Project và ProjectDraft
+dùng chung một access policy; read cho phép `NULL` hoặc `OWN`, còn save draft bắt buộc `OWN` và
+PublisherAccount `ACTIVE`. Web submission phải gửi exact draft version đã self-review.
+
+Studio chỉ tạo Project cloud khi user chọn Save to Cloud lần đầu, sau đó lưu ngay draft hiện tại;
+Backend không tạo draft rỗng cùng Project. Cloud là source of truth cho state đã sync và thiết bị mới
+phải download Project + draft. `GET draft` luôn trả thêm `projectStatus` để Studio chuyển sang
+read-only khi archive, nhưng Backend vẫn kiểm tra lifecycle lại trên từng lần save.
 
 ## 5. Asset
 
@@ -339,14 +339,20 @@ WHERE "deletedAt" IS NULL;
 
 ### Trách nhiệm
 
-`WorkflowRevision` là snapshot backend tạo từ đúng ProjectDraft version lúc submit trên Web. Record này không update content và không soft delete.
+Feature contract draft để review:
+[`../studio_project_workflow/workflow_revision.md`](../studio_project_workflow/workflow_revision.md).
+
+`WorkflowRevision` là snapshot Backend tạo từ đúng ProjectDraft version lúc submit trên Web. Record
+này không update content và không soft delete. Vì Node Catalog MVP chỉ giữ definition hiện hành,
+revision phải freeze đầy đủ contract của từng node type đã dùng; chỉ lưu `type + contentHash` không
+đủ để resolve definition lịch sử.
 
 ```sql
 CREATE TABLE "WorkflowRevision" (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     "projectId" UUID NOT NULL REFERENCES "Project" (id),
-    number INTEGER NOT NULL CHECK (number > 0),
-    "sourceDraftVersion" BIGINT NOT NULL CHECK ("sourceDraftVersion" > 0),
+    "sourceDraftVersion" INTEGER NOT NULL CHECK ("sourceDraftVersion" > 0),
+    "sourceDraftContentHash" VARCHAR(64) NOT NULL,
 
     -- Mock JSON: frozen Editor Graph, giữ metadata để admin/publisher inspect.
     -- {"schemaVersion":"1.0","entryNodeId":"start_01","nodes":[],"edges":[]}
@@ -359,7 +365,7 @@ CREATE TABLE "WorkflowRevision" (
     --   "nodes": [
     --     {
     --       "id": "start_01",
-    --       "handler": {"type": "flow.start", "version": 1},
+    --       "handler": {"type": "flow.start"},
     --       "bindings": {},
     --       "transitions": {"success": "end_01"}
     --     }
@@ -370,22 +376,36 @@ CREATE TABLE "WorkflowRevision" (
     -- Mock JSON Schema: same meaning as ProjectDraft.inputSchema.
     "inputSchema" JSONB NOT NULL,
 
+    -- Full immutable snapshot của distinct Node Definitions, sort theo type.
     -- Mock JSON:
     -- {
-    --   "schemaVersion": "1.0",
-    --   "nodes": [
-    --     {"type": "android.tap", "version": 1, "definitionVersionId": "uuid"}
+    --   "schemaVersion": 1,
+    --   "definitions": [
+    --     {
+    --       "type": "android.tap",
+    --       "runtimeHandler": "android.tap",
+    --       "minimumRuntimeVersion": "0.1.0",
+    --       "configSchema": {},
+    --       "inputSchema": {},
+    --       "outputSchema": {},
+    --       "outputPorts": {},
+    --       "editorHints": {},
+    --       "supportedErrorPolicies": {},
+    --       "capabilityCodes": ["android.device.control"],
+    --       "contentHash": "64-char-lowercase-sha256"
+    --     }
     --   ]
     -- }
-    "nodeVersionLock" JSONB NOT NULL,
+    "nodeDefinitionManifest" JSONB NOT NULL,
 
     -- Mock JSON:
     -- {
-    --   "schemaVersion": "1.0",
+    --   "schemaVersion": 1,
     --   "capabilities": ["android.device.control", "android.ui.observe"]
     -- }
     "capabilityManifest" JSONB NOT NULL,
 
+    -- Studio-provided advisory snapshot; cloud validation is stored by Submission pipeline.
     -- Mock JSON:
     -- {"schemaVersion":"1.0","status":"VALID","errors":[],"warnings":[]}
     "validationSummary" JSONB NOT NULL,
@@ -394,19 +414,21 @@ CREATE TABLE "WorkflowRevision" (
     -- {"schemaVersion":"1.0","runtimeVersion":"0.1.0","successfulRuns":2}
     "testSummary" JSONB NOT NULL DEFAULT '{}'::JSONB,
 
-    "contentHash" TEXT NOT NULL,
+    "contentHash" VARCHAR(64) NOT NULL,
     "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
     "createdById" UUID NOT NULL REFERENCES "User" (id),
 
-    CONSTRAINT "WorkflowRevision_project_number_key"
-        UNIQUE ("projectId", number),
     CONSTRAINT "WorkflowRevision_project_draftVersion_key"
         UNIQUE ("projectId", "sourceDraftVersion"),
+    CONSTRAINT "WorkflowRevision_sourceDraftContentHash_check"
+        CHECK ("sourceDraftContentHash" ~ '^[0-9a-f]{64}$'),
+    CONSTRAINT "WorkflowRevision_contentHash_check"
+        CHECK ("contentHash" ~ '^[0-9a-f]{64}$'),
     CONSTRAINT "WorkflowRevision_json_objects_check" CHECK (
         jsonb_typeof("editorGraph") = 'object'
         AND jsonb_typeof("runtimeIr") = 'object'
         AND jsonb_typeof("inputSchema") = 'object'
-        AND jsonb_typeof("nodeVersionLock") = 'object'
+        AND jsonb_typeof("nodeDefinitionManifest") = 'object'
         AND jsonb_typeof("capabilityManifest") = 'object'
         AND jsonb_typeof("validationSummary") = 'object'
         AND jsonb_typeof("testSummary") = 'object'
@@ -418,24 +440,31 @@ CREATE TABLE "WorkflowRevisionAsset" (
     "workflowRevisionId" UUID NOT NULL REFERENCES "WorkflowRevision" (id),
     "assetId" UUID NOT NULL REFERENCES "Asset" (id),
     alias VARCHAR(255) NOT NULL,
-    "assetHash" TEXT NOT NULL,
+    "assetHash" VARCHAR(64) NOT NULL,
     "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT "WorkflowRevisionAsset_revision_alias_key"
         UNIQUE ("workflowRevisionId", alias),
     CONSTRAINT "WorkflowRevisionAsset_revision_asset_key"
-        UNIQUE ("workflowRevisionId", "assetId")
+        UNIQUE ("workflowRevisionId", "assetId"),
+    CONSTRAINT "WorkflowRevisionAsset_assetHash_check"
+        CHECK ("assetHash" ~ '^[0-9a-f]{64}$')
 );
 ```
 
-`WorkflowRevisionAsset.assetHash` đóng băng expected content. Asset object không được overwrite; thay đổi asset tạo object/Asset mới.
+`sourceDraftContentHash` giữ provenance của draft đã chọn. `contentHash` là SHA-256 của canonical
+revision content gồm graph, IR, input schema, full node manifest, capability manifest,
+validation/test summary và asset alias/hash; identity/audit field không tham gia hash.
+
+`WorkflowRevisionAsset.assetHash` đóng băng expected content. Asset object không được overwrite;
+thay đổi asset tạo object/Asset mới. Quan hệ này chỉ được migrate sau khi Asset module tồn tại. Trong
+phase asset-free, revision hash dùng `assets: []` và submission có asset reference phải bị reject.
 
 ## 7. Quan hệ chính
 
 ```text
 Capability
 └── NodeDefinitionCapability
-    └── NodeDefinitionVersion
-        └── NodeDefinition
+    └── NodeDefinition
 
 PublisherAccount
 └── Project
