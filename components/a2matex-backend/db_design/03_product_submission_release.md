@@ -7,7 +7,7 @@ Nhóm này quản lý hành trình publish trên Marketplace:
 ```text
 Saved Project
 → Web self-review
-→ Product + Listing data
+→ editable Product + ProductMedia
 → immutable WorkflowRevision
 → Submission
 → automated scan
@@ -16,52 +16,21 @@ Saved Project
 → public catalog
 ```
 
-`Product` là identity ổn định. `ProductListing` là metadata hiển thị có thể cập nhật. `WorkflowRevision` và technical content của `ProductRelease` là immutable.
+`Product` là aggregate Publisher chỉnh sửa trước khi submit: identity ổn định, thông tin hiển thị và
+con trỏ tới release đang publish. `ProductMedia` chỉ liên kết ảnh đã upload qua Static/R2.
+`Submission`, `WorkflowRevision` và technical content của `ProductRelease` là immutable snapshot.
 
-## 2. Taxonomy
+Category, Tag, ProductTag, required-app classification và connector taxonomy không nằm trong MVP.
+Các node hiện tại chỉ cung cấp Android action cơ bản nên chưa có taxonomy ổn định mang giá trị tìm
+kiếm. Khi catalog lớn hơn, taxonomy chỉ được thêm từ usage thực tế và một feature spec riêng.
 
-### Trách nhiệm
-
-Category/Tag phục vụ navigation và search cơ bản. MVP chỉ cần CRUD và assignment đơn giản.
-
-```sql
-CREATE TABLE "Category" (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name VARCHAR(255) NOT NULL,
-    slug VARCHAR(255) NOT NULL,
-    description TEXT,
-    "sortOrder" INTEGER NOT NULL DEFAULT 0,
-    "isActive" BOOLEAN NOT NULL DEFAULT TRUE,
-    "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
-    "updatedAt" TIMESTAMPTZ,
-    "deletedAt" TIMESTAMPTZ,
-    "createdById" UUID NOT NULL REFERENCES "User" (id),
-    "updatedById" UUID REFERENCES "User" (id)
-);
-
-CREATE UNIQUE INDEX "Category_slug_idx"
-ON "Category" (lower(slug))
-WHERE "deletedAt" IS NULL;
-
-CREATE TABLE "Tag" (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name VARCHAR(100) NOT NULL,
-    slug VARCHAR(100) NOT NULL,
-    "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
-    "updatedAt" TIMESTAMPTZ,
-    "deletedAt" TIMESTAMPTZ
-);
-
-CREATE UNIQUE INDEX "Tag_slug_idx"
-ON "Tag" (lower(slug))
-WHERE "deletedAt" IS NULL;
-```
-
-## 3. Product identity
+## 2. Product aggregate và media
 
 ### Trách nhiệm
 
-`Product` thuộc một Publisher và, trong MVP, liên kết với đúng một Studio Project. Product tồn tại xuyên suốt nhiều submission/release.
+`Product` thuộc một Publisher, liên kết đúng một Studio Project, và tồn tại xuyên suốt nhiều
+Submission/ProductRelease. Publisher có thể lưu draft chưa đầy đủ. Submission lock Product hiện tại,
+validate đầy đủ field publish bắt buộc, rồi snapshot chính xác row đã lock.
 
 ```sql
 CREATE TYPE "ProductStatus" AS ENUM (
@@ -76,6 +45,11 @@ CREATE TABLE "Product" (
     "publisherAccountId" UUID NOT NULL REFERENCES "PublisherAccount" (id),
     "projectId" UUID NOT NULL UNIQUE REFERENCES "Project" (id),
     status "ProductStatus" NOT NULL DEFAULT 'DRAFT',
+    name VARCHAR(255),
+    slug VARCHAR(255),
+    "shortDescription" VARCHAR(500),
+    description TEXT,
+    "usageInstructions" TEXT,
     "statusReason" TEXT,
     "suspendedAt" TIMESTAMPTZ,
     "suspendedById" UUID REFERENCES "User" (id),
@@ -95,86 +69,51 @@ CREATE TABLE "Product" (
 CREATE INDEX "Product_publisher_status_idx"
 ON "Product" ("publisherAccountId", status)
 WHERE "deletedAt" IS NULL;
-```
 
-## 4. Product Listing và media
-
-### Trách nhiệm
-
-`ProductListing` lưu metadata hiển thị. Thay đổi listing không sửa technical release. Policy review lại listing nhạy cảm sẽ được thiết kế ở API layer sau.
-
-```sql
-CREATE TYPE "ListingVisibility" AS ENUM (
-    'PRIVATE',
-    'UNLISTED',
-    'PUBLIC'
-);
-
-CREATE TABLE "ProductListing" (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    "productId" UUID NOT NULL UNIQUE REFERENCES "Product" (id),
-    "categoryId" UUID REFERENCES "Category" (id),
-    name VARCHAR(255) NOT NULL,
-    slug VARCHAR(255) NOT NULL,
-    "shortDescription" VARCHAR(500) NOT NULL,
-    description TEXT NOT NULL,
-    "usageInstructions" TEXT,
-    visibility "ListingVisibility" NOT NULL DEFAULT 'PRIVATE',
-    "isFeatured" BOOLEAN NOT NULL DEFAULT FALSE,
-
-    -- Mock JSON:
-    -- {
-    --   "schemaVersion": "1.0",
-    --   "supportedAndroidVersions": ["11", "12", "13"],
-    --   "testedLdPlayerVersions": ["9.1"],
-    --   "targetPackages": ["com.example.game"]
-    -- }
-    "compatibilitySummary" JSONB NOT NULL DEFAULT '{}'::JSONB,
-
-    "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
-    "updatedAt" TIMESTAMPTZ,
-    "deletedAt" TIMESTAMPTZ,
-    "createdById" UUID NOT NULL REFERENCES "User" (id),
-    "updatedById" UUID REFERENCES "User" (id),
-
-    CONSTRAINT "ProductListing_compatibility_object_check"
-        CHECK (jsonb_typeof("compatibilitySummary") = 'object')
-);
-
-CREATE UNIQUE INDEX "ProductListing_slug_idx"
-ON "ProductListing" (lower(slug))
-WHERE "deletedAt" IS NULL;
-
-CREATE TABLE "ProductTag" (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    "productId" UUID NOT NULL REFERENCES "Product" (id),
-    "tagId" UUID NOT NULL REFERENCES "Tag" (id),
-    "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT "ProductTag_product_tag_key" UNIQUE ("productId", "tagId")
-);
+CREATE UNIQUE INDEX "Product_slug_idx"
+ON "Product" (lower(slug))
+WHERE "deletedAt" IS NULL AND slug IS NOT NULL;
 
 CREATE TYPE "ProductMediaType" AS ENUM (
     'ICON',
-    'SCREENSHOT',
-    'VIDEO'
+    'COVER',
+    'GALLERY'
 );
 
 CREATE TABLE "ProductMedia" (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     "productId" UUID NOT NULL REFERENCES "Product" (id),
-    "assetId" UUID NOT NULL REFERENCES "Asset" (id),
+    "staticId" UUID NOT NULL REFERENCES "Static" (id),
     type "ProductMediaType" NOT NULL,
     "sortOrder" INTEGER NOT NULL DEFAULT 0,
+    "altText" VARCHAR(500),
     "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+    "updatedAt" TIMESTAMPTZ,
     "deletedAt" TIMESTAMPTZ
 );
 
-CREATE UNIQUE INDEX "ProductMedia_product_asset_idx"
-ON "ProductMedia" ("productId", "assetId")
+CREATE UNIQUE INDEX "ProductMedia_product_static_idx"
+ON "ProductMedia" ("productId", "staticId")
 WHERE "deletedAt" IS NULL;
+
+CREATE UNIQUE INDEX "ProductMedia_single_icon_idx"
+ON "ProductMedia" ("productId")
+WHERE "deletedAt" IS NULL AND type = 'ICON';
+
+CREATE UNIQUE INDEX "ProductMedia_single_cover_idx"
+ON "ProductMedia" ("productId")
+WHERE "deletedAt" IS NULL AND type = 'COVER';
 ```
 
-## 5. Submission
+Draft Product mutation có thể thay đổi ProductMedia, nhưng không xóa Static/R2 object đang được một
+Submission/ProductRelease snapshot tham chiếu. Marketplace không đọc trực tiếp mutable Product row;
+nó đọc Product snapshot của current published release.
+
+Cross-module prerequisite: Static hiện tại chưa có ownership. Product image upload phải bổ sung
+nullable `Static.publisherAccountId` và derive từ authenticated Publisher; ProductMedia chỉ được link
+Static image có cùng Publisher. Static hệ thống/legacy có ownership null không được attach vào Product.
+
+## 3. Submission
 
 ### Trách nhiệm
 
@@ -197,27 +136,22 @@ CREATE TABLE "Submission" (
     number INTEGER NOT NULL CHECK (number > 0),
     status "SubmissionStatus" NOT NULL DEFAULT 'PENDING_SCAN',
 
-    -- Mock JSON: Product fields exactly as publisher confirmed at submit time.
+    -- Mock JSON: complete Product working copy exactly as publisher confirmed at submit time.
     -- {
     --   "schemaVersion": "1.0",
     --   "productId": "uuid",
     --   "publisherAccountId": "uuid",
-    --   "projectId": "uuid"
-    -- }
-    "productSnapshot" JSONB NOT NULL,
-
-    -- Mock JSON:
-    -- {
-    --   "schemaVersion": "1.0",
+    --   "projectId": "uuid",
     --   "name": "Daily Reward Collector",
     --   "slug": "daily-reward-collector",
     --   "shortDescription": "Collect daily rewards",
     --   "description": "...",
-    --   "categoryId": "uuid",
-    --   "tagIds": ["uuid"],
-    --   "media": [{"assetId":"uuid","type":"ICON","sortOrder":0}]
+    --   "usageInstructions": null,
+    --   "media": [
+    --     {"id":"uuid","staticId":"uuid","type":"ICON","sortOrder":0,"altText":"Product icon"}
+    --   ]
     -- }
-    "listingSnapshot" JSONB NOT NULL,
+    "productSnapshot" JSONB NOT NULL,
 
     -- Mock JSON:
     -- {
@@ -233,7 +167,6 @@ CREATE TABLE "Submission" (
     -- {
     --   "schemaVersion": "1.0",
     --   "purpose": "Collect daily reward",
-    --   "targetPackages": ["com.example.game"],
     --   "testInstructions": "Use the provided test account",
     --   "knownLimitations": ["English UI only"]
     -- }
@@ -244,7 +177,7 @@ CREATE TABLE "Submission" (
     --   "schemaVersion": "1.0",
     --   "confirmed": true,
     --   "items": [
-    --     {"code":"LISTING_MATCHES_BEHAVIOR","checked":true},
+    --     {"code":"PRODUCT_PRESENTATION_MATCHES_BEHAVIOR","checked":true},
     --     {"code":"NO_RAW_CREDENTIALS","checked":true}
     --   ]
     -- }
@@ -257,7 +190,6 @@ CREATE TABLE "Submission" (
     CONSTRAINT "Submission_product_number_key" UNIQUE ("productId", number),
     CONSTRAINT "Submission_json_objects_check" CHECK (
         jsonb_typeof("productSnapshot") = 'object'
-        AND jsonb_typeof("listingSnapshot") = 'object'
         AND jsonb_typeof("releaseRequest") = 'object'
         AND jsonb_typeof("reviewMetadata") = 'object'
         AND jsonb_typeof("selfReview") = 'object'
@@ -270,14 +202,14 @@ ON "Submission" (status, "submittedAt");
 
 Một transaction submit nên:
 
-1. Lock/check ProjectDraft exact version.
-2. Revalidate graph/IR/assets.
-3. Create WorkflowRevision immutable.
-4. Create/reuse Product và snapshot listing/release request.
+1. Resolve Publisher và lock Product hiện có, Project, rồi ProjectDraft exact version theo lock order.
+2. Validate Product publish fields và toàn bộ Static image refs từ Product row đã lock.
+3. Revalidate graph/IR/assets và create WorkflowRevision immutable.
+4. Snapshot Product fields + ordered media và release request; không update mutable Product.
 5. Create Submission.
 6. Create outbox event cho scan job.
 
-## 6. Automated Scan
+## 4. Automated Scan
 
 ### Trách nhiệm
 
@@ -348,7 +280,7 @@ CREATE TABLE "SubmissionScanFinding" (
 );
 ```
 
-## 7. Admin Review
+## 5. Admin Review
 
 ### Trách nhiệm
 
@@ -371,7 +303,7 @@ CREATE TABLE "SubmissionReview" (
     -- {
     --   "schemaVersion": "1.0",
     --   "items": [
-    --     {"code":"LISTING_ACCURACY","result":"PASS","comment":null},
+    --     {"code":"PRODUCT_PRESENTATION_ACCURACY","result":"PASS","comment":null},
     --     {"code":"CAPABILITY_JUSTIFIED","result":"CHANGE_REQUIRED","comment":"Explain HTTP access"}
     --   ]
     -- }
@@ -387,11 +319,14 @@ CREATE TABLE "SubmissionReview" (
 );
 ```
 
-## 8. ProductRelease
+## 6. ProductRelease
 
 ### Trách nhiệm
 
-`ProductRelease` lưu immutable technical artifact metadata. Khi `PUBLISHED`, package fields không được update; disable chỉ thay status/reason.
+`ProductRelease` lưu immutable technical artifact metadata và trỏ tới approved Submission. Khi
+`PUBLISHED`, package fields không được update; disable chỉ thay status/reason. Public Marketplace
+đọc Product presentation snapshot từ Submission của `Product.currentReleaseId`, không đọc trực tiếp
+mutable Product row.
 
 ```sql
 CREATE TYPE "ProductReleaseStatus" AS ENUM (
@@ -484,15 +419,16 @@ FOREIGN KEY ("currentReleaseId") REFERENCES "ProductRelease" (id);
 ```
 
 Application transaction đặt current release phải xác nhận release thuộc đúng Product và đang `PUBLISHED`; FK một mình không enforce được điều kiện đó.
+Transaction này đồng thời chuyển Product `DRAFT -> ACTIVE` cho first release; Product đang `ACTIVE`
+giữ nguyên status khi publish update. Admin approval chỉ cho phép build, không tự activate Product.
+Nếu build/publish thất bại, `currentReleaseId` và snapshot đang public không đổi.
 
-## 9. Quan hệ chính
+## 7. Quan hệ chính
 
 ```text
 PublisherAccount
 └── Product ── Project
-    ├── ProductListing ── Category
-    ├── ProductTag[] ── Tag
-    ├── ProductMedia[] ── Asset
+    ├── ProductMedia[] ── Static
     ├── Submission[] ── WorkflowRevision
     │   ├── SubmissionScan[]
     │   │   └── SubmissionScanFinding[]

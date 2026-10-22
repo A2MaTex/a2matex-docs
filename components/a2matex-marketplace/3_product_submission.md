@@ -1,37 +1,37 @@
 ## 3. Mô hình sản phẩm
 
-Cần phân biệt bốn khái niệm:
+Cần phân biệt ba khái niệm chính:
 
-| Thành phần       | Ý nghĩa                                       |
-| ---------------- | --------------------------------------------- |
-| `Product`        | Sản phẩm logic do publisher sở hữu            |
-| `ProductListing` | Metadata thương mại hiển thị trên Marketplace |
-| `ProductRelease` | Phiên bản kỹ thuật đã được duyệt và publish   |
-| `Submission`     | Snapshot publisher gửi để admin review        |
+| Thành phần       | Ý nghĩa                                                                    |
+| ---------------- | -------------------------------------------------------------------------- |
+| `Product`        | Editable aggregate Publisher sở hữu: identity, presentation data và media |
+| `Submission`     | Immutable Product + WorkflowRevision + release-request snapshot để review |
+| `ProductRelease` | Phiên bản kỹ thuật immutable đã được duyệt, build và publish               |
 
 Ví dụ:
 
 ```text
 Product: Auto mở rương game A
-├── Listing: tên, mô tả, giá, media
+├── Draft fields: tên, mô tả, hướng dẫn, Static-backed image media
 ├── Release 1.0.0
 ├── Release 1.1.0
 └── Release 1.2.0 — current release
 ```
 
-### 3.1. Product và ProductListing
+### 3.1. Product aggregate
 
-Chứa thông tin có thể cập nhật mà không cần build lại workflow:
+Product là working copy Publisher có thể lưu trước khi submit:
 
 - Tên, slug, mô tả ngắn và mô tả chi tiết.
-- Category và tags.
-- Icon, screenshot và video demo.
+- Hướng dẫn sử dụng.
+- Ordered image media (`ICON`, `COVER`, `GALLERY`) tham chiếu ảnh đã upload qua Static/R2.
 - Publisher.
-- Giá và chính sách sử dụng.
-- Trạng thái hiển thị.
+- Trạng thái lifecycle.
 - Current release.
 
-Thay đổi nhạy cảm như mục đích sản phẩm, category hoặc media chính có thể cần admin duyệt lại.
+MVP không có ProductListing, Category, Tag hoặc ProductTag riêng. Giá/chính sách bán thuộc Product
+Offer. Mọi thay đổi presentation hoặc media muốn xuất hiện trên Marketplace đều cần Submission mới;
+ProductRelease hiện tại vẫn public trong lúc Publisher sửa draft hoặc chờ review.
 
 ### 3.2. ProductRelease
 
@@ -49,16 +49,16 @@ Chứa thông tin kỹ thuật immutable:
 
 ProductRelease đã publish không được ghi đè. Muốn sửa workflow phải tạo submission và release mới.
 
-## 4. Submission từ Studio
+## 4. Submission từ Publisher Portal
 
-Khi publisher bấm `Submit for Review`, Studio gửi dữ liệu lên Backend, không gửi trực tiếp vào Marketplace Web.
+Studio chỉ save/sync Project draft. Publisher tạo/chỉnh Product và bấm `Submit for Review` trên Web
+Publisher Portal. Backend lock Product hiện tại và exact Project Draft version để tạo snapshot.
 
 ### 4.1. Product metadata
 
-- Product ID nếu cập nhật sản phẩm hiện có.
-- Product name, description và category.
-- Giá và chính sách sử dụng.
-- Icon, screenshot và video/demo instruction.
+- Product ID.
+- Product name, slug, descriptions và usage instructions.
+- Ordered image media metadata + `staticId`; không snapshot private URL/R2 object key.
 - Terms hoặc cảnh báo sử dụng.
 
 ### 4.2. Release snapshot
@@ -76,7 +76,6 @@ Khi publisher bấm `Submit for Review`, Studio gửi dữ liệu lên Backend, 
 
 - Tài khoản hoặc môi trường test nếu cần.
 - LDPlayer và Android version đã test.
-- Android application/package được thao tác.
 - Test instruction.
 - Mục đích workflow.
 - Danh sách hành động và dữ liệu mà workflow sử dụng.
@@ -87,8 +86,8 @@ Submission đã gửi là immutable. Khi admin yêu cầu chỉnh sửa:
 
 ```text
 Submission 01: CHANGES_REQUESTED
-→ Publisher sửa project trong Studio
-→ Studio tạo Submission 02
+→ Publisher sửa Product trên Web và/hoặc project trong Studio
+→ Publisher tạo Submission 02 trên Web
 → Submission 02 tham chiếu Submission 01
 → Admin review snapshot mới
 ```
@@ -132,7 +131,7 @@ Kết quả scan được lưu theo từng rule để admin biết lỗi nào ch
 
 Admin kiểm tra:
 
-- Listing có phản ánh đúng hành vi workflow không.
+- Product presentation snapshot có phản ánh đúng hành vi workflow không.
 - Workflow có hành vi nguy hiểm hoặc gây hiểu nhầm không.
 - Có thu thập hoặc truyền dữ liệu nhạy cảm không.
 - Capability yêu cầu có hợp lý không.

@@ -33,7 +33,7 @@ This module owns:
 This module does not own:
 
 - Studio draft editing, optimistic save conflicts, or draft history;
-- Web self-review, Product/Listing/Release metadata, or Submission status;
+- Web self-review, editable Product presentation/media, Release metadata, or Submission status;
 - asynchronous cloud validation, policy scanning, review, package building, or encryption;
 - Asset upload/storage lifecycle;
 - Launcher download authorization or Runtime execution.
@@ -246,7 +246,8 @@ The future Submission transaction should use this order:
 5. Extract distinct node types and load current definitions/capabilities in one set-based query.
 6. Build the frozen manifests and deterministic revision hash without network calls.
 7. Insert the Workflow Revision.
-8. Create Product/Submission snapshots and the outbox event in the same transaction.
+8. Snapshot the locked existing Product draft, then create Submission and the outbox event in the
+   same transaction. Submission never creates or edits Product.
 
 Lock Project before Project Draft everywhere to keep lock ordering stable. Database uniqueness on
 `(projectId, sourceDraftVersion)` is the durable concurrency boundary; a Redis lock is not required.

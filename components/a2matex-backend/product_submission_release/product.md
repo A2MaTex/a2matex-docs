@@ -6,13 +6,14 @@
 
 ## 1. Purpose and boundary
 
-`Product` is the stable Marketplace identity for one Publisher-owned Studio Project. It is created
-once and remains the parent identity across listing changes, submissions, reviews, and releases.
+`Product` is the Publisher-owned editable Marketplace aggregate for one Studio Project. It combines
+the stable Product identity with the Product's draft presentation fields. A Publisher creates and
+saves this aggregate before submission. Creating or editing it does not make it official or public.
 
 ```text
 PublisherAccount
 └── Product ── Project
-    ├── ProductListing       # separate feature
+    ├── ProductMedia[] ── Static
     ├── Submission[]         # separate feature
     └── ProductRelease[]     # separate feature
 ```
@@ -21,6 +22,9 @@ This module owns:
 
 - the one-to-one Product-to-Project identity;
 - Publisher ownership derived from the selected Project;
+- Publisher-authored name, slug, descriptions, usage instructions, and ordered media references;
+- draft creation and partial draft saving;
+- public Marketplace Product list/detail projections from the current published release;
 - Product lifecycle state and lifecycle authorization;
 - Publisher/Admin Product list and detail reads;
 - Publisher abandonment of an unpublished draft Product;
@@ -29,12 +33,12 @@ This module owns:
 
 This module does not own:
 
-- Product name, slug, description, category, tags, visibility, or compatibility metadata;
-- Product media, Asset records, Cloudflare R2 objects, or presigned URLs;
+- Static upload/processing or Cloudflare R2 objects; it stores only validated `staticId` references;
+- Category, Tag, ProductTag, required-app classification, or connector taxonomy;
 - self-review data, Workflow Revision creation, or Submission state;
 - automated scan findings or admin Submission review decisions;
 - package building, package encryption, package/payload hashes, or release manifests;
-- public Marketplace catalog queries;
+- advanced Catalog ranking, recommendations, and full-text infrastructure;
 - offers, orders, entitlement, download authorization, execution leases, or execution reports.
 
 The Product module must not copy Project workflow content or Publisher profile data into Product.
@@ -45,20 +49,44 @@ The Product module must not copy Project workflow content or Publisher profile d
   or exceptional soft deletion. A Product is never recreated for the same Project.
 - A Product belongs to the same `PublisherAccount` as its Project. Neither `projectId` nor
   `publisherAccountId` can change after creation.
-- Product creation is an explicit Publisher Portal operation performed after the Publisher selects
-  a cloud Project. It is not performed by Studio.
-- Repeating creation for the same accessible Project is idempotent while its Product is not
-  archived: return the existing Product ID without creating another record.
-- Repeating creation for a Project whose Product is archived returns
-  `409 Error.ProductArchived`; the archived Product is not restored or replaced.
-- Product creation requires an active, non-deleted Project owned by the caller's active Publisher
-  account. A Project Draft or Runtime IR is not required until Submission.
-- Product has no editable business metadata. Product Listing owns all publisher-editable Marketplace
-  presentation fields, so this module exposes no generic Product update endpoint.
+- The Web Publisher Portal creates Product as `DRAFT` before submission. Studio does not create it.
+- `POST /products` creates Product and its optional initial media references atomically. Repeated
+  creation for the same accessible Project resolves the existing non-archived Product.
+- `PATCH /products/:productId` saves the Publisher's editable working copy with MVP last-write-wins
+  semantics. It never changes lifecycle status or the currently published release.
+- Draft saves may be incomplete. Submission applies the complete publishing validation contract.
+- Product creation requires an active, non-deleted Project owned by the active Publisher.
+- An existing `ARCHIVED` or `SUSPENDED` Product cannot receive a new Submission. An `ACTIVE` Product
+  can receive an update Submission while its currently published release remains official.
+- Product Listing is not a separate MVP entity or route. "Listing information" means the editable
+  presentation fields stored on Product.
+- Product media is an ordered set of image references. Upload happens first through the existing
+  Static/R2 image flow; Product requests contain metadata and `staticId`, never image bytes or R2 keys.
+- The current Static record does not persist uploader/Publisher ownership. Before ProductMedia is
+  implemented, Product image upload must add nullable `Static.publisherAccountId`, derived from the
+  authenticated Publisher. Product create/update may attach only Static images whose
+  `publisherAccountId` matches the Product owner. Legacy/system Static rows with null ownership are
+  not eligible for ProductMedia.
+- Category, Tag, ProductTag, required apps, and connector taxonomy are deferred. Current basic
+  Android actions provide no stable taxonomy worth maintaining. Release capabilities remain
+  technical release data and are not Publisher-entered Product classification.
 - MVP statuses are `DRAFT`, `ACTIVE`, `SUSPENDED`, and `ARCHIVED`.
-- A newly created Product is `DRAFT`.
-- Only the Product Release module can transition `DRAFT` to `ACTIVE`, and only after an immutable
-  Product Release has been published successfully.
+- A newly created Product is `DRAFT`. Submission, scan completion, admin approval, or a
+  queued/building release does not by itself change that status.
+- Admin approval authorizes the build/publish pipeline; it does not create the Product and does not
+  make it public by itself.
+- Only the Product Release publication transaction can transition `DRAFT` to `ACTIVE`, and only
+  after the immutable Product Release has been built and marked `PUBLISHED` successfully.
+- If the first Submission is rejected or changes are requested, the editable Product remains
+  `DRAFT` and absent from the public catalog. A later corrected Submission snapshots it again.
+- If an update Submission for an `ACTIVE` Product is rejected, requests changes, or fails build, the
+  currently published release and approved Product snapshot remain unchanged.
+- Every Publisher-authored change that would alter the official store representation or executable
+  release requires a new Submission and admin review in the MVP. This includes workflow/Runtime IR,
+  release version/compatibility, Product text, slug, usage instructions, and Product media.
+- Submission freezes the Product fields, ordered media, Workflow Revision, and Release request as
+  immutable snapshots. Marketplace reads the snapshot behind `currentReleaseId`; editing Product
+  never overwrites the live store representation.
 - A Publisher may archive only its own `DRAFT` Product. Published or suspended Products cannot be
   archived because release and future customer-ownership history must remain addressable.
 - Only Admin may suspend or reactivate a Product. Suspension is a Product-level distribution
@@ -67,8 +95,8 @@ The Product module must not copy Project workflow content or Publisher profile d
   must independently exclude a blocked Publisher where appropriate.
 - `currentReleaseId` is not introduced by the Product migration. The Product Release feature adds
   that nullable column and its foreign key when `ProductRelease` exists.
-- Asset-related relations and presigned URLs are post-MVP. The existing `Static`/Cloudflare R2
-  storage path remains available to later package work but is not part of Product identity.
+- General Asset relations and presigned URLs remain post-MVP. Product images use the existing
+  Static/Cloudflare R2 path because expected files are small and already supported by Backend upload.
 
 ## 3. Data model
 
@@ -78,6 +106,12 @@ Product
   publisherAccountId UUID FK PublisherAccount, required, immutable
   projectId UUID FK Project, required, immutable, unique
   status ProductStatus, required, default DRAFT
+  currentReleaseId UUID FK ProductRelease, nullable, added by Product Release feature
+  name VARCHAR(255), nullable while draft
+  slug VARCHAR(255), nullable while draft
+  shortDescription VARCHAR(500), nullable while draft
+  description TEXT, nullable while draft
+  usageInstructions TEXT, nullable
   statusReason TEXT, nullable
   suspendedAt TIMESTAMPTZ, nullable
   suspendedById UUID FK User, nullable
@@ -87,10 +121,22 @@ Product
   createdById UUID FK User, required
   updatedById UUID FK User, nullable
   deletedById UUID FK User, nullable
+
+ProductMedia
+  id UUID PK
+  productId UUID FK Product, required
+  staticId UUID FK Static, required
+  type ProductMediaType, required
+  sortOrder INTEGER, required
+  altText VARCHAR(500), nullable
+  createdAt TIMESTAMPTZ, required
+  updatedAt TIMESTAMPTZ, nullable
+  deletedAt TIMESTAMPTZ, nullable
 ```
 
 ```text
 ProductStatus = DRAFT | ACTIVE | SUSPENDED | ARCHIVED
+ProductMediaType = ICON | COVER | GALLERY
 ```
 
 All foreign keys use `NO ACTION`. Product has no public delete or restore operation; `deletedAt` and
@@ -107,6 +153,14 @@ Database integrity requirements:
 - Every non-`SUSPENDED` status requires those three suspension fields to be null.
 - `statusReason` is normalized and validated by the application; it is not used for draft/archive
   notes.
+- `slug` is case-insensitively unique when non-null and non-deleted. Submission requires it.
+- Active Product media rows are unique by `(productId, staticId)`.
+- A Product can have at most one active `ICON` and one active `COVER`; `GALLERY` may contain many
+  ordered images.
+- Product media accepts only completed, non-deleted Static image records owned by the Product's
+  Publisher. It never accepts raw object keys or remote URLs.
+- Removing ProductMedia from the working draft removes only the association. Static cleanup must not
+  delete an image referenced by any immutable Submission or published Product Release.
 - Add the following query index for owner lists:
 
 ```sql
@@ -115,7 +169,7 @@ ON "Product" ("publisherAccountId", status)
 WHERE "deletedAt" IS NULL;
 ```
 
-No listing, release, submission, media, or JSON snapshot column belongs in this table.
+No release artifact, Workflow Revision content, or Submission snapshot belongs in Product.
 
 ## 4. Lifecycle and invariants
 
@@ -123,7 +177,7 @@ Allowed transitions:
 
 ```text
 [create] ──> DRAFT
-DRAFT ─────> ACTIVE       # internal: first Product Release published
+DRAFT ─────> ACTIVE       # internal: first approved Product Release published
 DRAFT ─────> ARCHIVED     # Publisher owner or unrestricted Admin
 ACTIVE ────> SUSPENDED    # unrestricted Admin
 SUSPENDED ─> ACTIVE       # unrestricted Admin after release eligibility check
@@ -133,6 +187,7 @@ All other transitions are rejected.
 
 Lifecycle rules:
 
+- `[create] -> DRAFT` occurs through the Publisher Product creation API.
 - `ARCHIVED` is terminal and readable.
 - Archive is idempotent for an accessible `DRAFT` Product.
 - An archive request for `ACTIVE` or `SUSPENDED` returns a stable conflict instead of hiding a
@@ -153,8 +208,9 @@ Lifecycle rules:
 
 ## 5. API contract
 
-All routes use Bearer authentication, route permissions, strict Zod inputs, the global response
-envelope, and the existing pagination format.
+Management and mutation routes use Bearer authentication and route permissions. Public Marketplace
+routes use `@IsPublic()` with no Permission record. All routes use strict Zod inputs, the global
+response envelope, and the existing pagination format.
 
 ### 5.1 Common transport and schemas
 
@@ -196,11 +252,31 @@ type ProductProjectSummary = {
   status: "ACTIVE" | "ARCHIVED";
 };
 
+type ProductMediaType = "ICON" | "COVER" | "GALLERY";
+
+type ProductMediaInput = {
+  staticId: string; // UUID
+  type: ProductMediaType;
+  sortOrder: number; // non-negative integer
+  altText?: string | null; // trimmed, maximum 500 characters
+};
+
+type ProductMediaOutput = ProductMediaInput & {
+  id: string; // UUID
+};
+
 type ProductManagementOutput = {
   id: string; // UUID
   publisherAccountId: string; // UUID
   project: ProductProjectSummary;
   status: ProductStatus;
+  name: string | null;
+  slug: string | null;
+  shortDescription: string | null;
+  description: string | null;
+  usageInstructions: string | null;
+  media: ProductMediaOutput[];
+  currentReleaseId: string | null;
   statusReason: string | null;
   suspendedAt: string | null;
   createdAt: string;
@@ -212,9 +288,10 @@ type ProductIdParam = {
 };
 ```
 
-`statusReason` and `suspendedAt` are non-null only when `status = 'SUSPENDED'`.
+`statusReason` and `suspendedAt` are non-null only when `status = 'SUSPENDED'`. Media order is
+deterministic: `type`, then `sortOrder`, then `id`.
 
-Common failures for every route:
+Common failures for authenticated management and mutation routes:
 
 | Condition                                              | Result                                       |
 | ------------------------------------------------------ | -------------------------------------------- |
@@ -222,7 +299,7 @@ Common failures for every route:
 | No active role grants the exact method/path permission | `403 Forbidden`                              |
 | Path, query, or body fails its strict schema           | `422` validation error with safe field paths |
 
-### 5.2 Create or resolve Product identity
+### 5.2 Create a Product draft
 
 ```http
 POST /api/v1/products
@@ -233,10 +310,7 @@ Content-Type: application/json
 Permission contract:
 
 ```text
-method = POST
-path   = /api/v1/products
-scope  = null
-role   = PUBLISHER
+method = POST, path = /api/v1/products, scope = null -> PUBLISHER
 ```
 
 Strict request body:
@@ -244,43 +318,80 @@ Strict request body:
 ```ts
 type CreateProductInput = {
   projectId: string; // UUID
+  name?: string | null; // trim, 1..255 when present
+  slug?: string | null; // normalized lowercase slug, 1..255 when present
+  shortDescription?: string | null; // trim, 1..500 when present
+  description?: string | null; // trimmed non-empty string when present
+  usageInstructions?: string | null;
+  media?: ProductMediaInput[]; // complete initial ordered set, default []
 };
 ```
 
-```json
-{
-  "projectId": "4a0906bf-7cf6-4c7d-83b7-976924fa399f"
-}
-```
+Only `projectId` is required for a draft save. The Backend derives Publisher ownership, status, and
+audit fields. It validates all media references in one set-based query and creates
+Product plus ProductMedia rows atomically.
 
-Successful response: `201 Created` for both first creation and idempotent resolution of an existing
-non-archived Product.
-
-```json
-{
-  "data": {
-    "id": "e5c89677-d139-47fe-9874-e3eceb574ec4"
-  },
-  "statusCode": 201
-}
-```
-
-The caller supplies only `projectId`. The Backend derives `publisherAccountId`, `status`, audit
-fields, and timestamps. It never accepts ownership or lifecycle fields from the request.
+First creation returns `201 Created` with `ProductManagementOutput`. If the same Publisher repeats
+creation for a Project that already has a non-archived Product, return that Product as `200 OK`
+without applying the repeated create payload; draft changes use `PATCH`.
 
 Route-specific failures:
 
-| Condition                                                            | Result                          |
-| -------------------------------------------------------------------- | ------------------------------- |
-| Project is missing, archived, deleted, or owned by another Publisher | `404 Error.ProjectNotFound`     |
-| Existing Product for this Project is archived                        | `409 Error.ProductArchived`     |
-| Caller is not an eligible active Publisher                           | Existing Publisher policy error |
-| Invalid UUID or unknown/missing body field                           | `422` validation error          |
+| Condition | Result |
+| --- | --- |
+| Project is missing, archived, deleted, or cross-owner | `404 Error.ProjectNotFound` |
+| Existing Product is archived | `409 Error.ProductArchived` |
+| Slug is already reserved by another Product | `409 Error.ProductSlugConflict` |
+| Media contains an unavailable, cross-owner, non-image, or duplicate Static reference | `422 Error.ProductMediaInvalid` |
+| Caller is not an eligible active Publisher | Existing Publisher policy error |
 
-Admin does not receive this permission. The endpoint never creates a Product on another
-Publisher's behalf.
+### 5.3 Update a Product draft
 
-### 5.3 List Products for management
+```http
+PATCH /api/v1/products/{productId}
+Authorization: Bearer <access-token>
+Content-Type: application/json
+```
+
+Permission contract:
+
+```text
+method = PATCH, path = /api/v1/products/:productId, scope = OWN -> PUBLISHER
+```
+
+Strict request body:
+
+```ts
+type UpdateProductInput = {
+  name?: string | null;
+  slug?: string | null;
+  shortDescription?: string | null;
+  description?: string | null;
+  usageInstructions?: string | null;
+  media?: ProductMediaInput[]; // when present, replaces the complete draft media set
+};
+```
+
+At least one mutable field is required. Omitted fields remain unchanged; explicit `null` clears an
+optional draft field; `media: []` clears all draft media. The
+request may update `DRAFT` or `ACTIVE` Products. It cannot update ownership, Project, status,
+`currentReleaseId`, audit fields, Submission snapshots, or release data.
+
+The update condition includes Product ID, owner, and allowed lifecycle state. Product fields and the
+complete media replacement commit in one transaction using MVP last-write-wins behavior. Success
+returns `200 OK` with `ProductManagementOutput`.
+
+Route-specific failures:
+
+| Condition | Result |
+| --- | --- |
+| Product is missing, deleted, or cross-owner | `404 Error.ProductNotFound` |
+| Product is `SUSPENDED` or `ARCHIVED` | `409 Error.ProductNotEditable` |
+| Slug is already reserved by another Product | `409 Error.ProductSlugConflict` |
+| Media validation fails | `422 Error.ProductMediaInvalid` |
+| Caller is not an eligible active Publisher | Existing Publisher policy error |
+
+### 5.4 List Products for management
 
 ```http
 GET /api/v1/products?page=1&limit=10&status=DRAFT
@@ -325,6 +436,13 @@ Successful response: `200 OK`.
           "status": "ACTIVE"
         },
         "status": "DRAFT",
+        "name": "Daily Reward Collector",
+        "slug": "daily-reward-collector",
+        "shortDescription": "Collect daily rewards with basic Android actions.",
+        "description": "An editable Product draft.",
+        "usageInstructions": null,
+        "media": [],
+        "currentReleaseId": null,
         "statusReason": null,
         "suspendedAt": null,
         "createdAt": "2026-10-19T08:00:00.000Z",
@@ -350,7 +468,7 @@ type GetProductListOutput = {
 };
 ```
 
-### 5.4 Get Product detail for management
+### 5.5 Get Product detail for management
 
 ```http
 GET /api/v1/products/{productId}
@@ -385,6 +503,21 @@ Successful response: `200 OK`.
       "status": "ACTIVE"
     },
     "status": "DRAFT",
+    "name": "Daily Reward Collector",
+    "slug": "daily-reward-collector",
+    "shortDescription": "Collect daily rewards with basic Android actions.",
+    "description": "An editable Product draft.",
+    "usageInstructions": null,
+    "media": [
+      {
+        "id": "18ce7863-8a10-4be2-8f44-0b8a356ebf2a",
+        "staticId": "d31977c8-d7ec-4a5d-8784-f9ef230a64ef",
+        "type": "ICON",
+        "sortOrder": 0,
+        "altText": "Daily Reward Collector icon"
+      }
+    ],
+    "currentReleaseId": null,
     "statusReason": null,
     "suspendedAt": null,
     "createdAt": "2026-10-19T08:00:00.000Z",
@@ -395,12 +528,89 @@ Successful response: `200 OK`.
 ```
 
 The management response does not expose audit user IDs, soft-delete fields, workflow content,
-Publisher private data, Listing data, Submission data, or Release artifacts.
+Publisher private data, Submission snapshots, Static object keys, or Release artifacts.
 
 Missing, deleted, and cross-owner Products return `404 Error.ProductNotFound`. Invalid UUIDs return
 `422` before the service runs.
 
-### 5.5 Apply a Product lifecycle action
+### 5.6 Public Marketplace Product reads
+
+Public Marketplace reads use separate routes from management reads:
+
+```http
+GET /api/v1/marketplace/products?page=1&limit=20&q=reward
+GET /api/v1/marketplace/products/{productId}
+```
+
+The routes belong to `MarketplaceProductController`, use `@IsPublic()`, accept no Bearer token
+requirement, and have no Permission record or scope. They must not reuse the permission-scoped
+`GET /products` and `GET /products/:productId` controller methods.
+
+Eligibility is identical for list and detail. A public Product must satisfy all of these conditions:
+
+- Product is non-deleted and `ACTIVE`;
+- owner Publisher and User remain publicly eligible and non-deleted;
+- `currentReleaseId` resolves to a release belonging to the same Product;
+- current release is `PUBLISHED`, not disabled, and references an `APPROVED` Submission;
+- the response is projected from that Submission's immutable Product snapshot, not mutable Product
+  presentation fields.
+
+Reusable public shapes:
+
+```ts
+type PublicProductPublisherOutput = {
+  username: string;
+  displayName: string;
+};
+
+type PublicProductReleaseOutput = {
+  id: string; // UUID
+  version: string;
+  publishedAt: string;
+  minimumLauncherVersion: string;
+  minimumRuntimeVersion: string;
+};
+
+type PublicProductSummaryOutput = {
+  id: string; // stable Product UUID
+  name: string;
+  slug: string;
+  shortDescription: string;
+  publisher: PublicProductPublisherOutput;
+  currentRelease: PublicProductReleaseOutput;
+};
+
+type PublicProductDetailOutput = PublicProductSummaryOutput & {
+  description: string;
+  usageInstructions: string | null;
+};
+```
+
+List query:
+
+```ts
+type GetPublicProductListInput = {
+  page?: number; // positive integer, default 1
+  limit?: number; // positive integer, default 20
+  q?: string; // trimmed, 1..100 when present; basic name/description search
+};
+```
+
+List returns the global success envelope containing the existing pagination shape with
+`PublicProductSummaryOutput[]`. Default order is current release `publishedAt DESC`, then Product ID
+`DESC`. Unknown query parameters return `422`.
+
+Detail uses strict UUID `productId` and returns `PublicProductDetailOutput`. Missing Products and
+Products that fail any public eligibility condition both return `404 Error.ProductNotFound`; the
+route must not reveal draft, suspended, archived, blocked-Publisher, rejected, failed-build, or
+disabled-release state.
+
+Public media delivery is not part of this MVP API contract yet. These public responses must not
+expose `staticId`, private Static URLs, or R2 object keys. Product media remains available in
+Publisher/Admin management responses and immutable Submission snapshots until a separately reviewed
+public media-delivery contract is added.
+
+### 5.7 Apply a Product lifecycle action
 
 ```http
 PUT /api/v1/products/{productId}/lifecycle
@@ -518,17 +728,18 @@ Route-specific failures:
 | Invalid UUID, action, reason, or body shape | `422` validation error |
 | `OWN` caller is no longer an eligible active Publisher | Existing Publisher policy error |
 
-There is no Product rename/update, delete, restore, initial activation, or public Marketplace
-endpoint in this feature.
+There is no delete, restore, direct activation, or published-content mutation endpoint. Public reads
+are available only through the `@IsPublic()` Marketplace projection routes in section 5.6.
 
-### 5.6 Permission records and role assignment
+### 5.8 Permission records and role assignment
 
 Permission uniqueness follows the existing `(method, path, scope)` contract. The Product feature
 requires the following permission records; `null` means unrestricted scope.
 
 | Permission name | Module | Method | Stored path | Scope | Assigned roles |
 | --- | --- | --- | --- | --- | --- |
-| Create Product | Product | `POST` | `/api/v1/products` | `null` | `PUBLISHER`, `ADMIN` |
+| Create Product Draft | Product | `POST` | `/api/v1/products` | `null` | `PUBLISHER` |
+| Update Own Product Draft | Product | `PATCH` | `/api/v1/products/:productId` | `OWN` | `PUBLISHER` |
 | List Own Products | Product | `GET` | `/api/v1/products` | `OWN` | `CUSTOMER`, `PUBLISHER` |
 | List All Products | Product | `GET` | `/api/v1/products` | `null` | `ADMIN` |
 | Read Own Product | Product | `GET` | `/api/v1/products/:productId` | `OWN` | `CUSTOMER`, `PUBLISHER` |
@@ -539,16 +750,20 @@ requires the following permission records; `null` means unrestricted scope.
 No Product permission is assigned implicitly because a user has a Publisher account. Access still
 requires an active role containing the matching permission record. When multiple active roles grant
 the same route, unrestricted `null` takes precedence over `OWN` in the service access predicate.
+Public Marketplace routes are intentionally absent from this table because `@IsPublic()` bypasses
+Bearer authentication and permission resolution.
 
 ## 6. Authorization and ownership behavior
 
-- Create calls the existing `PublisherAccessPolicy.assertActivePublisher(userId)`. This requires an
-  active User, active non-deleted Publisher account, active Publisher role, and acceptance of the
-  current Publisher Terms.
-- After Publisher eligibility is resolved, create queries an active, non-deleted Project using both
-  `projectId` and the resolved `publisherAccountId`. Missing, archived, soft-deleted, and cross-owner
-  Projects are externally indistinguishable.
-- Create is an unscoped Publisher capability. Ownership is always derived server-side.
+- Product create and update call `PublisherAccessPolicy.assertActivePublisher(userId)`. This
+  requires an active User, active non-deleted Publisher account, active Publisher role, and
+  acceptance of current Publisher Terms.
+- Create resolves an active, non-deleted Project using both `projectId` and the resolved
+  `publisherAccountId`. Missing, archived, soft-deleted, and cross-owner Projects are externally
+  indistinguishable.
+- Product ownership is always derived from that Project. Create/update never accept a client-selected
+  `publisherAccountId`.
+- Create/update validate all submitted Static IDs against the same Publisher ownership boundary.
 - `OWN` list/detail reads resolve the caller's non-deleted Publisher account regardless of
   `ACTIVE`/`BLOCKED` status, following the existing Project read pattern. A blocked former Publisher
   may inspect owned Product history through Customer `OWN` read permission.
@@ -565,43 +780,66 @@ the same route, unrestricted `null` takes precedence over `OWN` in the service a
   enumeration.
 - `UserStatus.BANNED` remains denied by the existing authentication/authorization layer.
 
-The authoritative permission records and role assignments are defined in section 5.6. Permission
+The authoritative Product route permissions and role assignments are defined in section 5.8.
+Submission permissions are defined by the future Submission feature spec. Permission
 creation and role assignment use the existing permission APIs and must preserve every existing
 role-permission ID.
 
 ## 7. Repository, transaction, and concurrency contract
 
-- Product creation runs in one database transaction.
-- Resolve Publisher eligibility before opening the Product transaction unless the policy itself must
-  participate in a broader caller-owned transaction.
-- Within the transaction, lock or conditionally select the owned Project before creating Product.
-- Never trust a caller-supplied Publisher ID and never create a Product from an unrestricted Admin
-  path.
-- Concurrent create requests for the same Project are resolved by the database unique constraint.
-  After a unique collision, perform an ownership-safe lookup and return the existing non-archived
-  Product ID; return `Error.ProductArchived` for the archived match.
+- Product create locks or conditionally selects the owned Project and commits Product plus initial
+  ProductMedia in one transaction. The unique `Product.projectId` constraint resolves concurrent
+  create attempts.
+- Product update validates media in one set-based query and updates scalar fields plus the supplied
+  media replacement in one last-write-wins transaction.
+- Submission never creates Product. It locks the existing Product and exact Project Draft using the
+  documented Workflow Revision lock order, validates Product completeness, and freezes Product/media
+  plus Workflow Revision and release request snapshots.
+- The same Submission transaction creates the immutable Workflow Revision, Submission, and durable
+  scan outbox event. A failure rolls back all three without changing Product draft data.
+- Never trust caller-supplied Publisher IDs and never create or edit Product from Admin review.
+- A Product is eligible for Submission only when it matches the locked Project/Publisher and is
+  `DRAFT` or `ACTIVE`. `ARCHIVED` and `SUSPENDED` reject new Submission creation.
 - Product lifecycle actions and internal release activation use atomic conditional updates on the
   expected source status.
 - When a conditional mutation changes no row, make one authorization-safe read to distinguish
   idempotent completion, not found, and invalid lifecycle state without revealing cross-owner data.
 - Do not use a Redis distributed lock. Database uniqueness and conditional writes are the durable
   concurrency boundaries.
-- Do not query inside loops. Product list projections, including Project summaries, use a set-based
-  relation query.
-- Do not perform object-storage, queue, Runtime, or other network calls inside Product transactions.
+- Do not query inside loops. Product list/media projections and Static validation are set-based.
+- Do not perform object-storage, queue, Runtime, or other network calls inside Product transactions;
+  Product only links already uploaded Static records.
 
 ## 8. Internal integration contracts
 
-The future Submission module consumes Product through a narrow trusted read that verifies:
+The future Submission module consumes an existing Product draft. After locking and authorizing the
+Product, Project, and exact Project Draft, it calls a read-only snapshot contract inside the
+Submission transaction:
 
-- Product exists and is not soft-deleted;
-- Product belongs to the active submitting Publisher;
-- Product is not `ARCHIVED` or `SUSPENDED`;
-- Product references the submitted Project;
-- the selected Project remains active and submission-eligible.
+```ts
+getSnapshotForSubmission({
+  productId,
+  projectId,
+  publisherAccountId,
+}): Promise<{
+  productSnapshot: ProductSubmissionSnapshot;
+}>;
+```
+
+The method verifies:
+
+- Product is non-deleted and belongs to the active submitting Publisher;
+- Product references the selected locked Project and is `DRAFT` or `ACTIVE`;
+- required publishing fields are complete and slug remains valid;
+- every active ProductMedia reference remains an eligible completed Static image.
+
+The snapshot contains Product identity, presentation fields, and ordered media metadata. It contains
+no private Static object key or mutable URL. The enclosing transaction freezes this Product snapshot,
+the immutable Workflow Revision, review metadata, and Release request. Submission creation does not
+mutate Product draft fields or `currentReleaseId`.
 
 The future Product Release module owns release persistence and calls Product lifecycle operations in
-the same transaction:
+the publication transaction:
 
 ```ts
 markActiveAfterPublishedRelease({
@@ -612,8 +850,17 @@ markActiveAfterPublishedRelease({
 ```
 
 That operation must reject `ARCHIVED` or `SUSPENDED` Products. The Product Release feature will add
-`currentReleaseId`, verify that the release belongs to the same Product and is `PUBLISHED`, then set
-both `Product.status = ACTIVE` and `Product.currentReleaseId = releaseId` atomically.
+`currentReleaseId` and verify that the release belongs to the same Product and is `PUBLISHED`. The
+same publication transaction must:
+
+1. Verify that the release references an approved Submission containing the Product snapshot.
+2. Set `Product.currentReleaseId = releaseId`.
+3. Transition a first-release Product from `DRAFT` to `ACTIVE`, or keep an update Product `ACTIVE`.
+4. Commit only after all official store/release fields are consistent.
+
+Admin approval alone changes Submission review state and schedules/allows the release pipeline. If
+package construction or publication fails, the Product remains `DRAFT` for a first release, or keeps
+its previous approved Product snapshot and current release for an update.
 
 Catalog, Offer, Entitlement, and Download Authorization modules must not infer availability from
 Product status alone. Their queries must also evaluate the current release and their own domain
@@ -625,7 +872,10 @@ rules.
 | --------------------------------------------------------------------- | ------------------------------------------- |
 | Missing, soft-deleted, or cross-owner Product                         | `404 Error.ProductNotFound`                 |
 | Missing, archived, soft-deleted, or cross-owner Project during create | `404 Error.ProjectNotFound`                 |
-| Existing archived Product for the selected Project                    | `409 Error.ProductArchived`                 |
+| Duplicate Product slug                                                | `409 Error.ProductSlugConflict`             |
+| Invalid or cross-owner Product media                                  | `422 Error.ProductMediaInvalid`             |
+| Archived Product selected for update/submission                       | `409 Error.ProductArchived`                 |
+| Suspended Product selected for update/submission                      | `409 Error.ProductSuspended`                |
 | `OWN` lifecycle caller requests `SUSPEND` or `REACTIVATE`              | `403 Error.ProductLifecycleActionDenied`    |
 | Archive requested for `ACTIVE` or `SUSPENDED` Product                 | `409 Error.ProductCannotBeArchived`         |
 | Suspend requested for non-`ACTIVE` Product                            | `409 Error.ProductCannotBeSuspended`        |
@@ -641,7 +891,8 @@ snapshots, package identifiers, or release secrets.
 
 ## 10. Privacy, logging, and operational behavior
 
-- Do not add routine success logs for Product create, list, detail, or lifecycle actions.
+- Do not add routine success logs for Product create, draft update, list, detail, or lifecycle
+  actions. Centralized request logging and audit columns cover normal operations.
 - Centralized request/error logging covers expected domain failures.
 - Admin suspension/reactivation may log Product ID, actor ID, old/new status, and a stable action
   code. Do not log the free-text reason; store it only in Product and the future Audit Log.
@@ -657,28 +908,32 @@ The feature is conformant when the following behaviors are demonstrated:
 
 | Area             | Required behavior                                                                                                     |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------- |
-| Identity         | Exactly one immutable Product identity exists per Project under concurrent creation.                                  |
+| Identity         | Exactly one Product is created by its Publisher for a Project before Submission.                                      |
 | Ownership        | Product ownership always equals Project ownership and cannot be supplied or changed by clients.                       |
-| Idempotency      | Repeated create returns the existing non-archived Product; repeating an action in its idempotent state succeeds.       |
-| Publisher policy | Only a currently qualified Publisher can create or archive an owned draft Product.                                    |
+| Draft authoring  | Product text and ordered Static-backed media save together with MVP last-write-wins behavior.                         |
+| Snapshot         | Submission locks the current Product and freezes its fields, media, Workflow Revision, and release request.           |
+| Idempotency      | Repeated Product creation resolves the existing Product; lifecycle idempotency rules remain stable.                   |
+| Publisher policy | Only a currently qualified Publisher can create/update Product, submit it, or archive an owned draft.                |
 | Read access      | Owner `OWN` and Admin unrestricted reads are isolated; cross-owner access is indistinguishable from not found.        |
+| Public access    | `@IsPublic()` Marketplace routes return only eligible `ACTIVE` Products from their current approved release snapshot. |
 | Lifecycle        | Only the approved transitions occur; `ARCHIVED` is terminal and suspension fields remain consistent.                  |
 | Release boundary | No Product becomes `ACTIVE` without a successfully published Product Release transaction.                             |
+| Review boundary  | Rejected or failed updates never replace the approved snapshot behind the current Product Release.                   |
 | Project boundary | Archived Project does not erase Product history, but cannot create a new Product or support a future Submission.      |
-| Data exposure    | Management responses contain identity/lifecycle data and Project summary only.                                        |
+| Data exposure    | Management responses expose draft fields and Static IDs, never object keys, private URLs, or workflow content.        |
 | Performance      | Lists and relation projections are set-based, paginated, deterministically ordered, and contain no per-row queries.   |
-| Security         | No client can select another Publisher, enumerate cross-owner records, or mutate status through a generic update API. |
+| Security         | No client can select another Publisher, link cross-owner media, enumerate records, or mutate lifecycle via PATCH.     |
 | Operations       | Expected mutations use database constraints/conditional writes and add no Redis lock or storage/network call.         |
 
 ## 12. Deferred features
 
-- Product Listing and its editable presentation metadata.
-- Category, Tag, and featured placement.
-- Product media and all Asset-related relations.
+- Category, Tag, ProductTag, featured placement, required-app classification, and connector taxonomy.
+- General Asset-backed Product media, videos, and large-file/presigned upload flows.
+- Public Marketplace delivery of approved Product images.
 - Presigned upload/download URLs.
 - Submission, automated scan, review, and Workflow Revision orchestration.
 - Product Release persistence, `currentReleaseId`, package creation, encryption, and integrity data.
-- Public catalog/search APIs.
+- Advanced catalog ranking, recommendations, and full-text search infrastructure.
 - Product Offer, acquisition, entitlement, order, payment, download authorization, and execution
   authorization.
 - Product transfer between Publishers or Projects.
