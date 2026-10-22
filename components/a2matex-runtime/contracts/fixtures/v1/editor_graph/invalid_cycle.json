@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "entryNodeId": "start_01",
+  "nodes": [
+    {
+      "id": "start_01",
+      "type": "flow.start",
+      "config": {},
+      "editor": {
+        "x": 0,
+        "y": 0
+      },
+      "bindings": {},
+      "errorPolicy": "STOP"
+    },
+    {
+      "id": "delay_01",
+      "type": "flow.delay",
+      "config": {},
+      "editor": {
+        "x": 240,
+        "y": 0
+      },
+      "bindings": {
+        "durationMs": {
+          "kind": "constant",
+          "value": 100
+        }
+      },
+      "errorPolicy": "ERROR_BRANCH"
+    },
+    {
+      "id": "delay_02",
+      "type": "flow.delay",
+      "config": {},
+      "editor": {
+        "x": 480,
+        "y": 0
+      },
+      "bindings": {
+        "durationMs": {
+          "kind": "constant",
+          "value": 100
+        }
+      },
+      "errorPolicy": "ERROR_BRANCH"
+    },
+    {
+      "id": "end_01",
+      "type": "flow.end",
+      "config": {},
+      "editor": {
+        "x": 720,
+        "y": 0
+      },
+      "bindings": {},
+      "errorPolicy": "STOP"
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge_start_delay",
+      "sourceNodeId": "start_01",
+      "sourcePort": "success",
+      "targetNodeId": "delay_01"
+    },
+    {
+      "id": "edge_delay_01_delay_02",
+      "sourceNodeId": "delay_01",
+      "sourcePort": "success",
+      "targetNodeId": "delay_02"
+    },
+    {
+      "id": "edge_delay_01_end",
+      "sourceNodeId": "delay_01",
+      "sourcePort": "error",
+      "targetNodeId": "end_01"
+    },
+    {
+      "id": "edge_delay_02_end",
+      "sourceNodeId": "delay_02",
+      "sourcePort": "success",
+      "targetNodeId": "end_01"
+    },
+    {
+      "id": "edge_delay_02_delay_01",
+      "sourceNodeId": "delay_02",
+      "sourcePort": "error",
+      "targetNodeId": "delay_01"
+    }
+  ]
+}

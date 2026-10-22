@@ -1,6 +1,11 @@
 
 # 28. Hướng triển khai theo giai đoạn
 
+> **Historical exploration:** This document is not an implementation contract.
+> The accepted decisions in [`phases/phase_a.md`](./phases/phase_a.md) and the
+> reorganized [`phases/plan.md`](./phases/plan.md) supersede conflicting details
+> below.
+
 ## Giai đoạn 1 — Technical spike
 
 Mục tiêu: chứng minh có thể điều khiển nhiều LDPlayer.

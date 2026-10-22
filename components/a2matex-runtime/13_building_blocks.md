@@ -1,6 +1,10 @@
 
 # 30. Kiến trúc MVP
 
+> **Historical exploration:** This document is not an implementation contract.
+> The accepted decisions in [`phases/phase_a.md`](./phases/phase_a.md) supersede
+> conflicting transport, persistence, device, and execution details below.
+
 ```mermaid
 flowchart TB
     CLIENT["Studio / Launcher"]

@@ -56,9 +56,9 @@ Studio chỉ lưu và đồng bộ project. Studio không gửi Product Submissi
 
 ## 1.3. Product, submission và review
 
-- [ ] **Product Module** — product identity ổn định và `PublisherAccount` ownership.
-- [ ] **Product Listing Module** — name, slug, descriptions, media, visibility và current release reference.
-- [ ] **Taxonomy Module** — category, tag và featured placement ở mức tối thiểu cho MVP.
+- [ ] **Product Module** — Publisher-owned editable aggregate: identity, Project link, name, slug,
+      descriptions, usage instructions, ordered Static-backed image media, lifecycle
+      và current release reference.
 - [ ] **Submission Module** — nhận project được chọn trên Web, tạo immutable Workflow Revision và tạo Submission tham chiếu revision đó.
 - [ ] **Automated Scanner Service** — capability, graph/IR, node catalog contract/hash, code node, asset và policy scan.
 - [ ] **Review Module** — scan result, admin feedback, request changes, approve và reject.
@@ -66,19 +66,26 @@ Studio chỉ lưu và đồng bộ project. Studio không gửi Product Submissi
 - [ ] **Package Builder Service** — chuẩn hóa Runtime IR, tạo manifest và đóng gói `.a2m`.
 - [ ] **Encryption/Key Service** — mã hóa workflow payload và quản lý release key.
 - [ ] **Artifact Integrity Service** — tạo package hash, payload hash và metadata để Launcher/Runtime verify.
-- [ ] **Catalog/Search Module** — public listing, product detail, publisher page, category và tìm kiếm cơ bản.
+- [ ] **Catalog/Search Module** — `@IsPublic()` list/detail cho Product `ACTIVE`, đọc Product snapshot
+      của current published release, publisher page và tìm kiếm text cơ bản.
+
+Category, Tag, ProductTag, required-app classification và connector taxonomy để sau MVP. Node hiện
+tại chỉ có Android action cơ bản; chưa có taxonomy ổn định đáng để thêm table/API quản trị.
 
 Luồng tạo submission trên Web:
 
 ```text
 Publisher mở Publisher Portal
 → chọn project đã được Studio lưu trên Backend
+→ tạo/chọn Product draft của project
+→ lưu Product text và ordered image media bằng Static IDs
 → xem project summary và local validation/test summary mang tính tham khảo
 → tự review project theo checklist
-→ nhập/chọn Product data, Listing data và Release metadata
+→ nhập Release metadata
 → xác nhận submit
+→ Backend lock existing Product row
 → Backend tạo immutable Workflow Revision từ đúng draft version
-→ Backend tạo Submission tham chiếu revision
+→ Backend tạo Submission snapshot Product/media, revision và release request
 → Backend đẩy background job validate Workflow Revision
 → lưu cloud validation result; chỉ tiếp tục scan/build khi pipeline cho phép
 ```
@@ -125,10 +132,9 @@ Web Marketplace Frontend không sở hữu business rule. Frontend hiển thị 
 
 ## 2.1. Public Marketplace
 
-- [ ] Product listing và search cơ bản.
+- [ ] Product catalog và text search cơ bản.
 - [ ] Product detail, offer và compatibility.
 - [ ] Public publisher profile.
-- [ ] Category cơ bản.
 - [ ] Download active Launcher release.
 - [ ] Login/register entry points.
 
@@ -146,11 +152,11 @@ Web Marketplace Frontend không sở hữu business rule. Frontend hiển thị 
 - [ ] Publisher status/blocked reason.
 - [ ] Danh sách project đã được Studio lưu lên Backend.
 - [ ] Project summary và self-review checklist.
-- [ ] Tạo/chọn Product và nhập Listing data.
+- [ ] Tạo/chọn Product; nhập Product text và chọn ordered image media đã upload qua Static/R2.
 - [ ] Nhập release version, changelog và compatibility.
 - [ ] Review toàn bộ submission data trước khi gửi.
 - [ ] Submission history, scan result và admin feedback.
-- [ ] Product listing và release history.
+- [ ] Product draft và release history.
 
 ## 2.4. Admin Portal
 
@@ -159,7 +165,6 @@ Web Marketplace Frontend không sở hữu business rule. Frontend hiển thị 
 - [ ] Scan findings, feedback, request changes, approve và reject.
 - [ ] Product/release suspend hoặc disable.
 - [ ] Launcher Release list, detail, create, update và activate.
-- [ ] Category/tag management tối thiểu.
 - [ ] Manual entitlement grant/revoke.
 - [ ] Product report resolution.
 - [ ] Audit log view cơ bản.
@@ -254,7 +259,7 @@ Customer
 → Studio save/sync project và assets lên Backend
 → Publisher chọn project trên Web
 → tự review project và local validation/test summary
-→ nhập Product, Listing và Release data
+→ nhập Product draft và Release data
 → submit
 → Backend tạo immutable Workflow Revision và Submission
 → background cloud validation
@@ -289,7 +294,7 @@ Customer xem/nhận/mua Product trên Web
 - [ ] Project draft version/conflict contract.
 - [ ] Workflow Revision immutable snapshot contract.
 - [ ] Submission payload và self-review checklist contract.
-- [ ] Product/Listing/Release metadata contract.
+- [ ] Product snapshot/Release metadata contract.
 - [ ] `.a2m` manifest, payload hash và package hash contract.
 - [ ] Minimum Studio/Launcher/Runtime compatibility rules.
 - [ ] Launcher ↔ Runtime local API contract.
@@ -308,7 +313,7 @@ Database ownership, entity relation, constraint, indexes, retention và detailed
 3. Node Catalog contract tối thiểu. **Đã hoàn thành ở Backend.**
 4. Project cloud container + ownership + archive lifecycle.
 5. Project Draft + Asset upload + Studio save/sync.
-6. Product identity/listing tối thiểu + Web project selection/self-review.
+6. Product aggregate/media tối thiểu + Web project selection/self-review.
 7. Workflow Revision + Submission + scan/validation.
 8. Admin Review + request changes/approve/reject.
 9. ProductRelease + package/encryption + publish.

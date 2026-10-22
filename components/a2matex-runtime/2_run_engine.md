@@ -1,6 +1,10 @@
 
 # 2. Runtime Agent chạy như thế nào?
 
+> **Historical exploration:** This document is not an implementation contract.
+> The accepted decisions in [`phases/phase_a.md`](./phases/phase_a.md) supersede
+> conflicting transport, persistence, device, and execution details below.
+
 Runtime Agent nên là một executable Go độc lập:
 
 ```text

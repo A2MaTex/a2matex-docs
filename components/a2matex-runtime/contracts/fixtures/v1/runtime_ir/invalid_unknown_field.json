@@ -1,0 +1,52 @@
+{
+  "formatVersion": 1,
+  "minimumRuntimeVersion": "0.1.0",
+  "metadata": {
+    "sourceGraphSchemaVersion": 1
+  },
+  "entryNodeId": "start_01",
+  "name": "unknown Runtime IR field",
+  "inputSchema": {
+    "type": "object",
+    "properties": {},
+    "required": [],
+    "additionalProperties": false
+  },
+  "nodes": [
+    {
+      "id": "start_01",
+      "type": "flow.start",
+      "runtimeHandler": "flow.start",
+      "config": {},
+      "inputs": {},
+      "timeoutMs": 1000,
+      "retryPolicy": {
+        "maxAttempts": 1,
+        "delayMs": 0
+      },
+      "errorPolicy": "STOP"
+    },
+    {
+      "id": "end_01",
+      "type": "flow.end",
+      "runtimeHandler": "flow.end",
+      "config": {},
+      "inputs": {},
+      "timeoutMs": 1000,
+      "retryPolicy": {
+        "maxAttempts": 1,
+        "delayMs": 0
+      },
+      "errorPolicy": "STOP"
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge_start_end",
+      "sourceNodeId": "start_01",
+      "sourcePort": "success",
+      "targetNodeId": "end_01"
+    }
+  ],
+  "requiredCapabilities": []
+}

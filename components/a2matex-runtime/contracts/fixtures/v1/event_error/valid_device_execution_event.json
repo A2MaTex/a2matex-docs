@@ -1,0 +1,11 @@
+{
+  "cursor": "2",
+  "type": "DEVICE_EXECUTION_STATE_CHANGED",
+  "occurredAt": "2026-10-22T08:00:00.001Z",
+  "runGroupId": "10000000-0000-4000-8000-000000000001",
+  "deviceExecutionId": "10000000-0000-4000-8000-000000000002",
+  "payload": {
+    "status": "RUNNING",
+    "nextNodeId": "start_01"
+  }
+}

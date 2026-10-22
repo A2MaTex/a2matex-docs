@@ -1,5 +1,9 @@
 # 20. Agent nhận dữ liệu từ LDPlayer được không?
 
+> **Historical exploration:** This document is not an implementation contract.
+> The accepted decisions in [`phases/phase_a.md`](./phases/phase_a.md) supersede
+> conflicting transport, persistence, device, event, and error details below.
+
 Có, nhưng phải hiểu rằng LDPlayer không tự động “gửi toàn bộ trạng thái app” cho Agent.
 
 Agent có thể lấy dữ liệu qua những cơ chế sau:
