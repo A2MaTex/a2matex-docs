@@ -21,9 +21,10 @@ Entitlement xác định:
 
 - Customer được sử dụng product nào.
 - Thời gian hiệu lực.
-- Số Windows installation được đăng ký.
-- Số Android device được chạy đồng thời.
 - Quyền tải và cập nhật release.
+
+MVP không giới hạn Windows installation, Android device hoặc concurrent
+execution. Runtime tự bound/queue công việc theo tài nguyên local.
 
 ## 8. Download package
 
@@ -46,11 +47,12 @@ Màn hình My Products gồm:
 - Product name và publisher.
 - Current release và version đã cài.
 - Entitlement status và expiration date.
-- Max concurrent devices.
 - Nút `Open in Launcher`.
 - Nút `View details` và `Report`.
 
-Link chỉ chứa định danh sản phẩm, không chứa access token, lease token hoặc workflow key. Launcher tự kiểm tra user session trước khi download hoặc chạy.
+Link chỉ chứa định danh sản phẩm, không chứa access token, signed lease, key
+envelope hoặc workflow key. Launcher tự kiểm tra user session trước khi download
+hoặc chạy.
 
 Website có thể mở Launcher bằng custom URL protocol:
 

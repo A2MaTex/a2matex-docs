@@ -1,4 +1,4 @@
-# Runtime Contract Fixtures v1
+# Runtime Contract Fixtures
 
 **Status:** Accepted
 
@@ -43,7 +43,8 @@ The canonical package is:
 ```text
 contracts/
 ├── runtime_ir_v1.example.json
-└── fixtures/v1/
+├── fixtures/v1/              # historical accepted set
+└── fixtures/v2/              # current set
     ├── manifest.json
     ├── editor_graph/
     ├── runtime_ir/
@@ -51,7 +52,11 @@ contracts/
     └── local_api/
 ```
 
-[`manifest.json`](./fixtures/v1/manifest.json) is the machine-readable index.
+[`fixtures/v2/manifest.json`](./fixtures/v2/manifest.json) is the current
+machine-readable index. Fixture set v2 removes the redundant fixed `mode` from
+the A7 runtime-information response; v1 remains unchanged for historical
+consumers.
+
 All paths in it are relative to the `contracts` directory. Every payload has a
 SHA-256 digest so a vendored copy cannot be reformatted or changed silently.
 
@@ -61,7 +66,7 @@ tests are implemented. They must not depend on a sibling checkout path, bundle
 these fixtures in a release binary, or create implementation-specific edited
 copies under the same fixture ID.
 
-The `v1` directory is immutable after approval. A changed payload, digest, or
+Every accepted version directory is immutable. A changed payload, digest, or
 expectation creates a new fixture-set directory and version; it does not change
 Runtime IR `formatVersion`, Local API `/v1`, or a node-handler version.
 

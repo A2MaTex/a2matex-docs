@@ -1,0 +1,13 @@
+{
+  "cursor": "4",
+  "type": "NODE_RETRY_SCHEDULED",
+  "occurredAt": "2026-10-22T08:00:00.003Z",
+  "runGroupId": "10000000-0000-4000-8000-000000000001",
+  "deviceExecutionId": "10000000-0000-4000-8000-000000000002",
+  "nodeAttemptId": "10000000-0000-4000-8000-000000000003",
+  "nodeId": "tap_01",
+  "payload": {
+    "nextAttemptNumber": 2,
+    "delayMs": 1000
+  }
+}

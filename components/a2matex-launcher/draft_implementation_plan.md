@@ -17,7 +17,7 @@
 - Reconnect vào execution đang chạy.
 - Realtime execution monitor khi Launcher đang mở.
 - Pause/resume/cancel execution.
-- Hiển thị trạng thái `PAUSED_LICENSE`.
+- Hiển thị `PAUSED` với reason `AUTHORIZATION_EXPIRED` và hướng dẫn reauthorize.
 - Local settings.
 - Run summary.
 - Đóng Runtime nếu không còn execution hoạt động.

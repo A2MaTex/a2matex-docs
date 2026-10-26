@@ -10,13 +10,21 @@ Trạng thái entitlement cho MVP:
 
 Trước khi chạy, Launcher phải request execution lease.
 
-Ví dụ:
+MVP chỉ authorize customer và đúng Product Release. Customer được phép chạy trên
+bất kỳ số máy hoặc Android device nào; Backend không nhận device ID/count, không
+giới hạn active lease và không áp dụng concurrent-execution policy. Giới hạn tài
+nguyên cục bộ, nếu có, thuộc Runtime scheduler và không phải license rule.
+
+Request authorization gồm:
 
 ```json
 {
   "productId": "product_01",
   "releaseId": "release_01",
-  "deviceIds": ["ldplayer_0", "ldplayer_1"]
+  "packageHash": "sha256:...",
+  "runtimeSessionId": "runtime_session_01",
+  "runtimePublicKey": "base64-spki...",
+  "runtimeKeyThumbprint": "sha256:..."
 }
 ```
 
@@ -26,26 +34,30 @@ Server kiểm tra:
 - Product không bị suspend.
 - Release vẫn được phép chạy.
 - Customer không bị ban.
-- Device không bị disable.
-- Không vượt giới hạn device.
-- Không vượt số execution đồng thời.
+- Package hash khớp immutable Product Release.
+- Runtime public key và thumbprint hợp lệ.
 
-Backend trả `leaseToken`. Launcher giữ token trong RAM và chuyển xuống Runtime. Runtime gọi Backend để validate token và nhận:
+Backend trả signed execution lease và content-key envelope được mã hóa riêng cho
+Runtime session. Launcher giữ và chuyển chúng trong RAM nhưng không nhận plaintext
+workflow key. Runtime verify Backend signature, session binding, package hash và
+envelope trước khi giải mã Runtime IR trong memory.
 
-- Product/release được phép chạy.
-- `maxConcurrentDevices`.
-- `expiresAt`.
-- Workflow decryption key tạm thời.
+Lease có `refreshAfter` và `expiresAt`. Launcher renew từ `refreshAfter`; Runtime
+tiếp tục chạy bằng lease hiện tại cho đến hard expiry. Renew thành công trước
+expiry chỉ thay lease, không cần giải mã lại workflow.
 
-Runtime cache kết quả trong RAM. Mạng gián đoạn ngắn không làm dừng workflow; Runtime chỉ chuyển `PAUSED_LICENSE` khi lease thực sự hết hạn và không thể renew.
+Nếu hard expiry xảy ra, Runtime không bắt đầu node mới, commit safe checkpoint,
+chuyển execution sang `PAUSED` với reason `AUTHORIZATION_EXPIRED`, rồi xóa
+plaintext workflow và transient key material. Resume yêu cầu Runtime session key
+pair, signed lease và key envelope mới.
 
-## 11. Installation, revoke và suspend
+Contract đầy đủ nằm tại
+[Production Execution Authorization v1](../../specifications/production_execution_authorization_v1.md).
 
-Backend quản lý Windows installation, không quản lý từng LDPlayer instance.
+## 11. Revoke và suspend
 
 | Hành động            | Phạm vi                                   |
 | -------------------- | ----------------------------------------- |
-| Disable installation | Chặn một máy Windows đăng ký với customer |
 | Revoke entitlement   | Chặn một customer dùng một product        |
 | Disable release      | Chặn một release cụ thể                   |
 | Suspend product      | Chặn toàn bộ product                      |
@@ -58,6 +70,7 @@ Khi revoke hoặc suspend trong MVP:
 - Package có thể vẫn còn trên máy customer.
 - Execution hiện tại được chạy đến khi lease hết hạn.
 - Runtime pause trước khi bắt đầu node tiếp theo.
+- Runtime xóa decrypted workflow và transient keys tại authorization boundary.
 - Customer vẫn xem được order history.
 - Admin phải nhập lý do và hệ thống ghi audit log.
 

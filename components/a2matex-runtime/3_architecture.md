@@ -45,7 +45,7 @@ flowchart TB
 | State Store | Lưu execution, node result và checkpoint |
 | Event Bus | Phát progress/log cho UI |
 | Artifact Store | Lưu screenshot, UI dump, debug output |
-| Policy Engine | Capability, quota, Runtime mode, lease |
+| Policy Engine | Capability compatibility, local resource bounds, Runtime mode, lease deadline |
 
 
 # 5. Cấu trúc repo đề xuất

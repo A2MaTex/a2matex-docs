@@ -43,14 +43,19 @@ sequenceDiagram
     participant B as Backend
     participant R as Runtime Agent
 
-    U->>L: Chọn sản phẩm và thiết bị
+    U->>L: Chọn sản phẩm, thiết bị và Run
     L->>L: Validate input/profile
-    L->>B: Request execution lease
-    B-->>L: Execution lease
-    L->>R: Start run group
+    L->>R: Prepare Product Run authorization session
+    R-->>L: Session ID, public key, thumbprint
+    L->>B: Request authorization for Release/package/session
+    B-->>L: Signed lease + Runtime-bound key envelope
+    L->>R: Start encrypted Product Run
     R-->>L: Run group created
     R-->>L: Execution events
-    L->>B: Renew lease
+    R-->>L: AUTHORIZATION_RENEWAL_REQUIRED
+    L->>B: Renew signed lease
+    B-->>L: New lease with later expiry
+    L->>R: Submit renewed lease
     R-->>L: Final results
 ```
 
@@ -63,11 +68,8 @@ Start request:
     "releaseId": "release_03",
     "packagePath": "packages/product_01/release_03/package.enc"
   },
-  "lease": {},
-  "executionPolicy": {
-    "maxConcurrentDevices": 3,
-    "failurePolicy": "CONTINUE_OTHER_DEVICES"
-  },
+  "lease": "signed-lease",
+  "keyEnvelope": {},
   "devicePlans": [
     {
       "deviceId": "ldplayer:0",
@@ -78,6 +80,11 @@ Start request:
   ]
 }
 ```
+
+Backend authorization is independent of device count and machine count.
+Runtime may queue selected devices according to local hardware capacity. The
+signed lease and key envelope follow
+[Production Execution Authorization v1](../../specifications/production_execution_authorization_v1.md).
 
 Runtime trả:
 

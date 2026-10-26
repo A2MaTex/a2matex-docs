@@ -19,7 +19,7 @@ MVP ưu tiên free acquisition và admin manual grant. Schema Order/Payment đư
 
 ### Trách nhiệm
 
-`ProductOffer` mô tả cách customer nhận quyền sử dụng và snapshot limit sẽ cấp cho Entitlement.
+`ProductOffer` mô tả cách customer nhận quyền sử dụng và commercial terms sẽ snapshot vào Entitlement. MVP không bán machine, device hoặc concurrency limit.
 
 ```sql
 CREATE TYPE "ProductOfferType" AS ENUM (
@@ -42,7 +42,6 @@ CREATE TABLE "ProductOffer" (
     currency CHAR(3),
     "priceMinor" BIGINT CHECK ("priceMinor" IS NULL OR "priceMinor" >= 0),
     "durationDays" INTEGER CHECK ("durationDays" IS NULL OR "durationDays" > 0),
-    "maxConcurrentDevices" INTEGER NOT NULL DEFAULT 1 CHECK ("maxConcurrentDevices" > 0),
 
     -- Mock JSON:
     -- {
@@ -76,7 +75,7 @@ WHERE "deletedAt" IS NULL;
 
 ### Trách nhiệm
 
-`Order` lưu commercial transaction. `OrderItem` snapshot Offer để lịch sử không thay đổi khi publisher sửa giá/limit. `PaymentTransaction` lưu normalized payment attempt, không lưu secret/payment credential.
+`Order` lưu commercial transaction. `OrderItem` snapshot Offer để lịch sử không thay đổi khi publisher sửa giá hoặc thời hạn. `PaymentTransaction` lưu normalized payment attempt, không lưu secret/payment credential.
 
 ```sql
 CREATE TYPE "OrderStatus" AS ENUM (
@@ -113,8 +112,7 @@ CREATE TABLE "OrderItem" (
     --   "offerType": "ONE_TIME",
     --   "currency": "USD",
     --   "priceMinor": 999,
-    --   "durationDays": 30,
-    --   "maxConcurrentDevices": 3
+    --   "durationDays": 30
     -- }
     "offerSnapshot" JSONB NOT NULL,
 
@@ -166,7 +164,7 @@ Free acquisition không bắt buộc tạo PaymentTransaction. Có thể tạo O
 
 ### Trách nhiệm
 
-`Entitlement` là quyền dài hạn của một User đối với một Product. Limit được snapshot khi grant để Offer thay đổi không âm thầm thay đổi quyền đã cấp.
+`Entitlement` là quyền dài hạn của một User đối với một Product. Commercial terms được snapshot khi grant để Offer thay đổi không âm thầm thay đổi quyền đã cấp. Entitlement không giới hạn machine, device hoặc concurrent execution.
 
 ```sql
 CREATE TYPE "EntitlementStatus" AS ENUM (
@@ -191,7 +189,6 @@ CREATE TABLE "Entitlement" (
     "grantSource" "EntitlementGrantSource" NOT NULL,
     "startsAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
     "expiresAt" TIMESTAMPTZ,
-    "maxConcurrentDevices" INTEGER NOT NULL CHECK ("maxConcurrentDevices" > 0),
 
     -- Mock JSON: immutable snapshot of effective usage rights.
     -- {
@@ -230,7 +227,14 @@ Expiration time vẫn phải được kiểm tra bằng `expiresAt > now()`; par
 
 ### Trách nhiệm
 
-`ExecutionLease` là authorization tạm thời cho một production execution của customer. Backend không gắn lease với Launcher installation và chỉ lưu token hash.
+`ExecutionLease` là authorization tạm thời cho một production execution của
+customer. Backend không gắn lease với installation/device và không giới hạn số
+lease đồng thời. Mỗi row là một lease family; Backend rotate signed lease ID và
+sequence trên cùng row khi renew. Signed token, key envelope và plaintext key
+không được lưu trong PostgreSQL.
+
+Trong signed claims, row `id` là `leaseFamilyId`, còn `currentLeaseId` là
+`leaseId` hiện tại.
 
 ```sql
 CREATE TYPE "ExecutionLeaseStatus" AS ENUM (
@@ -247,34 +251,38 @@ CREATE TABLE "ExecutionLease" (
     "customerId" UUID NOT NULL REFERENCES "User" (id),
     "productId" UUID NOT NULL REFERENCES "Product" (id),
     "productReleaseId" UUID NOT NULL REFERENCES "ProductRelease" (id),
-    "tokenHash" TEXT NOT NULL UNIQUE,
+    "packageHash" TEXT NOT NULL,
+    "runtimeSessionId" UUID NOT NULL,
+    "runtimeKeyThumbprint" TEXT NOT NULL,
+    "currentLeaseId" UUID NOT NULL UNIQUE DEFAULT gen_random_uuid(),
+    sequence INTEGER NOT NULL DEFAULT 1 CHECK (sequence > 0),
     status "ExecutionLeaseStatus" NOT NULL DEFAULT 'ACTIVE',
-    "requestedDeviceCount" INTEGER NOT NULL CHECK ("requestedDeviceCount" > 0),
-    "maxConcurrentDevices" INTEGER NOT NULL CHECK ("maxConcurrentDevices" > 0),
 
-    -- Mock JSON: snapshot of authorization decision, never contains workflow key.
+    -- Mock JSON: authorization decision snapshot; never contains keys/tokens.
     -- {
     --   "schemaVersion": "1.0",
     --   "entitlementStatus": "ACTIVE",
     --   "productStatus": "ACTIVE",
     --   "releaseStatus": "PUBLISHED",
-    --   "capabilities": ["android.device.control"]
+    --   "packageHash": "sha256:..."
     -- }
     "grantSnapshot" JSONB NOT NULL,
 
     "issuedAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+    "notBefore" TIMESTAMPTZ NOT NULL,
+    "refreshAfter" TIMESTAMPTZ NOT NULL,
     "expiresAt" TIMESTAMPTZ NOT NULL,
-    "lastValidatedAt" TIMESTAMPTZ,
     "renewedAt" TIMESTAMPTZ,
-    "rotationCount" INTEGER NOT NULL DEFAULT 0 CHECK ("rotationCount" >= 0),
     "revokedAt" TIMESTAMPTZ,
     "revokedReason" TEXT,
     "completedAt" TIMESTAMPTZ,
     "updatedAt" TIMESTAMPTZ,
 
-    CONSTRAINT "ExecutionLease_period_check" CHECK ("expiresAt" > "issuedAt"),
-    CONSTRAINT "ExecutionLease_device_limit_check"
-        CHECK ("requestedDeviceCount" <= "maxConcurrentDevices"),
+    CONSTRAINT "ExecutionLease_period_check" CHECK (
+        "issuedAt" <= "notBefore"
+        AND "notBefore" < "refreshAfter"
+        AND "refreshAfter" < "expiresAt"
+    ),
     CONSTRAINT "ExecutionLease_grantSnapshot_object_check"
         CHECK (jsonb_typeof("grantSnapshot") = 'object'),
     CONSTRAINT "ExecutionLease_revoked_fields_check" CHECK (
@@ -289,7 +297,12 @@ WHERE status = 'ACTIVE';
 
 ```
 
-Issue/renew lease phải serialize concurrency decision bằng transaction lock hoặc distributed lock. Runtime receives plaintext lease token and workflow key only in memory; neither plaintext value is stored here.
+Issue/renew phải update `currentLeaseId`, `sequence`, `refreshAfter` và
+`expiresAt` atomically; renew dùng row lock/idempotency để không cấp hai sequence
+khác nhau cho cùng request. Backend signs claims from this row and wraps the
+release content key for `runtimeKeyThumbprint`. Runtime verifies locally;
+Launcher never receives plaintext workflow key. Contract đầy đủ:
+[Production Execution Authorization v1](../../../specifications/production_execution_authorization_v1.md).
 
 ## 6. Execution Report
 

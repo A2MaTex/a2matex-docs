@@ -1,0 +1,9 @@
+{
+  "cursor": "1",
+  "type": "RUN_GROUP_STATE_CHANGED",
+  "occurredAt": "2026-10-22T08:00:00.000Z",
+  "runGroupId": "10000000-0000-4000-8000-000000000001",
+  "payload": {
+    "status": "RUNNING"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "cursor": "4",
+  "runGroup": {
+    "id": "10000000-0000-4000-8000-000000000001",
+    "requestId": "20000000-0000-4000-8000-000000000001",
+    "status": "RUNNING",
+    "createdAt": "2026-10-22T08:00:00.000Z",
+    "finishedAt": null,
+    "summary": {
+      "total": 1,
+      "queued": 0,
+      "running": 1,
+      "paused": 0,
+      "succeeded": 0,
+      "failed": 0,
+      "cancelled": 0,
+      "interrupted": 0
+    }
+  },
+  "deviceExecutions": [
+    {
+      "id": "10000000-0000-4000-8000-000000000002",
+      "adbSerial": "emulator-5554",
+      "status": "RUNNING",
+      "nextNodeId": "start_01",
+      "createdAt": "2026-10-22T08:00:00.000Z",
+      "startedAt": "2026-10-22T08:00:00.001Z",
+      "finishedAt": null,
+      "terminalError": null
+    }
+  ]
+}

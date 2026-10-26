@@ -1,6 +1,6 @@
 # B1 — Go Project Foundation
 
-**Status:** Proposed
+**Status:** Implemented and verified; lint pending
 
 **Phase:** B1 — Go project skeleton
 

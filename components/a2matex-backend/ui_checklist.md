@@ -41,7 +41,7 @@ Năm platform được tính trong plan:
 ## 2.2. Customer Portal — P0
 
 - [ ] My Products.
-- [ ] Entitlement status, expiration và concurrent-device limit.
+- [ ] Entitlement status và expiration; MVP không hiển thị machine/device/concurrency limit.
 - [ ] Free acquisition hoặc purchase entry.
 - [ ] Open in Launcher action.
 - [ ] Order/ownership history cơ bản.
@@ -193,7 +193,7 @@ Năm platform được tính trong plan:
 - [ ] Node error and artifact display.
 - [ ] Pause/resume/cancel actions.
 - [ ] Runtime reconnect and execution state reload.
-- [ ] `PAUSED_LICENSE` state and renew/retry guidance.
+- [ ] `PAUSED` với reason `AUTHORIZATION_EXPIRED` và renew/retry guidance.
 - [ ] Final run summary.
 
 ## 4.5. Launcher P1 if time allows

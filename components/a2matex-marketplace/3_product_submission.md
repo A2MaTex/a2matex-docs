@@ -200,3 +200,7 @@ Hash dùng để:
 - Tránh chạy nhầm artifact.
 
 Encryption chỉ làm tăng chi phí đọc workflow, không thể chống tuyệt đối reverse engineering trên máy customer.
+Release content key được Backend key service bảo vệ và chỉ được wrap vào
+Runtime-bound key envelope sau khi authorization thành công; Launcher không nhận
+plaintext key. Xem
+[Production Execution Authorization v1](../../specifications/production_execution_authorization_v1.md).

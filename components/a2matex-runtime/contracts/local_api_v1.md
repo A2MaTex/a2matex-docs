@@ -21,7 +21,9 @@ Studio native process
 
 The first API is a Development-mode API. Launcher Production package,
 authorization, license, and protected-workflow endpoints are added only with
-I2. A successful API response never replaces G1 execution admission.
+I2 under
+[Production Execution Authorization v1](../../../specifications/production_execution_authorization_v1.md).
+A successful API response never replaces G1 execution admission.
 
 ## 2. Common transport rules
 
@@ -152,7 +154,6 @@ This authenticated response is the v1 compatibility handshake:
 ```json
 {
   "runtimeVersion": "0.1.0",
-  "mode": "DEVELOPMENT",
   "runtimeIrFormatVersions": [1],
   "supportedNodes": [
     {
@@ -164,7 +165,8 @@ This authenticated response is the v1 compatibility handshake:
 ```
 
 The `/api/v1` path is the API-version contract, so the body does not repeat an
-`apiVersion` field. `supportedNodes` contains unique A2 type/handler pairs
+`apiVersion` field. This API is Development-only, so the response does not
+repeat a fixed mode. `supportedNodes` contains unique A2 type/handler pairs
 sorted by `type`. It does not expose handler versions, mutable catalog records,
 Go version, commit, build time, operating system, architecture, local paths, or
 configuration. Studio may use this response for early feedback, but G1 still

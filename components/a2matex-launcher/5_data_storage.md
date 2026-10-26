@@ -13,15 +13,19 @@
 | Execution variables              | Runtime Agent               |
 | Node result                      | Runtime Agent               |
 | Lease record                     | Backend                     |
-| Lease token tạm thời             | Launcher RAM                |
-| Lease đã validate                | Runtime RAM                 |
+| Signed lease và key envelope     | Launcher RAM                |
+| Lease đã verify                  | Runtime RAM                 |
 | Execution history chi tiết       | Runtime Agent SQLite        |
 | Run summary chưa đồng bộ         | Runtime Agent SQLite        |
 | Run summary đã đồng bộ           | Backend                     |
 
 Launcher không lưu `currentNode`, `sequence` hoặc execution variables làm source of truth. Sau khi reconnect, Launcher gọi Runtime để đọc lại trạng thái.
 
-Launcher chỉ giữ `leaseToken` trong RAM trong thời gian execution hoạt động để có thể gửi lại nếu Runtime restart. Backend mới là source of truth của lease; Runtime chỉ cache kết quả validate.
+Launcher chỉ giữ signed lease và key envelope trong RAM để chuyển giữa Backend
+và Runtime. Launcher không nhận plaintext content key. Backend là source of truth
+của authorization; Runtime giữ verified lease, decrypted workflow và transient
+key material trong RAM cho đến khi kết thúc hoặc hard expiry. Sau Runtime restart,
+Launcher phải tạo authorization session mới thay vì replay envelope cũ.
 
 # 7. Local storage
 

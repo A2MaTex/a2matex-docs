@@ -148,7 +148,7 @@ For example:
 - whether resume continues at the current or next node;
 - how offline-device recovery works;
 - whether cancelling one device cancels its siblings;
-- how `PAUSED_LICENSE` participates in group status.
+- how `PAUSED` with `AUTHORIZATION_EXPIRED` participates in group status.
 
 ### 8. Persistence is currently conceptual
 
@@ -174,8 +174,9 @@ Production mode depends on future contracts for:
 - `.a2m` package manifest;
 - Product Release identity;
 - package/payload hashes;
-- execution leases;
-- capability grants;
+- signed execution leases and renewal;
+- Runtime session key pairs and key envelopes;
+- package-required capability compatibility;
 - authorization expiry;
 - workflow encryption.
 
@@ -499,14 +500,13 @@ Handles:
 - device-offline pause;
 - authorization pause.
 
-### Capability Policy Engine
+### Capability Compatibility Engine
 
-Authorizes each handler against:
+Checks each handler against:
 
 - workflow-declared capabilities;
 - Development-mode policy;
-- Production grant;
-- execution authorization.
+- Runtime-supported capabilities.
 
 ## 5. Persistence and recovery modules
 

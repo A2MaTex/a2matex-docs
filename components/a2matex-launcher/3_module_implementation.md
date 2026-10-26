@@ -292,7 +292,7 @@ Trước khi Run, customer cấu hình:
 - product/release;
 - danh sách thiết bị;
 - input profile từng thiết bị;
-- maximum concurrent devices;
+- optional local parallel-device preference;
 - failure policy;
 - connector credential;
 - optional run name.
@@ -302,7 +302,7 @@ Ví dụ:
 ```json
 {
   "releaseId": "release_01",
-  "maxConcurrentDevices": 3,
+  "maxParallelDevices": 3,
   "failurePolicy": "CONTINUE_OTHER_DEVICES",
   "devices": [
     {
@@ -325,162 +325,56 @@ Launcher thực hiện preflight:
 - thiết bị online;
 - input đầy đủ;
 - credential tồn tại;
-- số thiết bị không vượt license.
+- Runtime còn đủ local capacity hoặc có thể queue execution.
 
-## 3.10. License Lease Manager
+`maxParallelDevices` chỉ là local scheduling preference theo tài nguyên máy. Nó
+không được gửi lên Backend và không giới hạn quyền sử dụng Product.
 
-Lease là quyền chạy tạm thời do backend cấp cho một execution. Trong MVP, lease là một token ngẫu nhiên, không chứa dữ liệu để Launcher hoặc Runtime giải mã.
+## 3.10. Production Authorization Manager
 
-### Cấp lease
+Launcher owns customer-authenticated Backend calls but never decrypts Product
+workflow content. The authoritative protocol is
+[Production Execution Authorization v1](../../specifications/production_execution_authorization_v1.md).
 
-Khi customer bấm **Run**, Launcher gọi:
+When customer clicks **Run**, Launcher:
 
-```http
-POST /execution-leases
-Authorization: Bearer <access-token>
-```
+1. asks Runtime to prepare a Product Run authorization session;
+2. receives `runtimeSessionId`, Runtime public key, algorithm, and thumbprint;
+3. requests Backend authorization for the exact Product, Release, package hash,
+   and Runtime session;
+4. receives a signed execution lease and Runtime-bound key envelope;
+5. forwards the encrypted package reference, lease, envelope, selected devices,
+   and inputs to Runtime.
 
-Request:
+Launcher never receives a plaintext workflow key. It keeps the signed lease and
+key envelope in memory only and never places either value in files, local
+storage, telemetry, or logs.
 
-```json
-{
-  "productId": "product_01",
-  "releaseId": "release_03",
-  "installationId": "install_01",
-  "requestedDeviceCount": 3
-}
-```
+### Renewal
 
-Backend lấy `customerId` từ access token, kiểm tra entitlement và concurrency rồi trả về:
+Runtime emits `AUTHORIZATION_RENEWAL_REQUIRED` at the signed lease's
+`refreshAfter`. Launcher renews with Backend while the old lease remains valid,
+then forwards the newer signed lease to Runtime. Runtime verifies the signature,
+lease family, increasing sequence, Product/Release/package, and Runtime-session
+binding before atomically replacing the old lease.
 
-```json
-{
-  "leaseId": "lease_01",
-  "executionId": "exec_01",
-  "leaseToken": "random-256-bit-token",
-  "expiresAt": "2026-09-28T03:00:00Z"
-}
-```
+Launcher retries only transient connectivity, timeout, `429`, and `5xx`
+responses with bounded exponential backoff and jitter. It reuses one request ID
+and stops at the current `expiresAt`. Authorization denial, revoked entitlement,
+disabled Release, package mismatch, and invalid session binding require an
+explicit error state rather than blind retry.
 
-Backend chỉ lưu hash của token:
+Launcher stays available in its background/system-tray process while a Product
+Run needs renewal. If it exits completely, Runtime continues only until the
+current lease expires.
 
-```json
-{
-  "leaseId": "lease_01",
-  "tokenHash": "sha256_of_lease_token",
-  "customerId": "customer_01",
-  "productId": "product_01",
-  "releaseId": "release_03",
-  "executionId": "exec_01",
-  "installationId": "install_01",
-  "maxConcurrentDevices": 5,
-  "expiresAt": "2026-09-28T03:00:00Z",
-  "status": "ACTIVE"
-}
-```
+### Hard expiry and reauthorization
 
-### Gửi xuống Runtime
-
-Launcher giữ token trong RAM và gửi run request đến local Runtime:
-
-```json
-{
-  "executionId": "exec_01",
-  "leaseToken": "random-256-bit-token",
-  "workflowPackagePath": "packages/release_03.a2pkg",
-  "selectedDeviceIds": ["ldplayer_0", "ldplayer_1", "ldplayer_2"],
-  "inputs": {}
-}
-```
-
-Lease không được lưu vào file, SQLite, local storage hoặc log.
-
-### Runtime xác minh lease
-
-Runtime không tin thông tin do Launcher tự khai báo mà gọi trực tiếp backend:
-
-```http
-POST /execution-leases/validate
-```
-
-Request:
-
-```json
-{
-  "leaseToken": "random-256-bit-token",
-  "executionId": "exec_01",
-  "installationId": "install_01",
-  "releaseId": "release_03",
-  "runtimeVersion": "1.0.0"
-}
-```
-
-Response:
-
-```json
-{
-  "valid": true,
-  "leaseId": "lease_01",
-  "productId": "product_01",
-  "releaseId": "release_03",
-  "maxConcurrentDevices": 5,
-  "validForSeconds": 3600,
-  "workflowKey": "temporary-decryption-key"
-}
-```
-
-Runtime giữ kết quả này trong RAM, dùng `workflowKey` để giải mã workflow package và dùng `validForSeconds` để tính thời gian hiệu lực bằng monotonic clock.
-
-Nếu workflow package chỉ dùng hash để kiểm tra integrity thì không cần `workflowKey`. Nếu cần giải mã graph thì package phải được mã hóa, vì hash không thể giải mã ngược.
-
-### Xử lý mất mạng
-
-Sau khi validate thành công, Runtime không cần gọi backend cho từng node. Workflow vẫn chạy bình thường nếu mạng lag hoặc mất mạng ngắn hạn.
-
-Nếu validate hoặc renew thất bại, Runtime retry:
-
-```text
-2 giây → 5 giây → 10 giây
-```
-
-Runtime chỉ dừng bắt đầu node mới khi thời hạn lease thực sự kết thúc:
-
-```text
-Node hiện tại hoàn thành
-→ không bắt đầu node mới
-→ execution chuyển PAUSED_LICENSE
-```
-
-### Renew lease
-
-Nếu Launcher đang mở hoặc được mở lại, Launcher gọi:
-
-```http
-POST /execution-leases/lease_01/renew
-Authorization: Bearer <access-token>
-```
-
-Request:
-
-```json
-{
-  "executionId": "exec_01",
-  "installationId": "install_01"
-}
-```
-
-Backend trả token mới:
-
-```json
-{
-  "leaseToken": "new-random-256-bit-token",
-  "expiresAt": "2026-09-28T04:00:00Z"
-}
-```
-
-Launcher gửi token mới xuống Runtime. Runtime validate lại rồi cập nhật lease trong RAM.
-
-Launcher không cần chạy nền. Nếu Launcher bị đóng, Runtime tiếp tục execution đến khi hoàn thành hoặc lease hết hạn. Khi Launcher được mở lại, nó có thể cấp lease mới để Runtime tiếp tục execution đang ở trạng thái `PAUSED_LICENSE`.
+At hard expiry Runtime stops admitting new node attempts, checkpoints the last
+unambiguous result, enters `PAUSED` with reason `AUTHORIZATION_EXPIRED`, and
+removes decrypted workflow/key material. Launcher must then obtain a new Runtime
+session, signed lease, and key envelope. Runtime revalidates and decrypts the
+same package before resuming from the last safe checkpoint.
 
 ## 3.11. Execution Monitor
 

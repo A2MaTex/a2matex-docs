@@ -1,0 +1,5 @@
+{
+  "code": "DEVICE_OFFLINE",
+  "message": "device is offline",
+  "retryable": true
+}

@@ -237,7 +237,7 @@ Important contract rules:
 | ID  | Module                | Depends on | Deliverable and checkout condition                                                                                  |
 | --- | --------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------- |
 | B1  | Go project skeleton   | A1         | Minimal executable, internal packages, build metadata, and test layout; no unnecessary framework                    |
-| B2  | Configuration         | B1         | Validated configuration for mode, loopback address, ADB path, database, artifacts, ordinary HTTP/SSE timeouts, and concurrency limits |
+| B2  | Configuration         | B1         | Strict startup configuration for shutdown, loopback HTTP, and logging; later subsystems add settings only with their implementation |
 | B3  | Supervisor            | B1–B2      | Root context, component startup ordering, graceful shutdown, and bounded shutdown timeout                           |
 | B4  | Logging and redaction | B1         | Structured logs containing run/device/node correlations without secrets or protected workflow payloads              |
 | B5  | Local authentication  | A7, B2     | Per-startup random token, protected per-user connection-file handoff, constant-time verification, and cleanup       |
@@ -403,14 +403,19 @@ It includes:
 - Installed package format.
 - Release identity and integrity verification.
 - Runtime compatibility verification.
-- Customer authorization or lease validation.
-- Capability and device-limit enforcement.
-- Protected Runtime IR loading.
+- Runtime authorization-session key generation.
+- Signed customer/Release lease verification and renewal.
+- Runtime-bound key-envelope opening and protected Runtime IR loading.
 - No plaintext workflow persistence.
-- Generic `PAUSED` or a policy-defined terminal result when authorization expires.
+- `PAUSED` with `AUTHORIZATION_EXPIRED` when the hard lease deadline passes.
+- Safe checkpoint, transient-key cleanup, and reauthorization resume.
 - Launcher handshake and production execution APIs.
 
-The execution engine is reused; Production mode adds a protected workflow source and authorization boundary.
+Backend authorization has no installation, machine, device-count, active-lease,
+or concurrent-run limit. Runtime resource bounds remain local scheduling rules.
+The execution engine is reused; Production mode adds a protected workflow source
+and authorization boundary defined by
+[Production Execution Authorization v1](../../../specifications/production_execution_authorization_v1.md).
 
 ### Phase J — MVP hardening and release gate
 

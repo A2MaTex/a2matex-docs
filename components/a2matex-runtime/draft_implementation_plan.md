@@ -105,8 +105,8 @@ Thêm:
 
 - package signature;
 - encrypted release;
-- execution lease;
-- capability grants;
+- Runtime session key pair and key envelope;
+- signed execution lease and renewal;
 - log redaction;
 - runtime compatibility checking.
 

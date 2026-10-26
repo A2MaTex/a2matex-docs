@@ -94,14 +94,15 @@ Nếu admin yêu cầu thay đổi, publisher sửa project trong Studio, lưu d
 
 ## 1.4. Distribution, entitlement và execution authorization
 
-- [ ] **Product Offer Module** — free/paid offer, thời hạn và concurrent device limit.
+- [ ] **Product Offer Module** — free/paid offer và thời hạn sử dụng; MVP không có machine, device hoặc concurrency limit.
 - [ ] **Entitlement Module** — quyền dài hạn của customer đối với Product.
 - [ ] **Manual Grant Use Case** — admin cấp entitlement cho UAT/MVP; nằm trong Entitlement Module.
 - [ ] **Download Authorization Service** — kiểm tra entitlement và cấp presigned package download URL.
 - [ ] **Launcher API** — My Products, Product release metadata và compatibility.
 - [ ] **Execution Lease Module** — issue, validate, renew, expire và revoke lease.
-- [ ] **Lease Concurrency Policy** — giới hạn active lease và requested device count khi cấp/renew lease.
-- [ ] **Runtime API** — validate lease, trả capability grant và workflow decryption key tạm thời.
+- [ ] **Lease Signing Service** — ký lease bound với customer, Product Release, package hash và Runtime session; hỗ trợ signing-key rotation.
+- [ ] **Runtime Key Envelope Service** — wrap release content key bằng ephemeral Runtime public key; không trả plaintext key cho Launcher.
+- [ ] **Production Authorization API** — issue/renew signed lease và key envelope theo [Production Execution Authorization v1](../../specifications/production_execution_authorization_v1.md).
 - [ ] **Execution Report Module** — nhận idempotent run summary từ Runtime Agent.
 
 ## 1.5. Commerce — phạm vi MVP tối thiểu
@@ -219,7 +220,7 @@ Studio chịu trách nhiệm tạo project automation và lưu project lên Back
 - [ ] Per-device run configuration.
 - [ ] Request/renew execution lease.
 - [ ] Start/reconnect/pause/resume/cancel run qua Runtime Agent.
-- [ ] Execution monitor và `PAUSED_LICENSE` state.
+- [ ] Execution monitor và `PAUSED`/`AUTHORIZATION_EXPIRED` reason.
 - [ ] Run summary visibility.
 
 Launcher không gọi ADB trực tiếp và không giữ execution state làm source of truth.

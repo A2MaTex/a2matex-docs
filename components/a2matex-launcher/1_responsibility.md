@@ -21,12 +21,12 @@ Launcher chịu trách nhiệm:
 - Hiển thị danh sách LDPlayer instance do Runtime phát hiện.
 - Cho phép chọn thiết bị chạy workflow.
 - Gán input, account và credential cho từng thiết bị.
-- Xin execution lease từ backend.
+- Chuyển Runtime session public key lên Backend và xin signed execution lease cùng key envelope.
 - Gửi yêu cầu bắt đầu run group tới Runtime.
 - Theo dõi trạng thái từng device execution.
 - Pause, resume và cancel.
 - Giữ ứng dụng chạy background/system tray.
-- Gia hạn license lease trong thời gian chạy.
+- Gia hạn execution lease từ `refreshAfter` trong thời gian chạy.
 - Gửi run summary về backend nếu cần.
 
 Launcher không chịu trách nhiệm:
@@ -38,3 +38,8 @@ Launcher không chịu trách nhiệm:
 - Lưu `currentNode`, sequence và variables làm source of truth.
 - Review hoặc chỉnh sửa workflow.
 - Giải quyết logic retry của từng node.
+- Giải mã Product workflow hoặc nhận plaintext release content key.
+
+MVP không giới hạn machine, Android device hoặc concurrent execution ở Backend.
+Launcher có thể cho customer chọn nhiều device; Runtime tự queue/bound parallel
+work theo tài nguyên local.

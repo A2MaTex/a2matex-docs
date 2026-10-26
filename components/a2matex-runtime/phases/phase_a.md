@@ -230,7 +230,7 @@ Reference:
 Production APIs, WebSocket, test-one-node, run-from-node, per-device controls,
 log streaming, API device metadata, and generic execution CRUD are deferred.
 
-## A8 — Runtime Contract Fixtures v1
+## A8 — Runtime Contract Fixtures
 
 **Status:** Accepted
 
@@ -240,8 +240,8 @@ exhaustive replacement for phase-owned unit and integration tests.
 
 References:
 
-- [Runtime Contract Fixtures v1](../contracts/contract_fixtures_v1.md)
-- [Fixture manifest](../contracts/fixtures/v1/manifest.json)
+- [Runtime Contract Fixtures](../contracts/contract_fixtures_v1.md)
+- [Current fixture manifest](../contracts/fixtures/v2/manifest.json)
 
 The canonical files remain in the plan repository and are vendored unchanged
 into consumer test suites. Cross-language agreement is not yet proven; C6, G1,

@@ -65,6 +65,8 @@ interface NodeExecutionContext {
 ```
 
 Publisher không được sửa trực tiếp phần hệ thống như `deviceId` hoặc capability grant.
+`capabilityGrant` ở đây là Runtime-internal capability context derived từ node
+contract; nó không phải customer entitlement field hoặc server-side lease limit.
 
 
 # 6. Thiết kế Edge
