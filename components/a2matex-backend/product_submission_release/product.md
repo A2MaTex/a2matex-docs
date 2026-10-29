@@ -1,6 +1,6 @@
 # Product Module Feature Spec
 
-**Status:** Draft for review; documentation only, not implemented  
+**Status:** Backend implemented; manual verification pending; automated Product tests intentionally deferred
 **Module group:** 03 — Product, Submission, Review, and Product Release  
 **Owner:** Backend; consumed by the Web Publisher Portal and later Submission, Release, and Catalog modules
 
@@ -24,7 +24,6 @@ This module owns:
 - Publisher ownership derived from the selected Project;
 - Publisher-authored name, slug, descriptions, usage instructions, and ordered media references;
 - draft creation and partial draft saving;
-- public Marketplace Product list/detail projections from the current published release;
 - Product lifecycle state and lifecycle authorization;
 - Publisher/Admin Product list and detail reads;
 - Publisher abandonment of an unpublished draft Product;
@@ -34,6 +33,7 @@ This module owns:
 This module does not own:
 
 - Static upload/processing or Cloudflare R2 objects; it stores only validated `staticId` references;
+- public Marketplace Product list/detail projections, which require Submission and Product Release;
 - Category, Tag, ProductTag, required-app classification, or connector taxonomy;
 - self-review data, Workflow Revision creation, or Submission state;
 - automated scan findings or admin Submission review decisions;
@@ -50,8 +50,9 @@ The Product module must not copy Project workflow content or Publisher profile d
 - A Product belongs to the same `PublisherAccount` as its Project. Neither `projectId` nor
   `publisherAccountId` can change after creation.
 - The Web Publisher Portal creates Product as `DRAFT` before submission. Studio does not create it.
-- `POST /products` creates Product and its optional initial media references atomically. Repeated
-  creation for the same accessible Project resolves the existing non-archived Product.
+- `POST /products` creates Product and its optional initial media references atomically. Exactly one
+  request may create the Product for a Project; a repeated or concurrent loser receives a stable
+  conflict and is never retried as transient work.
 - `PATCH /products/:productId` saves the Publisher's editable working copy with MVP last-write-wins
   semantics. It never changes lifecycle status or the currently published release.
 - Draft saves may be incomplete. Submission applies the complete publishing validation contract.
@@ -62,11 +63,9 @@ The Product module must not copy Project workflow content or Publisher profile d
   presentation fields stored on Product.
 - Product media is an ordered set of image references. Upload happens first through the existing
   Static/R2 image flow; Product requests contain metadata and `staticId`, never image bytes or R2 keys.
-- The current Static record does not persist uploader/Publisher ownership. Before ProductMedia is
-  implemented, Product image upload must add nullable `Static.publisherAccountId`, derived from the
-  authenticated Publisher. Product create/update may attach only Static images whose
-  `publisherAccountId` matches the Product owner. Legacy/system Static rows with null ownership are
-  not eligible for ProductMedia.
+- Static is shared storage metadata and does not carry Product or Publisher ownership. Product
+  create/update may attach any completed, non-deleted image Static that passed the existing image
+  pipeline. The API still accepts only `staticId`; it never accepts object keys or remote URLs.
 - Category, Tag, ProductTag, required apps, and connector taxonomy are deferred. Current basic
   Android actions provide no stable taxonomy worth maintaining. Release capabilities remain
   technical release data and are not Publisher-entered Product classification.
@@ -93,8 +92,9 @@ The Product module must not copy Project workflow content or Publisher profile d
   control; it does not delete the Product, Project, Submission, Release, or customer history.
 - Blocking a Publisher does not rewrite Product statuses. Access policies and public Catalog queries
   must independently exclude a blocked Publisher where appropriate.
-- `currentReleaseId` is not introduced by the Product migration. The Product Release feature adds
-  that nullable column and its foreign key when `ProductRelease` exists.
+- The Product migration introduces nullable `currentReleaseId` without a foreign key because
+  `ProductRelease` does not exist yet. Clients cannot write it. The Product Release migration must
+  add the foreign key and becomes the only owner of current-release changes.
 - General Asset relations and presigned URLs remain post-MVP. Product images use the existing
   Static/Cloudflare R2 path because expected files are small and already supported by Backend upload.
 
@@ -106,7 +106,7 @@ Product
   publisherAccountId UUID FK PublisherAccount, required, immutable
   projectId UUID FK Project, required, immutable, unique
   status ProductStatus, required, default DRAFT
-  currentReleaseId UUID FK ProductRelease, nullable, added by Product Release feature
+  currentReleaseId UUID, nullable, internal-only; Product Release adds the FK later
   name VARCHAR(255), nullable while draft
   slug VARCHAR(255), nullable while draft
   shortDescription VARCHAR(500), nullable while draft
@@ -157,8 +157,9 @@ Database integrity requirements:
 - Active Product media rows are unique by `(productId, staticId)`.
 - A Product can have at most one active `ICON` and one active `COVER`; `GALLERY` may contain many
   ordered images.
-- Product media accepts only completed, non-deleted Static image records owned by the Product's
-  Publisher. It never accepts raw object keys or remote URLs.
+- Product media accepts only completed, non-deleted Static image records that passed the image
+  pipeline. Static is shared and has no Publisher ownership. Product never accepts raw object keys
+  or remote URLs.
 - Removing ProductMedia from the working draft removes only the association. Static cleanup must not
   delete an image referenced by any immutable Submission or published Product Release.
 - Add the following query index for owner lists:
@@ -331,19 +332,29 @@ Only `projectId` is required for a draft save. The Backend derives Publisher own
 audit fields. It validates all media references in one set-based query and creates
 Product plus ProductMedia rows atomically.
 
-First creation returns `201 Created` with `ProductManagementOutput`. If the same Publisher repeats
-creation for a Project that already has a non-archived Product, return that Product as `200 OK`
-without applying the repeated create payload; draft changes use `PATCH`.
+First creation returns `201 Created` with only the new Product ID:
+
+```ts
+type CreateProductOutput = {
+  id: string; // UUID
+};
+```
+
+If another request already created a Product for the Project, the loser returns
+`409 Error.ProductAlreadyExists`. This is a terminal business conflict, including under future
+queue delivery; it must not be classified as a transient failure or retried indefinitely. Clients
+use `GET /products/{productId}` to fetch the complete Product and its relations.
 
 Route-specific failures:
 
-| Condition | Result |
-| --- | --- |
-| Project is missing, archived, deleted, or cross-owner | `404 Error.ProjectNotFound` |
-| Existing Product is archived | `409 Error.ProductArchived` |
-| Slug is already reserved by another Product | `409 Error.ProductSlugConflict` |
-| Media contains an unavailable, cross-owner, non-image, or duplicate Static reference | `422 Error.ProductMediaInvalid` |
-| Caller is not an eligible active Publisher | Existing Publisher policy error |
+| Condition                                                                            | Result                          |
+| ------------------------------------------------------------------------------------ | ------------------------------- |
+| Project is missing, archived, deleted, or cross-owner                                | `404 Error.ProjectNotFound`     |
+| Existing non-archived Product for the Project                                        | `409 Error.ProductAlreadyExists`|
+| Existing Product is archived                                                         | `409 Error.ProductArchived`     |
+| Slug is already reserved by another Product                                          | `409 Error.ProductSlugConflict` |
+| Media contains an unavailable, unprocessed, non-image, or duplicate Static reference | `422 Error.ProductMediaInvalid` |
+| Caller is not an eligible active Publisher                                           | Existing Publisher policy error |
 
 ### 5.3 Update a Product draft
 
@@ -379,17 +390,18 @@ request may update `DRAFT` or `ACTIVE` Products. It cannot update ownership, Pro
 
 The update condition includes Product ID, owner, and allowed lifecycle state. Product fields and the
 complete media replacement commit in one transaction using MVP last-write-wins behavior. Success
-returns `200 OK` with `ProductManagementOutput`.
+returns `200 OK` with the standard success message. `GET /products/{productId}` owns fetching the
+complete record and preloading its related entities.
 
 Route-specific failures:
 
-| Condition | Result |
-| --- | --- |
-| Product is missing, deleted, or cross-owner | `404 Error.ProductNotFound` |
-| Product is `SUSPENDED` or `ARCHIVED` | `409 Error.ProductNotEditable` |
+| Condition                                   | Result                          |
+| ------------------------------------------- | ------------------------------- |
+| Product is missing, deleted, or cross-owner | `404 Error.ProductNotFound`     |
+| Product is `SUSPENDED` or `ARCHIVED`        | `409 Error.ProductNotEditable`  |
 | Slug is already reserved by another Product | `409 Error.ProductSlugConflict` |
-| Media validation fails | `422 Error.ProductMediaInvalid` |
-| Caller is not an eligible active Publisher | Existing Publisher policy error |
+| Media validation fails                      | `422 Error.ProductMediaInvalid` |
+| Caller is not an eligible active Publisher  | Existing Publisher policy error |
 
 ### 5.4 List Products for management
 
@@ -533,7 +545,10 @@ Publisher private data, Submission snapshots, Static object keys, or Release art
 Missing, deleted, and cross-owner Products return `404 Error.ProductNotFound`. Invalid UUIDs return
 `422` before the service runs.
 
-### 5.6 Public Marketplace Product reads
+### 5.6 Deferred Public Marketplace Product reads
+
+This contract belongs to the later Catalog integration after Submission and Product Release exist.
+It is retained here as a compatibility note and is not part of current Product authoring completion.
 
 Public Marketplace reads use separate routes from management reads:
 
@@ -630,14 +645,14 @@ Strict discriminated request body:
 ```ts
 type UpdateProductLifecycleInput =
   | {
-      action: 'ARCHIVE';
+      action: "ARCHIVE";
     }
   | {
-      action: 'SUSPEND';
+      action: "SUSPEND";
       reason: string; // trim, 1..2,000 characters
     }
   | {
-      action: 'REACTIVATE';
+      action: "REACTIVATE";
     };
 ```
 
@@ -667,10 +682,10 @@ Examples:
 
 Scope and action enforcement:
 
-| Resolved permission access | Permitted actions | Additional rule |
-| --- | --- | --- |
-| `OWN` | `ARCHIVE` | Product must belong to the resolved active Publisher account. |
-| Unrestricted `null` | `ARCHIVE`, `SUSPEND`, `REACTIVATE` | Product ownership is not used as a filter. |
+| Resolved permission access | Permitted actions                  | Additional rule                                               |
+| -------------------------- | ---------------------------------- | ------------------------------------------------------------- |
+| `OWN`                      | `ARCHIVE`                          | Product must belong to the resolved active Publisher account. |
+| Unrestricted `null`        | `ARCHIVE`, `SUSPEND`, `REACTIVATE` | Product ownership is not used as a filter.                    |
 
 The exact method/path permission is enforced by `AccessTokenGuard`. The controller passes the
 resolved scopes to the Product service. The Product lifecycle policy then resolves a typed access
@@ -693,11 +708,11 @@ lifecycle route. Product Release activation is not exposed through this endpoint
 
 Action behavior:
 
-| Action | Allowed transition | Idempotent state | Behavior |
-| --- | --- | --- | --- |
-| `ARCHIVE` | `DRAFT -> ARCHIVED` | `ARCHIVED` | Preserve Product history and reject published/suspended Products. |
-| `SUSPEND` | `ACTIVE -> SUSPENDED` | `SUSPENDED` | Record the trimmed reason, Admin actor, and timestamp. |
-| `REACTIVATE` | `SUSPENDED -> ACTIVE` | `ACTIVE` | Require an eligible published current release and clear suspension fields. |
+| Action       | Allowed transition    | Idempotent state | Behavior                                                                   |
+| ------------ | --------------------- | ---------------- | -------------------------------------------------------------------------- |
+| `ARCHIVE`    | `DRAFT -> ARCHIVED`   | `ARCHIVED`       | Preserve Product history and reject published/suspended Products.          |
+| `SUSPEND`    | `ACTIVE -> SUSPENDED` | `SUSPENDED`      | Record the trimmed reason, Admin actor, and timestamp.                     |
+| `REACTIVATE` | `SUSPENDED -> ACTIVE` | `ACTIVE`         | Require an eligible published current release and clear suspension fields. |
 
 The repository performs each transition as an atomic conditional update using the expected source
 status. An `OWN` update also includes `publisherAccountId` in the predicate. If no row changes, the
@@ -717,16 +732,16 @@ Successful response for every action: `200 OK`.
 
 Route-specific failures:
 
-| Condition | Result |
-| --- | --- |
-| Product is missing, deleted, or outside an `OWN` caller's ownership | `404 Error.ProductNotFound` |
-| `OWN` caller requests `SUSPEND` or `REACTIVATE` | `403 Error.ProductLifecycleActionDenied` |
-| `ARCHIVE` requested for `ACTIVE` or `SUSPENDED` | `409 Error.ProductCannotBeArchived` |
-| `SUSPEND` requested for `DRAFT` or `ARCHIVED` | `409 Error.ProductCannotBeSuspended` |
-| `REACTIVATE` requested for `DRAFT` or `ARCHIVED` | `409 Error.ProductCannotBeReactivated` |
-| `REACTIVATE` requested without an eligible published current release | `409 Error.ProductReleaseUnavailable` |
-| Invalid UUID, action, reason, or body shape | `422` validation error |
-| `OWN` caller is no longer an eligible active Publisher | Existing Publisher policy error |
+| Condition                                                            | Result                                   |
+| -------------------------------------------------------------------- | ---------------------------------------- |
+| Product is missing, deleted, or outside an `OWN` caller's ownership  | `404 Error.ProductNotFound`              |
+| `OWN` caller requests `SUSPEND` or `REACTIVATE`                      | `403 Error.ProductLifecycleActionDenied` |
+| `ARCHIVE` requested for `ACTIVE` or `SUSPENDED`                      | `409 Error.ProductCannotBeArchived`      |
+| `SUSPEND` requested for `DRAFT` or `ARCHIVED`                        | `409 Error.ProductCannotBeSuspended`     |
+| `REACTIVATE` requested for `DRAFT` or `ARCHIVED`                     | `409 Error.ProductCannotBeReactivated`   |
+| `REACTIVATE` requested without an eligible published current release | `409 Error.ProductReleaseUnavailable`    |
+| Invalid UUID, action, reason, or body shape                          | `422` validation error                   |
+| `OWN` caller is no longer an eligible active Publisher               | Existing Publisher policy error          |
 
 There is no delete, restore, direct activation, or published-content mutation endpoint. Public reads
 are available only through the `@IsPublic()` Marketplace projection routes in section 5.6.
@@ -736,19 +751,18 @@ are available only through the `@IsPublic()` Marketplace projection routes in se
 Permission uniqueness follows the existing `(method, path, scope)` contract. The Product feature
 requires the following permission records; `null` means unrestricted scope.
 
-| Permission name | Module | Method | Stored path | Scope | Assigned roles |
-| --- | --- | --- | --- | --- | --- |
-| Create Product Draft | Product | `POST` | `/api/v1/products` | `null` | `PUBLISHER` |
-| Update Own Product Draft | Product | `PATCH` | `/api/v1/products/:productId` | `OWN` | `PUBLISHER` |
-| List Own Products | Product | `GET` | `/api/v1/products` | `OWN` | `CUSTOMER`, `PUBLISHER` |
-| List All Products | Product | `GET` | `/api/v1/products` | `null` | `ADMIN` |
-| Read Own Product | Product | `GET` | `/api/v1/products/:productId` | `OWN` | `CUSTOMER`, `PUBLISHER` |
-| Read Any Product | Product | `GET` | `/api/v1/products/:productId` | `null` | `ADMIN` |
-| Manage Own Product Lifecycle | Product | `PUT` | `/api/v1/products/:productId/lifecycle` | `OWN` | `PUBLISHER` |
-| Manage Any Product Lifecycle | Product | `PUT` | `/api/v1/products/:productId/lifecycle` | `null` | `ADMIN` |
+| Permission name              | Module  | Method  | Stored path                             | Scope  | Assigned roles          |
+| ---------------------------- | ------- | ------- | --------------------------------------- | ------ | ----------------------- |
+| Create Product Draft         | Product | `POST`  | `/api/v1/products`                      | `null` | `PUBLISHER`             |
+| Update Own Product Draft     | Product | `PATCH` | `/api/v1/products/:productId`           | `OWN`  | `PUBLISHER`             |
+| List Own Products            | Product | `GET`   | `/api/v1/products`                      | `OWN`  | `CUSTOMER`, `PUBLISHER` |
+| List All Products            | Product | `GET`   | `/api/v1/products`                      | `null` | `ADMIN`                 |
+| Read Own Product             | Product | `GET`   | `/api/v1/products/:productId`           | `OWN`  | `CUSTOMER`, `PUBLISHER` |
+| Read Any Product             | Product | `GET`   | `/api/v1/products/:productId`           | `null` | `ADMIN`                 |
+| Manage Own Product Lifecycle | Product | `PUT`   | `/api/v1/products/:productId/lifecycle` | `OWN`  | `PUBLISHER`             |
+| Manage Any Product Lifecycle | Product | `PUT`   | `/api/v1/products/:productId/lifecycle` | `null` | `ADMIN`                 |
 
-No Product permission is assigned implicitly because a user has a Publisher account. Access still
-requires an active role containing the matching permission record. When multiple active roles grant
+No Product permission is assigned implicitly because a user has a Publisher account. Access still requires an active role containing the matching permission record. When multiple active roles grant
 the same route, unrestricted `null` takes precedence over `OWN` in the service access predicate.
 Public Marketplace routes are intentionally absent from this table because `@IsPublic()` bypasses
 Bearer authentication and permission resolution.
@@ -763,7 +777,8 @@ Bearer authentication and permission resolution.
   indistinguishable.
 - Product ownership is always derived from that Project. Create/update never accept a client-selected
   `publisherAccountId`.
-- Create/update validate all submitted Static IDs against the same Publisher ownership boundary.
+- Create/update validate all submitted Static IDs in one set-based query as completed, non-deleted
+  image-pipeline records. Static is shared and has no Publisher ownership boundary.
 - `OWN` list/detail reads resolve the caller's non-deleted Publisher account regardless of
   `ACTIVE`/`BLOCKED` status, following the existing Project read pattern. A blocked former Publisher
   may inspect owned Product history through Customer `OWN` read permission.
@@ -810,7 +825,10 @@ role-permission ID.
 - Do not perform object-storage, queue, Runtime, or other network calls inside Product transactions;
   Product only links already uploaded Static records.
 
-## 8. Internal integration contracts
+## 8. Deferred internal integration contracts
+
+This section is a note for the future Submission and Product Release modules. It is not part of
+current Product implementation completion.
 
 The future Submission module consumes an existing Product draft. After locking and authorizing the
 Product, Project, and exact Project Draft, it calls a read-only snapshot contract inside the
@@ -866,6 +884,13 @@ Catalog, Offer, Entitlement, and Download Authorization modules must not infer a
 Product status alone. Their queries must also evaluate the current release and their own domain
 rules.
 
+The future Product Release feature must also specify release history and controlled current-release
+selection. It should retain immutable older releases, list releases for an owned Product, and allow
+an authorized Publisher or Admin to point `currentReleaseId` to an eligible previously published,
+non-disabled release. Selecting an old approved release is a pointer change, not a new Submission,
+review, rebuild, or mutation of that ProductRelease. Exact endpoints, permissions, audit behavior,
+and concurrency rules remain Product Release decisions.
+
 ## 9. Stable failure semantics
 
 | Condition                                                             | Result                                      |
@@ -873,10 +898,10 @@ rules.
 | Missing, soft-deleted, or cross-owner Product                         | `404 Error.ProductNotFound`                 |
 | Missing, archived, soft-deleted, or cross-owner Project during create | `404 Error.ProjectNotFound`                 |
 | Duplicate Product slug                                                | `409 Error.ProductSlugConflict`             |
-| Invalid or cross-owner Product media                                  | `422 Error.ProductMediaInvalid`             |
+| Invalid, unavailable, or unprocessed Product media                    | `422 Error.ProductMediaInvalid`             |
 | Archived Product selected for update/submission                       | `409 Error.ProductArchived`                 |
 | Suspended Product selected for update/submission                      | `409 Error.ProductSuspended`                |
-| `OWN` lifecycle caller requests `SUSPEND` or `REACTIVATE`              | `403 Error.ProductLifecycleActionDenied`    |
+| `OWN` lifecycle caller requests `SUSPEND` or `REACTIVATE`             | `403 Error.ProductLifecycleActionDenied`    |
 | Archive requested for `ACTIVE` or `SUSPENDED` Product                 | `409 Error.ProductCannotBeArchived`         |
 | Suspend requested for non-`ACTIVE` Product                            | `409 Error.ProductCannotBeSuspended`        |
 | Reactivate requested for a status other than `SUSPENDED`/`ACTIVE`     | `409 Error.ProductCannotBeReactivated`      |
@@ -904,25 +929,23 @@ snapshots, package identifiers, or release secrets.
 
 ## 11. Acceptance criteria
 
-The feature is conformant when the following behaviors are demonstrated:
+The Product authoring feature is conformant when the following behaviors are demonstrated. Current
+verification is manual; automated Product tests are intentionally deferred to prioritize feature
+implementation.
 
 | Area             | Required behavior                                                                                                     |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------- |
 | Identity         | Exactly one Product is created by its Publisher for a Project before Submission.                                      |
 | Ownership        | Product ownership always equals Project ownership and cannot be supplied or changed by clients.                       |
 | Draft authoring  | Product text and ordered Static-backed media save together with MVP last-write-wins behavior.                         |
-| Snapshot         | Submission locks the current Product and freezes its fields, media, Workflow Revision, and release request.           |
-| Idempotency      | Repeated Product creation resolves the existing Product; lifecycle idempotency rules remain stable.                   |
-| Publisher policy | Only a currently qualified Publisher can create/update Product, submit it, or archive an owned draft.                |
+| Create conflict  | Exactly one create wins per Project; repeated and concurrent losers receive a terminal conflict.                     |
+| Publisher policy | Only a currently qualified Publisher can create/update Product or archive an owned draft.                            |
 | Read access      | Owner `OWN` and Admin unrestricted reads are isolated; cross-owner access is indistinguishable from not found.        |
-| Public access    | `@IsPublic()` Marketplace routes return only eligible `ACTIVE` Products from their current approved release snapshot. |
 | Lifecycle        | Only the approved transitions occur; `ARCHIVED` is terminal and suspension fields remain consistent.                  |
-| Release boundary | No Product becomes `ACTIVE` without a successfully published Product Release transaction.                             |
-| Review boundary  | Rejected or failed updates never replace the approved snapshot behind the current Product Release.                   |
 | Project boundary | Archived Project does not erase Product history, but cannot create a new Product or support a future Submission.      |
 | Data exposure    | Management responses expose draft fields and Static IDs, never object keys, private URLs, or workflow content.        |
 | Performance      | Lists and relation projections are set-based, paginated, deterministically ordered, and contain no per-row queries.   |
-| Security         | No client can select another Publisher, link cross-owner media, enumerate records, or mutate lifecycle via PATCH.     |
+| Security         | No client can select another Publisher, enumerate Products, or mutate lifecycle via PATCH.                            |
 | Operations       | Expected mutations use database constraints/conditional writes and add no Redis lock or storage/network call.         |
 
 ## 12. Deferred features
@@ -932,7 +955,9 @@ The feature is conformant when the following behaviors are demonstrated:
 - Public Marketplace delivery of approved Product images.
 - Presigned upload/download URLs.
 - Submission, automated scan, review, and Workflow Revision orchestration.
-- Product Release persistence, `currentReleaseId`, package creation, encryption, and integrity data.
+- Submission snapshot integration and Product publishing-completeness validation.
+- Product Release persistence, `currentReleaseId` foreign key, release history/current-release
+  selection, package creation, encryption, and integrity data.
 - Advanced catalog ranking, recommendations, and full-text search infrastructure.
 - Product Offer, acquisition, entitlement, order, payment, download authorization, and execution
   authorization.

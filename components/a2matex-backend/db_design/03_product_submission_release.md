@@ -109,9 +109,9 @@ Draft Product mutation có thể thay đổi ProductMedia, nhưng không xóa St
 Submission/ProductRelease snapshot tham chiếu. Marketplace không đọc trực tiếp mutable Product row;
 nó đọc Product snapshot của current published release.
 
-Cross-module prerequisite: Static hiện tại chưa có ownership. Product image upload phải bổ sung
-nullable `Static.publisherAccountId` và derive từ authenticated Publisher; ProductMedia chỉ được link
-Static image có cùng Publisher. Static hệ thống/legacy có ownership null không được attach vào Product.
+Static là storage metadata dùng chung và không có Product/Publisher ownership. ProductMedia có thể
+tham chiếu bất kỳ Static image nào chưa bị xóa và đã hoàn tất image pipeline; request chỉ nhận
+`staticId`, không nhận object key, private URL hoặc R2 key.
 
 ## 3. Submission
 

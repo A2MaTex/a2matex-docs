@@ -1,6 +1,6 @@
 # Workflow Revision Feature Spec
 
-**Status:** Draft for review; documentation only, not implemented
+**Status:** Backend core implemented; Submission transaction integration pending
 
 **Phase:** `a2matex-be/phase5.md`
 

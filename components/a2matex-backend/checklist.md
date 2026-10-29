@@ -40,8 +40,9 @@ Backend là source of truth cho dữ liệu cloud và cung cấp API cho Web Mar
       permission, optimistic concurrency và compiled HTTP behavior đã được verify. Studio conflict-tab UX
       được để lại cho client integration. Xem
       [`studio_project_workflow/project_draft.md`](studio_project_workflow/project_draft.md).
-- [ ] **Workflow Revision Module** — tạo immutable revision từ một phiên bản project draft khi
-      publisher submit trên Web; contract draft để review tại
+- [x] **Workflow Revision Module** — private service đã implement migration, exact-version locking,
+      immutable snapshot, deterministic hash và focused tests; atomic integration với Submission
+      được để lại cho Submission Module. Xem
       [`studio_project_workflow/workflow_revision.md`](studio_project_workflow/workflow_revision.md).
 - [ ] **Asset Module** — metadata và ownership của template image, OCR resource, icon, screenshot và video.
 - [ ] **Storage Service** — upload lifecycle, Object Storage object key và presigned URL.
@@ -56,9 +57,9 @@ Studio chỉ lưu và đồng bộ project. Studio không gửi Product Submissi
 
 ## 1.3. Product, submission và review
 
-- [ ] **Product Module** — Publisher-owned editable aggregate: identity, Project link, name, slug,
-      descriptions, usage instructions, ordered Static-backed image media, lifecycle
-      và current release reference.
+- [x] **Product Module** — Publisher-owned editable aggregate: identity, Project link, name, slug,
+      descriptions, usage instructions, shared Static-backed ordered image media và lifecycle đã
+      implement; manual verification/live permission check pending, automated tests tạm hoãn.
 - [ ] **Submission Module** — nhận project được chọn trên Web, tạo immutable Workflow Revision và tạo Submission tham chiếu revision đó.
 - [ ] **Automated Scanner Service** — capability, graph/IR, node catalog contract/hash, code node, asset và policy scan.
 - [ ] **Review Module** — scan result, admin feedback, request changes, approve và reject.
