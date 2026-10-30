@@ -1,9 +1,70 @@
 # Phase B — Runtime Process Foundation
 
+## Overview
+
 Phase B implements the Go process shell required by every later Runtime
 subsystem. It turns the accepted Phase A contracts into a runnable,
 authenticated, loopback-only agent foundation, but it does not execute a
 workflow or communicate with an Android device.
+
+In the completed foundation, `cmd/agent` constructs one process graph. The
+supervisor starts the loopback HTTP listener before publishing a protected
+connection file containing the address and per-start session token. Studio or
+Launcher reads that file, uses the token for authenticated Local API requests,
+and loses access when the Runtime stops and removes the file. A startup failure
+rolls back already-started components; a process stop shuts them down in reverse
+order within one configured deadline.
+
+```mermaid
+flowchart LR
+    Entry["cmd/agent<br/>configuration + dependency wiring"] --> Supervisor["Supervisor<br/>process lifecycle owner"]
+    Entry --> Session["Per-start session<br/>token verification"]
+    Entry --> API["Local API<br/>middleware + B6 handlers"]
+
+    Supervisor -->|"1. start"| HTTP["Loopback HTTP server"]
+    Supervisor -->|"2. publish after bind"| Discovery["Protected connection file"]
+    Session --> API
+    API --> HTTP
+
+    Client["Studio / Launcher"] -->|"read base URL + token"| Discovery
+    Client -->|"Bearer request on loopback"| HTTP
+
+    HTTP -->|"startup or runtime failure"| Stop["Reverse shutdown<br/>remove file, then stop HTTP"]
+    Supervisor -->|"signal / cancellation"| Stop
+
+    Future["Deferred phases:<br/>validation, devices, execution, events"] -.->|"add only with a real consumer"| Supervisor
+```
+
+Phase B owns only process startup and shutdown, configuration, safe structured
+logging, local discovery and authentication, and the minimal Local API. Workflow
+validation, persistence, Android/ADB control, node execution, artifacts, and
+event streaming remain owned by later phases.
+
+### Maintainer map
+
+| Area | Current code owner | Maintenance responsibility |
+|---|---|---|
+| Process construction | `cmd/agent` | Load configuration and connect constructors through Wire; it must not own component behavior. |
+| Lifecycle | `internal/supervisor` | Start components in dependency order, detect terminal failures, and stop started components in reverse order under one deadline. |
+| Listener | `internal/platform/httpserver` | Bind before reporting startup success, serve the supplied handler, and release the listener during shutdown. |
+| API assembly | `internal/api` | Define middleware order, public/protected routing, stable responses, and request-level logging. |
+| Local identity | `internal/auth` | Create the per-process session secret and verify bearer credentials without exposing the token. |
+| Client discovery | `internal/discovery` | Atomically publish the protected connection document after HTTP is ready and remove only the document owned by this process. |
+| Configuration | `internal/config` | Parse and validate only settings that have a current Runtime consumer. |
+| Logging | `internal/logging` | Construct the shared structured logger and apply the B4 redaction boundary. |
+| Shared protocol values | `pkg/constants`, `pkg/x-error` | Hold reusable stable values and shared errors without taking ownership of feature behavior. |
+
+The main invariants to preserve are:
+
+- the HTTP listener must bind before the connection file is visible;
+- the same session instance must be used by discovery and API authentication;
+- the connection file must be removed before the HTTP server stops;
+- credentials and sensitive request data must never enter logs;
+- a component publishes its terminal result before cancelling the supervisor,
+  so a real failure is not replaced by a secondary cancellation error; and
+- new supervised components are added only when a later phase implements a
+  real lifecycle resource. Their `Start` must report readiness synchronously,
+  `Wait` must report termination, and `Shutdown` must cause `Wait` to return.
 
 ## Progress
 
@@ -115,3 +176,28 @@ Phase B is complete when the agent starts, publishes protected connection
 information only after the loopback listener is ready, serves the exact B6 API,
 rejects unauthenticated requests, and exits within its shutdown deadline
 without leaking owned goroutines or credentials.
+
+## Completion against the original Phase B documents
+
+**Implementation status: completed.** The current Runtime source implements the
+approved responsibilities and boundaries from the original B1–B6 documents:
+
+- B1 provides the buildable Go agent and dependency-composition foundation;
+- B2 supplies the validated settings consumed by this phase;
+- B3 owns ordered startup, failure propagation, rollback, and bounded reverse
+  shutdown;
+- B4 supplies structured operational logging and sensitive-field redaction;
+- B5 supplies the per-start session and protected local connection publication;
+  and
+- B6 exposes the public health route and authenticated Runtime information route
+  through the loopback-only server.
+
+No Phase B behavior has been intentionally moved to a future phase. Later
+phases extend this foundation with validation, devices, execution, artifacts,
+and events instead of redefining its lifecycle or authentication boundary.
+
+This completion statement records implementation against the approved Phase B
+specifications. The progress table remains the verification record: the
+explicitly skipped focused logger test, unavailable lint run, and unexecuted
+Windows runtime behavior remain visible review exceptions and are not presented
+as completed verification.

@@ -87,6 +87,7 @@ Optional fields are added only when the event owns them:
 | `route` | String | Registered Gin route pattern, never the raw URL |
 | `status` | Integer | HTTP response status |
 | `duration_ms` | Integer | Non-negative elapsed milliseconds |
+| `listen_address` | String | Configured loopback address, only on HTTP component readiness |
 | `reason` | String | One of the bounded values defined by the emitting event |
 | `error` | Error or string | Trusted internal error only; see error rules below |
 
@@ -100,14 +101,26 @@ B4 standardizes the lifecycle records already emitted by B3:
 | Level | `component` | `event` | Message | Additional fields |
 |---|---|---|---|---|
 | Info | `runtime` | `runtime_starting` | `starting runtime agent` | None |
+| Info | Component name | `component_ready` | `runtime component ready` | `local_http_server` includes `listen_address`; other components add only approved safe fields |
 | Info | `runtime` | `runtime_ready` | `runtime agent ready` | None |
 | Info | `runtime` | `runtime_stopped` | `runtime agent stopped` | None |
 | Error | `runtime` | `runtime_failed` | `runtime agent stopped with an error` | Safe `error` |
 
-`runtime_ready` means every currently registered B3 component completed
-`Start`. In the present checkout that means only that the loopback listener is
-bound. It does not claim A7 compliance, authentication, persistence, device
-readiness, or execution readiness.
+Each `component_ready` record is emitted by the supervisor immediately after
+that component's `Start` returns successfully. A component whose `Start`
+returns an error emits no readiness record. A component may still fail later;
+that failure terminates the Runtime through the existing B3 monitoring path.
+
+`local_http_server` readiness includes the configured loopback
+`listen_address`, which is safe operational metadata and identifies the active
+port. Connection-file paths and contents remain prohibited because the file
+contains the session token.
+
+`runtime_ready` remains the authoritative aggregate transition and means every
+currently registered B3 component completed `Start`. In the present checkout
+that means the loopback listener is bound and the protected connection file is
+published. It does not claim device availability, persistence, or
+workflow-execution readiness.
 
 The B3 component name used in errors must be a stable non-secret identifier.
 Current B4 uses `local_http_server`; later components must follow the same
@@ -278,7 +291,8 @@ The implementation changes only the current logging call path:
 1. `internal/logging/logger.go` adds the shared `ReplaceAttr` redactor and
    retains the existing level/format handlers.
 2. `internal/supervisor/supervisor.go` adds stable lifecycle attributes and uses the
-   log-safe component identifier.
+   log-safe component identifier. It emits each successful component readiness
+   transition before the aggregate Runtime readiness record.
 3. `internal/api/middleware` logs route patterns, applies the level policy,
    and removes raw recovered panic values.
 4. `cmd/agent/main.go` adds the stable failure attributes while remaining the
@@ -302,8 +316,11 @@ Focused standard-library tests must prove:
 - ordinary requests use Info and every client/server error request uses Error;
 - request logs contain the route pattern and never raw path, query, headers,
   or body content;
-- unmatched routes use the fixed `unmatched` value; and
-- panic recovery logs no recovered value, stack, or request data.
+- unmatched routes use the fixed `unmatched` value;
+- panic recovery logs no recovered value, stack, or request data;
+- successful component starts emit ordered `component_ready` records;
+- HTTP readiness includes only the configured loopback `listen_address`;
+- failed component starts emit no readiness record and prevent `runtime_ready`.
 
 The reviewer explicitly skipped a dedicated `logger_test.go`. Existing Local
 API tests continue to cover secret-free request logging and panic recovery;
