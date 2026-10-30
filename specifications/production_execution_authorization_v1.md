@@ -11,8 +11,10 @@ limit installations, machines, Android devices, active leases, or concurrent
 executions. Runtime may still bound local parallel work for resource safety;
 that is scheduling, not commercial authorization.
 
-This contract owns Production authorization. The Development API remains
-defined by `components/a2matex-runtime/contracts/local_api_v1.md`.
+This contract owns Production authorization. The Studio authoring API remains
+defined by `components/a2matex-runtime/contracts/local_api_v1.md`. Runtime may
+register both API families concurrently; selecting an endpoint selects the
+operation, so no global Development/Production mode switch is required.
 
 ## 2. Cryptographic model
 
@@ -100,6 +102,37 @@ Runtime admits the run only after it verifies:
 - key-envelope algorithm and binding;
 - package integrity and Runtime compatibility;
 - decrypted Runtime IR hash and graph validity.
+
+Launcher identifies the downloaded package through a Runtime-constrained
+package reference. The reference may be a package ID or a relative folder/file
+name below the Runtime-owned package root; Production APIs must not accept an
+arbitrary absolute path, traversal segment, symlink escape, or URL. The Runtime
+resolves and verifies the package before returning authorization-session
+material.
+
+After successful authorization and decryption, Runtime retains the validated
+plaintext Runtime IR and required input schema only in memory for the active
+authorized session so execution does not repeat package decryption for every
+node. It must never persist or return plaintext workflow content or the content
+key. Failed authorization or admission, terminal completion, cancellation,
+shutdown, and hard authorization expiry release the plaintext and key material;
+resume after hard expiry decrypts again under a new authorization session.
+
+### Production validation disclosure
+
+G1 may create detailed internal findings while validating the decrypted Runtime
+IR, but the Production customer response exposes only the generic A6
+`VALIDATION_FAILED` failure. It must not include the Studio validation
+object or reveal Phase C diagnostic codes, graph paths, node or edge
+identifiers, handler names, installed registry contents, schema details, or
+protected workflow values.
+
+Admission failure creates no run and dispatches no device command. It rejects
+that Product Run request but does not normally terminate the Runtime Agent, so
+the process can continue to provide health, recovery, and later valid requests.
+Only an invalid system-owned Runtime installation or registry may fail process
+startup/readiness, using a generic external failure and sanitized operational
+logging.
 
 ## 5. Execution lease
 
@@ -232,7 +265,10 @@ when their outcome is ambiguous.
 | Launcher | Customer authentication, package download, authorization/renewal requests, and forwarding responses to Runtime |
 | Runtime | Session key generation, signature/envelope verification, in-memory decryption, deadline enforcement, cleanup, checkpoint, and execution |
 
-Production endpoints are an I2 contract and do not alter Development API v1.
+Production endpoints are an I2 contract and do not alter Studio authoring API
+v1.
+They coexist with the Studio validation endpoint and never send an encrypted
+package to C5. The Production API must cover:
 The Production API must cover:
 
 - prepare Runtime authorization session;
@@ -242,7 +278,8 @@ The Production API must cover:
 - expose authorization state and renewal-required events.
 
 Exact request/response schemas and error codes must be approved before I2
-implementation.
+implementation. That later transport contract must preserve the generic-only
+validation disclosure rule above.
 
 ## 10. Acceptance rules
 
@@ -256,3 +293,6 @@ implementation.
 - Resume after hard expiry requires a new key pair, lease, and envelope.
 - Authorization failures and cryptographic material are logged only as
   sanitized identifiers and reason codes.
+- Production admission failures disclose only the generic validation failure,
+  create no run, dispatch no command, and leave a healthy Runtime Agent
+  available for recovery or a later valid request.
