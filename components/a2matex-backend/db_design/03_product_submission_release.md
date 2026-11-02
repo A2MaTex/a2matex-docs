@@ -54,6 +54,7 @@ CREATE TABLE "Product" (
     "suspendedAt" TIMESTAMPTZ,
     "suspendedById" UUID REFERENCES "User" (id),
     "currentReleaseId" UUID,
+    "lastOfferChangedAt" TIMESTAMPTZ,
     "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
     "updatedAt" TIMESTAMPTZ,
     "deletedAt" TIMESTAMPTZ,
@@ -112,6 +113,10 @@ nó đọc Product snapshot của current published release.
 Static là storage metadata dùng chung và không có Product/Publisher ownership. ProductMedia có thể
 tham chiếu bất kỳ Static image nào chưa bị xóa và đã hoàn tất image pipeline; request chỉ nhận
 `staticId`, không nhận object key, private URL hoặc R2 key.
+
+`lastOfferChangedAt` là field internal do Product Offer module quản lý để enforce cooldown cho thay
+đổi commercial collection của Product `ACTIVE`. Product create/update, Submission, Review và Product
+Release không được ghi field này. Product Offer không nằm trong Submission/ProductRelease snapshot.
 
 ## 3. Submission
 

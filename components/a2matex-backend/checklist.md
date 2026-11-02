@@ -95,7 +95,13 @@ Nếu admin yêu cầu thay đổi, publisher sửa project trong Studio, lưu d
 
 ## 1.4. Distribution, entitlement và execution authorization
 
-- [ ] **Product Offer Module** — free/paid offer và thời hạn sử dụng; MVP không có machine, device hoặc concurrency limit.
+- [ ] **Product Offer Module** — Publisher replace toàn bộ ONE_TIME/SUBSCRIPTION collection; Backend
+      update current price in-place, insert natural key mới, soft-delete offer bị omit và enforce
+      Product-level cooldown từ validated environment config. Deleted Offer là immutable và không
+      restore. Mutation chỉ trả `SUCCESS_RESPONSE`; management/public Product detail preload Offer
+      hiện tại, còn public Product list chỉ preload minimum SUBSCRIPTION price và duration.
+- [ ] **Order Module** — mua bằng `Profile.balance`, kể cả zero-value Order; snapshot Offer, block
+      purchase khi Product entitlement còn active và enforce ONE_TIME một lần/customer/Product.
 - [ ] **Entitlement Module** — quyền dài hạn của customer đối với Product.
 - [ ] **Manual Grant Use Case** — admin cấp entitlement cho UAT/MVP; nằm trong Entitlement Module.
 - [ ] **Download Authorization Service** — kiểm tra entitlement và cấp presigned package download URL.
@@ -108,8 +114,9 @@ Nếu admin yêu cầu thay đổi, publisher sửa project trong Studio, lưu d
 
 ## 1.5. Commerce — phạm vi MVP tối thiểu
 
-- [ ] **Free Product Acquisition** — customer nhận entitlement cho Product miễn phí.
-- [ ] **Order Module** — cấu trúc order cơ bản và lịch sử sở hữu; không mở rộng promotion/refund trong MVP.
+- [ ] **Zero-value ONE_TIME Acquisition** — đi cùng Order path, không cấp Entitlement trực tiếp và
+      không tạo PaymentTransaction.
+- [ ] **Order history** — giữ immutable Offer snapshot; không mở rộng promotion/refund trong MVP.
 - [ ] **Payment Module** — để sau UAT nếu payment gateway production chưa cần trong tháng đầu.
 
 MVP ưu tiên free Product và manual entitlement grant. Không để payment production chặn hành trình publish/download/run.
@@ -135,7 +142,8 @@ Web Marketplace Frontend không sở hữu business rule. Frontend hiển thị 
 ## 2.1. Public Marketplace
 
 - [ ] Product catalog và text search cơ bản.
-- [ ] Product detail, offer và compatibility.
+- [ ] Product catalog preload minimum SUBSCRIPTION price và duration, không dùng ONE_TIME cho list.
+- [ ] Product detail preload toàn bộ current Offer và compatibility; không có Offer GET API riêng.
 - [ ] Public publisher profile.
 - [ ] Download active Launcher release.
 - [ ] Login/register entry points.
@@ -275,7 +283,8 @@ Customer
 
 ```text
 Customer xem/nhận/mua Product trên Web
-→ Backend cấp Entitlement
+→ Backend tạo balance/zero-value Order và snapshot Product Offer
+→ Backend cấp hoặc reactivate một durable Entitlement
 → customer mở Launcher
 → Launcher tải Product package
 → Launcher verify package và chọn Runtime devices
@@ -319,7 +328,7 @@ Database ownership, entity relation, constraint, indexes, retention và detailed
 7. Workflow Revision + Submission + scan/validation.
 8. Admin Review + request changes/approve/reject.
 9. ProductRelease + package/encryption + publish.
-10. Free acquisition/manual Entitlement + My Products.
+10. Product Offer + balance Order + Entitlement + My Products.
 11. Launcher Release management + Launcher/Product package download/verification.
 12. Execution Lease + Launcher/Runtime integration.
 13. Runtime execution + event monitor + execution summary.

@@ -153,8 +153,7 @@ createdById
 ### 4.2 Publisher-safe feedback
 
 ```ts
-type SubmissionReviewFeedbackV1 = {
-  schemaVersion: 1;
+type SubmissionReviewFeedback = {
   summary: string;
   items?: Array<{
     message: string;
@@ -209,17 +208,17 @@ Request:
 ```ts
 type ReviewSubmissionInput = {
   decision: "APPROVE" | "REQUEST_CHANGES" | "REJECT";
-  feedback?: SubmissionReviewFeedbackV1;
+  feedback?: SubmissionReviewFeedback;
 };
 ```
 
 The request object is strict. Decision-specific rules are:
 
-| Decision          | Required Submission state | Required scan status | Feedback                     |
-| ----------------- | ------------------------- | -------------------- | ---------------------------- |
-| `APPROVE`         | `READY_FOR_REVIEW`        | `PASSED`             | optional                     |
-| `REQUEST_CHANGES` | `READY_FOR_REVIEW`        | `PASSED` or `FAILED` | required and non-empty       |
-| `REJECT`          | `READY_FOR_REVIEW`        | `PASSED` or `FAILED` | required and non-empty       |
+| Decision          | Required Submission state | Required scan status | Feedback               |
+| ----------------- | ------------------------- | -------------------- | ---------------------- |
+| `APPROVE`         | `READY_FOR_REVIEW`        | `PASSED`             | optional               |
+| `REQUEST_CHANGES` | `READY_FOR_REVIEW`        | `PASSED` or `FAILED` | required and non-empty |
+| `REJECT`          | `READY_FOR_REVIEW`        | `PASSED` or `FAILED` | required and non-empty |
 
 The service returns `SUCCESS_RESPONSE`; the global interceptor produces:
 
@@ -241,7 +240,6 @@ record and applying the Admin or owner projection.
 {
   "decision": "REQUEST_CHANGES",
   "feedback": {
-    "schemaVersion": 1,
     "summary": "The workflow cannot be released in its current form.",
     "items": [
       {
@@ -307,7 +305,7 @@ Publication occurs only for `APPROVED`:
 ```text
 topic: product-release.build.requested
 dead letter: product-release.build.requested.dlq   # owned by the future consumer
-type: product-release.build.requested.v1
+type: product-release.build.requested
 Kafka key: productId
 message ID: product-release-build:<submissionId>
 ```
@@ -315,7 +313,7 @@ message ID: product-release-build:<submissionId>
 Payload:
 
 ```ts
-type ProductReleaseBuildRequestedV1 = {
+type ProductReleaseBuildRequested = {
   submissionId: string;
 };
 ```
@@ -335,13 +333,13 @@ new idempotency table or request key is required.
 
 Repeated behavior:
 
-| Stored state                                    | Repeated request                                      | Result                                      |
-| ----------------------------------------------- | ----------------------------------------------------- | ------------------------------------------- |
-| same terminal decision, equal feedback          | same request                                          | success                                     |
-| `APPROVED`, equal request                       | same request                                          | success and safe deterministic republish    |
-| terminal decision, different decision           | any different decision                                | conflict                                    |
-| terminal decision, same decision, changed input | altered feedback                                      | conflict                                    |
-| `READY_FOR_REVIEW`                              | valid first decision                                  | commit decision                             |
+| Stored state                                    | Repeated request       | Result                                   |
+| ----------------------------------------------- | ---------------------- | ---------------------------------------- |
+| same terminal decision, equal feedback          | same request           | success                                  |
+| `APPROVED`, equal request                       | same request           | success and safe deterministic republish |
+| terminal decision, different decision           | any different decision | conflict                                 |
+| terminal decision, same decision, changed input | altered feedback       | conflict                                 |
+| `READY_FOR_REVIEW`                              | valid first decision   | commit decision                          |
 
 There is an accepted direct-publication gap: the approval transaction can commit and the process
 can stop before Kafka publication succeeds. Recovery is provided by repeating the identical
@@ -351,20 +349,20 @@ not part of this MVP.
 
 ## 9. Failure contract
 
-| Condition                                                   | HTTP result                                      | Mutation |
-| ----------------------------------------------------------- | ------------------------------------------------ | -------- |
-| Missing or deleted Submission                               | `404 Error.SubmissionNotFound`                   | none     |
-| Submission not `READY_FOR_REVIEW` and not identical retry   | `409 Error.SubmissionNotReadyForReview`          | none     |
-| Different terminal decision already exists                  | `409 Error.SubmissionAlreadyReviewed`            | none     |
-| Same decision with different feedback                       | `409 Error.SubmissionReviewConflict`             | none     |
-| Missing feedback for request-changes/reject                  | `422 Error.SubmissionReviewFeedbackRequired`     | none     |
-| Feedback violates shape, bounds, or safe-content checks     | `422 Error.InvalidSubmissionReviewFeedback`      | none     |
-| Approval attempted for scan `FAILED`                        | `409 Error.SubmissionScanFailed`                 | none     |
-| Scan is not a completed `PASSED` or `FAILED` business scan  | `409 Error.SubmissionScanIncomplete`             | none     |
-| Product or Publisher no longer approval-eligible            | `409 Error.SubmissionNotEligibleForApproval`      | none     |
-| Authorization missing or insufficient                       | existing `401` or `403` contract                 | none     |
-| Database failure before commit                              | existing internal error contract                 | rollback |
-| Kafka publication fails after approval commit               | `503 Error.ProductReleaseBuildPublishFailed`     | retained |
+| Condition                                                  | HTTP result                                  | Mutation |
+| ---------------------------------------------------------- | -------------------------------------------- | -------- |
+| Missing or deleted Submission                              | `404 Error.SubmissionNotFound`               | none     |
+| Submission not `READY_FOR_REVIEW` and not identical retry  | `409 Error.SubmissionNotReadyForReview`      | none     |
+| Different terminal decision already exists                 | `409 Error.SubmissionAlreadyReviewed`        | none     |
+| Same decision with different feedback                      | `409 Error.SubmissionReviewConflict`         | none     |
+| Missing feedback for request-changes/reject                | `422 Error.SubmissionReviewFeedbackRequired` | none     |
+| Feedback violates shape, bounds, or safe-content checks    | `422 Error.InvalidSubmissionReviewFeedback`  | none     |
+| Approval attempted for scan `FAILED`                       | `409 Error.SubmissionScanFailed`             | none     |
+| Scan is not a completed `PASSED` or `FAILED` business scan | `409 Error.SubmissionScanIncomplete`         | none     |
+| Product or Publisher no longer approval-eligible           | `409 Error.SubmissionNotEligibleForApproval` | none     |
+| Authorization missing or insufficient                      | existing `401` or `403` contract             | none     |
+| Database failure before commit                             | existing internal error contract             | rollback |
+| Kafka publication fails after approval commit              | `503 Error.ProductReleaseBuildPublishFailed` | retained |
 
 Known validation and lifecycle failures are not logged repeatedly at controller and service layers.
 The centralized request/error logger records the final failure. Kafka publication failure logs the
@@ -416,16 +414,16 @@ src/routes/submission-review/
   submission-review.module.ts
 ```
 
-| File                              | Responsibility                                                      |
-| --------------------------------- | ------------------------------------------------------------------- |
-| `submission-review.controller.ts` | Admin-only route, DTO binding, active Admin extraction, delegation  |
-| `submission-review.service.ts`    | Decision rules, transaction, idempotency, post-commit publication   |
-| `submission-review.repo.ts`       | Minimal Submission/Product locks, eligibility reads, review update  |
-| `submission-review.model.ts`      | Strict decision, feedback, and success-response schemas             |
-| `submission-review.dto.ts`        | Zod DTO and OpenAPI adapters                                        |
-| `submission-review.error.ts`      | Stable lifecycle, feedback, conflict, and publication errors        |
-| `submission-review.constant.ts`   | Decisions, bounds, topic/type/group-independent message constants   |
-| `submission-review.module.ts`     | Controller/service/repository and queue integration                 |
+| File                              | Responsibility                                                     |
+| --------------------------------- | ------------------------------------------------------------------ |
+| `submission-review.controller.ts` | Admin-only route, DTO binding, active Admin extraction, delegation |
+| `submission-review.service.ts`    | Decision rules, transaction, idempotency, post-commit publication  |
+| `submission-review.repo.ts`       | Minimal Submission/Product locks, eligibility reads, review update |
+| `submission-review.model.ts`      | Strict decision, feedback, and success-response schemas            |
+| `submission-review.dto.ts`        | Zod DTO and OpenAPI adapters                                       |
+| `submission-review.error.ts`      | Stable lifecycle, feedback, conflict, and publication errors       |
+| `submission-review.constant.ts`   | Decisions, bounds, topic/type/group-independent message constants  |
+| `submission-review.module.ts`     | Controller/service/repository and queue integration                |
 
 The module is registered in `AppModule`. Permission seeding discovers its controller route. The
 service injects the existing `QUEUE_PROVIDER`; no new messaging dependency is introduced.
@@ -456,7 +454,7 @@ Submission controller or expose internal queue contracts as HTTP DTOs.
 
 ### Publication
 
-- Only approval publishes `product-release.build.requested.v1`.
+- Only approval publishes `product-release.build.requested`.
 - Publication occurs after commit and carries only `submissionId`.
 - The key, message ID, type, and trace ID follow the documented contract.
 - A post-commit publication failure leaves the Submission approved and returns the retryable error.

@@ -97,6 +97,10 @@ The Product module must not copy Project workflow content or Publisher profile d
   add the foreign key and becomes the only owner of current-release changes.
 - General Asset relations and presigned URLs remain post-MVP. Product images use the existing
   Static/Cloudflare R2 path because expected files are small and already supported by Backend upload.
+- The Product Offer module may add nullable internal `lastOfferChangedAt` to Product for a
+  Product-level commercial cooldown. Product create/update, Submission, Review, and Product Release
+  must not write it. Offer price/duration changes remain outside Submission and never rebuild a
+  Product Release.
 
 ## 3. Data model
 
@@ -107,6 +111,7 @@ Product
   projectId UUID FK Project, required, immutable, unique
   status ProductStatus, required, default DRAFT
   currentReleaseId UUID, nullable, internal-only; Product Release adds the FK later
+  lastOfferChangedAt TIMESTAMPTZ, nullable, internal-only; Product Offer owns writes
   name VARCHAR(255), nullable while draft
   slug VARCHAR(255), nullable while draft
   shortDescription VARCHAR(500), nullable while draft
@@ -266,6 +271,13 @@ type ProductMediaOutput = ProductMediaInput & {
   id: string; // UUID
 };
 
+type ProductOfferOutput = {
+  id: string; // UUID
+  type: "ONE_TIME" | "SUBSCRIPTION";
+  priceAmount: string; // system-balance BIGINT serialized as a decimal string
+  durationDays: number | null;
+};
+
 type ProductManagementOutput = {
   id: string; // UUID
   publisherAccountId: string; // UUID
@@ -282,6 +294,10 @@ type ProductManagementOutput = {
   suspendedAt: string | null;
   createdAt: string;
   updatedAt: string | null;
+};
+
+type ProductManagementDetailOutput = ProductManagementOutput & {
+  offers: ProductOfferOutput[];
 };
 
 type ProductIdParam = {
@@ -347,14 +363,14 @@ use `GET /products/{productId}` to fetch the complete Product and its relations.
 
 Route-specific failures:
 
-| Condition                                                                            | Result                          |
-| ------------------------------------------------------------------------------------ | ------------------------------- |
-| Project is missing, archived, deleted, or cross-owner                                | `404 Error.ProjectNotFound`     |
-| Existing non-archived Product for the Project                                        | `409 Error.ProductAlreadyExists`|
-| Existing Product is archived                                                         | `409 Error.ProductArchived`     |
-| Slug is already reserved by another Product                                          | `409 Error.ProductSlugConflict` |
-| Media contains an unavailable, unprocessed, non-image, or duplicate Static reference | `422 Error.ProductMediaInvalid` |
-| Caller is not an eligible active Publisher                                           | Existing Publisher policy error |
+| Condition                                                                            | Result                           |
+| ------------------------------------------------------------------------------------ | -------------------------------- |
+| Project is missing, archived, deleted, or cross-owner                                | `404 Error.ProjectNotFound`      |
+| Existing non-archived Product for the Project                                        | `409 Error.ProductAlreadyExists` |
+| Existing Product is archived                                                         | `409 Error.ProductArchived`      |
+| Slug is already reserved by another Product                                          | `409 Error.ProductSlugConflict`  |
+| Media contains an unavailable, unprocessed, non-image, or duplicate Static reference | `422 Error.ProductMediaInvalid`  |
+| Caller is not an eligible active Publisher                                           | Existing Publisher policy error  |
 
 ### 5.3 Update a Product draft
 
@@ -502,7 +518,7 @@ type ProductIdParam = {
 };
 ```
 
-Successful response: `200 OK`.
+Successful response: `200 OK` with `ProductManagementDetailOutput`.
 
 ```json
 {
@@ -529,6 +545,20 @@ Successful response: `200 OK`.
         "altText": "Daily Reward Collector icon"
       }
     ],
+    "offers": [
+      {
+        "id": "aa4e2b8c-e255-4d18-a8ec-a8606d3489e7",
+        "type": "ONE_TIME",
+        "priceAmount": "0",
+        "durationDays": 7
+      },
+      {
+        "id": "232b6676-988d-4a2a-9cbb-11633a390695",
+        "type": "SUBSCRIPTION",
+        "priceAmount": "250",
+        "durationDays": 90
+      }
+    ],
     "currentReleaseId": null,
     "statusReason": null,
     "suspendedAt": null,
@@ -539,11 +569,11 @@ Successful response: `200 OK`.
 }
 ```
 
-The management response does not expose audit user IDs, soft-delete fields, workflow content,
-Publisher private data, Submission snapshots, Static object keys, or Release artifacts.
+The management detail response returns the current non-deleted Offers so the Publisher editor and Admin view can reload the newest state after an Offer mutation. Offer IDs are read-only; the strict Offer replacement request accepts only type, price, and duration. Product management lists do not preload Offers.
 
-Missing, deleted, and cross-owner Products return `404 Error.ProductNotFound`. Invalid UUIDs return
-`422` before the service runs.
+The management response does not expose audit user IDs, soft-delete fields, workflow content, Publisher private data, Submission snapshots, Static object keys, or Release artifacts.
+
+Missing, deleted, and cross-owner Products return `404 Error.ProductNotFound`. Invalid UUIDs return `422` before the service runs.
 
 ### 5.6 Deferred Public Marketplace Product reads
 
@@ -593,13 +623,29 @@ type PublicProductSummaryOutput = {
   shortDescription: string;
   publisher: PublicProductPublisherOutput;
   currentRelease: PublicProductReleaseOutput;
+  minimumSubscriptionOffer: {
+    priceAmount: string;
+    durationDays: number;
+  } | null;
 };
 
 type PublicProductDetailOutput = PublicProductSummaryOutput & {
   description: string;
   usageInstructions: string | null;
+  offers: ProductOfferOutput[];
 };
 ```
+
+Presentation fields still come from the approved Submission behind `currentReleaseId`. `offers`
+comes from the current non-deleted ProductOffer collection because commercial terms are managed
+independently and are not part of Submission/Admin review. An active Product with no eligible Offer
+returns `offers: []` and is visible but not purchasable.
+
+`minimumSubscriptionOffer` considers only current non-deleted `SUBSCRIPTION` Offers and ignores
+`ONE_TIME` Offers. It selects `priceAmount ASC`; equal prices use `durationDays ASC`, then Offer ID
+`ASC`, so the returned duration always corresponds to the selected minimum-price row. It is `null`
+when the Product has no subscription Offer. The list query must load this projection for the page in
+one set-based query and must not execute one Offer query per Product.
 
 List query:
 
@@ -619,6 +665,10 @@ Detail uses strict UUID `productId` and returns `PublicProductDetailOutput`. Mis
 Products that fail any public eligibility condition both return `404 Error.ProductNotFound`; the
 route must not reveal draft, suspended, archived, blocked-Publisher, rejected, failed-build, or
 disabled-release state.
+
+There is no standalone public or management Offer read endpoint. Product detail is the refresh
+source after `PUT /products/:productId/offers`; Offer mutation responses contain only the shared
+`SUCCESS_RESPONSE`.
 
 Public media delivery is not part of this MVP API contract yet. These public responses must not
 expose `staticId`, private Static URLs, or R2 object keys. Product media remains available in
@@ -933,20 +983,20 @@ The Product authoring feature is conformant when the following behaviors are dem
 verification is manual; automated Product tests are intentionally deferred to prioritize feature
 implementation.
 
-| Area             | Required behavior                                                                                                     |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------- |
-| Identity         | Exactly one Product is created by its Publisher for a Project before Submission.                                      |
-| Ownership        | Product ownership always equals Project ownership and cannot be supplied or changed by clients.                       |
-| Draft authoring  | Product text and ordered Static-backed media save together with MVP last-write-wins behavior.                         |
-| Create conflict  | Exactly one create wins per Project; repeated and concurrent losers receive a terminal conflict.                     |
-| Publisher policy | Only a currently qualified Publisher can create/update Product or archive an owned draft.                            |
-| Read access      | Owner `OWN` and Admin unrestricted reads are isolated; cross-owner access is indistinguishable from not found.        |
-| Lifecycle        | Only the approved transitions occur; `ARCHIVED` is terminal and suspension fields remain consistent.                  |
-| Project boundary | Archived Project does not erase Product history, but cannot create a new Product or support a future Submission.      |
-| Data exposure    | Management responses expose draft fields and Static IDs, never object keys, private URLs, or workflow content.        |
-| Performance      | Lists and relation projections are set-based, paginated, deterministically ordered, and contain no per-row queries.   |
-| Security         | No client can select another Publisher, enumerate Products, or mutate lifecycle via PATCH.                            |
-| Operations       | Expected mutations use database constraints/conditional writes and add no Redis lock or storage/network call.         |
+| Area             | Required behavior                                                                                                   |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Identity         | Exactly one Product is created by its Publisher for a Project before Submission.                                    |
+| Ownership        | Product ownership always equals Project ownership and cannot be supplied or changed by clients.                     |
+| Draft authoring  | Product text and ordered Static-backed media save together with MVP last-write-wins behavior.                       |
+| Create conflict  | Exactly one create wins per Project; repeated and concurrent losers receive a terminal conflict.                    |
+| Publisher policy | Only a currently qualified Publisher can create/update Product or archive an owned draft.                           |
+| Read access      | Owner `OWN` and Admin unrestricted reads are isolated; cross-owner access is indistinguishable from not found.      |
+| Lifecycle        | Only the approved transitions occur; `ARCHIVED` is terminal and suspension fields remain consistent.                |
+| Project boundary | Archived Project does not erase Product history, but cannot create a new Product or support a future Submission.    |
+| Data exposure    | Management responses expose draft fields and Static IDs, never object keys, private URLs, or workflow content.      |
+| Performance      | Lists and relation projections are set-based, paginated, deterministically ordered, and contain no per-row queries. |
+| Security         | No client can select another Publisher, enumerate Products, or mutate lifecycle via PATCH.                          |
+| Operations       | Expected mutations use database constraints/conditional writes and add no Redis lock or storage/network call.       |
 
 ## 12. Deferred features
 

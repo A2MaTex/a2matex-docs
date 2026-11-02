@@ -11,7 +11,7 @@ Backend là source of truth cho dữ liệu cloud. Database local của Studio, 
 | `01_identity_publisher_installation.md` | Identity, access và Launcher distribution | Auth/RBAC hiện có, Publisher, Terms, Launcher Release |
 | `02_studio_project_workflow.md` | Studio cloud data | Node Catalog, Project Draft, Workflow Revision, Asset |
 | `03_product_submission_release.md` | Marketplace publishing | Product, Listing, Taxonomy, Submission, Scan, Review, ProductRelease |
-| `04_commerce_entitlement_execution.md` | Customer ownership và execution authorization | Offer, Order, Payment, Entitlement, Lease, Execution Report, Product Report |
+| `04_commerce_entitlement_execution.md` | Customer ownership và execution authorization | Offer, balance Order, Entitlement, Lease, Execution Report, Product Report |
 | `05_operations_support.md` | Hạ tầng hỗ trợ | Audit, Notification, Outbox, Job và Idempotency |
 
 ## Quy ước chung
@@ -20,10 +20,14 @@ Backend là source of truth cho dữ liệu cloud. Database local của Studio, 
 - Tên table và camelCase column được quote để khớp Prisma hiện tại.
 - Timestamp dùng `TIMESTAMPTZ` và lưu UTC.
 - Mutable business entity có `createdAt`, `updatedAt`, `deletedAt` khi cần soft delete.
+- Row đã soft-delete là historical data immutable: Backend không restore, update hoặc reuse ID; nếu
+  business key xuất hiện lại thì tạo row mới.
 - Immutable snapshot/evidence record không soft delete; chỉ thêm record mới hoặc thay đổi status được cho phép.
 - Foreign key mặc định không cascade delete dữ liệu nghiệp vụ hoặc lịch sử.
 - Partial unique index dùng `WHERE "deletedAt" IS NULL` cho soft-deleted master data.
-- Tiền được lưu bằng integer minor unit (`priceMinor`), không dùng floating point.
+- Product price và balance dùng cùng integer system-currency unit (`priceAmount`/`balance`) dưới dạng
+  BIGINT, không dùng floating point. API serialize BIGINT thành decimal string. Currency/direct
+  payment chỉ được thêm bởi feature spec riêng sau MVP.
 - Secret plaintext, refresh/lease token plaintext và workflow decryption key không được lưu. Chỉ lưu hash hoặc key reference.
 - Binary file không lưu trong PostgreSQL. Database chỉ lưu Object Storage key, size, media type và hash.
 - JSONB chỉ dùng cho snapshot, schema có version, metadata biến đổi hoặc payload event. Quan hệ cần query/join/constraint phải dùng table/column chuẩn.

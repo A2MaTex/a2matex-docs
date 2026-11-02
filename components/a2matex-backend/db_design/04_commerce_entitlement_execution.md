@@ -6,76 +6,80 @@ Nhóm này quản lý quyền sử dụng Product của customer:
 
 ```text
 ProductOffer
-→ free acquisition hoặc Order/Payment
+→ zero-value hoặc balance Order
 → Entitlement
 → ExecutionLease
 → Runtime validation
 → ExecutionReport
 ```
 
-MVP ưu tiên free acquisition và admin manual grant. Schema Order/Payment được giữ ở mức cơ bản để không chặn việc bổ sung payment gateway sau UAT.
+MVP dùng `Profile.balance` làm system currency và vẫn tạo Order/OrderItem cho acquisition giá 0.
+Direct payment, multi-currency và PaymentTransaction cho purchase Product được defer đến một feature
+spec riêng. Admin manual grant vẫn thuộc Entitlement Module.
 
 ## 2. Product Offer
 
 ### Trách nhiệm
 
-`ProductOffer` mô tả cách customer nhận quyền sử dụng và commercial terms sẽ snapshot vào Entitlement. MVP không bán machine, device hoặc concurrency limit.
+`ProductOffer` mô tả các lựa chọn one-time/subscription hiện tại của một Product. Publisher thay thế
+toàn bộ collection bằng một API; Backend match current row theo `(productId, type, durationDays)`,
+update price in-place, insert combination mới và soft-delete combination bị
+omit. Offer không có review/status riêng và không nằm trong Submission snapshot. Contract đầy đủ:
+[Product Offer Module Feature Spec](../commerce_entitlement_execution/product_offer.md).
 
 ```sql
 CREATE TYPE "ProductOfferType" AS ENUM (
-    'FREE',
     'ONE_TIME',
     'SUBSCRIPTION'
 );
 
-CREATE TYPE "ProductOfferStatus" AS ENUM (
-    'DRAFT',
-    'ACTIVE',
-    'INACTIVE'
-);
+ALTER TABLE "Product"
+ADD COLUMN "lastOfferChangedAt" TIMESTAMPTZ;
 
 CREATE TABLE "ProductOffer" (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    "productId" UUID NOT NULL REFERENCES "Product" (id),
+    "productId" UUID NOT NULL REFERENCES "Product" (id) ON DELETE NO ACTION,
     type "ProductOfferType" NOT NULL,
-    status "ProductOfferStatus" NOT NULL DEFAULT 'DRAFT',
-    currency CHAR(3),
-    "priceMinor" BIGINT CHECK ("priceMinor" IS NULL OR "priceMinor" >= 0),
-    "durationDays" INTEGER CHECK ("durationDays" IS NULL OR "durationDays" > 0),
-
-    -- Mock JSON:
-    -- {
-    --   "schemaVersion": "1.0",
-    --   "releaseAccess": "CURRENT_AND_SUPPORTED",
-    --   "allowUpdates": true
-    -- }
-    "usagePolicy" JSONB NOT NULL DEFAULT '{}'::JSONB,
+    "priceAmount" BIGINT NOT NULL,
+    "durationDays" INTEGER,
 
     "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
     "updatedAt" TIMESTAMPTZ,
     "deletedAt" TIMESTAMPTZ,
-    "createdById" UUID NOT NULL REFERENCES "User" (id),
-    "updatedById" UUID REFERENCES "User" (id),
-
-    CONSTRAINT "ProductOffer_usagePolicy_object_check"
-        CHECK (jsonb_typeof("usagePolicy") = 'object'),
-    CONSTRAINT "ProductOffer_price_check" CHECK (
-        (type = 'FREE' AND COALESCE("priceMinor", 0) = 0)
-        OR
-        (type <> 'FREE' AND "priceMinor" IS NOT NULL AND currency IS NOT NULL)
-    )
+    "createdById" UUID NOT NULL REFERENCES "User" (id) ON DELETE NO ACTION,
+    "updatedById" UUID REFERENCES "User" (id) ON DELETE NO ACTION,
+    "deletedById" UUID REFERENCES "User" (id) ON DELETE NO ACTION
 );
 
-CREATE INDEX "ProductOffer_product_status_idx"
-ON "ProductOffer" ("productId", status)
+CREATE INDEX "ProductOffer_productId_idx"
+ON "ProductOffer" ("productId")
 WHERE "deletedAt" IS NULL;
 ```
 
-## 3. Order và Payment
+`priceAmount` là BIGINT cùng unit với `Profile.balance` và được serialize thành decimal string trên
+API. `ONE_TIME` cho phép price bằng 0, duration hữu hạn hoặc permanent (`null`). `SUBSCRIPTION` yêu
+cầu price dương và duration hữu hạn. Backend validate các rule này, duplicate natural key,
+soft-delete pairing và cooldown; database chỉ giữ identity/foreign key/index quan trọng.
+
+`Product.lastOfferChangedAt` chỉ được Product Offer service update khi collection public của Product
+`ACTIVE` thay đổi thật sự. Draft edit và no-op request không consume cooldown.
+Offer count, maximum duration, maximum price và cooldown hours đều lấy từ validated environment
+configuration; các giá trị này không nằm trong API response.
+Offer đã soft-delete là historical data immutable: không restore, không update và không reuse ID.
+Nếu cùng type/duration xuất hiện lại, Backend insert row mới.
+
+Không có Offer GET API riêng. Management và public Product detail preload toàn bộ current
+non-deleted Offer; public Product list chỉ preload minimum-priced `SUBSCRIPTION` Offer gồm price và
+duration, hoàn toàn bỏ qua `ONE_TIME`. `PUT /products/:productId/offers` chỉ trả
+`SUCCESS_RESPONSE`; frontend reload Product detail để lấy state và generated IDs mới nhất.
+
+## 3. Order
 
 ### Trách nhiệm
 
-`Order` lưu commercial transaction. `OrderItem` snapshot Offer để lịch sử không thay đổi khi publisher sửa giá hoặc thời hạn. `PaymentTransaction` lưu normalized payment attempt, không lưu secret/payment credential.
+`Order` lưu transaction dùng system balance. `OrderItem` snapshot Offer để lịch sử không thay đổi
+khi Publisher sửa price hoặc collection. Đây là compatibility shape tạm thời; Order feature spec sẽ
+chốt concurrency/idempotency và API trước implementation.
 
 ```sql
 CREATE TYPE "OrderStatus" AS ENUM (
@@ -89,8 +93,7 @@ CREATE TABLE "Order" (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     "customerId" UUID NOT NULL REFERENCES "User" (id),
     status "OrderStatus" NOT NULL DEFAULT 'PENDING',
-    currency CHAR(3) NOT NULL,
-    "totalMinor" BIGINT NOT NULL CHECK ("totalMinor" >= 0),
+    "totalAmount" BIGINT NOT NULL,
     "paidAt" TIMESTAMPTZ,
     "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
     "updatedAt" TIMESTAMPTZ,
@@ -104,14 +107,13 @@ CREATE TABLE "OrderItem" (
     "orderId" UUID NOT NULL REFERENCES "Order" (id),
     "productId" UUID NOT NULL REFERENCES "Product" (id),
     "productOfferId" UUID NOT NULL REFERENCES "ProductOffer" (id),
-    "unitPriceMinor" BIGINT NOT NULL CHECK ("unitPriceMinor" >= 0),
+    "unitPriceAmount" BIGINT NOT NULL,
 
     -- Mock JSON: immutable commercial snapshot.
     -- {
     --   "schemaVersion": "1.0",
     --   "offerType": "ONE_TIME",
-    --   "currency": "USD",
-    --   "priceMinor": 999,
+    --   "priceAmount": "0",
     --   "durationDays": 30
     -- }
     "offerSnapshot" JSONB NOT NULL,
@@ -121,50 +123,17 @@ CREATE TABLE "OrderItem" (
     CONSTRAINT "OrderItem_offerSnapshot_object_check"
         CHECK (jsonb_typeof("offerSnapshot") = 'object')
 );
-
-CREATE TYPE "PaymentStatus" AS ENUM (
-    'PENDING',
-    'SUCCEEDED',
-    'FAILED',
-    'CANCELLED'
-);
-
-CREATE TABLE "PaymentTransaction" (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    "orderId" UUID NOT NULL REFERENCES "Order" (id),
-    provider VARCHAR(100) NOT NULL,
-    "providerTransactionId" VARCHAR(255),
-    status "PaymentStatus" NOT NULL DEFAULT 'PENDING',
-    currency CHAR(3) NOT NULL,
-    "amountMinor" BIGINT NOT NULL CHECK ("amountMinor" >= 0),
-
-    -- Mock JSON: sanitized provider result only.
-    -- {
-    --   "schemaVersion": "1.0",
-    --   "providerStatus": "captured",
-    --   "failureCode": null
-    -- }
-    -- Không lưu card number, secret, raw authorization header hoặc full webhook chứa PII.
-    "providerResult" JSONB NOT NULL DEFAULT '{}'::JSONB,
-
-    "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
-    "updatedAt" TIMESTAMPTZ,
-    CONSTRAINT "PaymentTransaction_providerResult_object_check"
-        CHECK (jsonb_typeof("providerResult") = 'object')
-);
-
-CREATE UNIQUE INDEX "PaymentTransaction_provider_id_idx"
-ON "PaymentTransaction" (provider, "providerTransactionId")
-WHERE "providerTransactionId" IS NOT NULL;
 ```
 
-Free acquisition không bắt buộc tạo PaymentTransaction. Có thể tạo Order zero-value để thống nhất history, hoặc cấp Entitlement trực tiếp với `grantSource = FREE_ACQUISITION`; quyết định API sẽ được chốt khi làm commerce slice.
+Acquisition giá 0 vẫn tạo zero-value Order và OrderItem. Product purchase không tạo
+PaymentTransaction trong MVP; TopUp/SePay chỉ nạp `Profile.balance` trước khi Order dùng balance.
 
 ## 4. Entitlement
 
 ### Trách nhiệm
 
-`Entitlement` là quyền dài hạn của một User đối với một Product. Commercial terms được snapshot khi grant để Offer thay đổi không âm thầm thay đổi quyền đã cấp. Entitlement không giới hạn machine, device hoặc concurrent execution.
+`Entitlement` là current access state lâu dài của một User đối với một Product. Immutable commercial terms nằm trong từng OrderItem; Entitlement giữ period và source mới nhất để authorize access.
+Entitlement không giới hạn machine, device hoặc concurrent execution.
 
 ```sql
 CREATE TYPE "EntitlementStatus" AS ENUM (
@@ -174,7 +143,6 @@ CREATE TYPE "EntitlementStatus" AS ENUM (
 );
 
 CREATE TYPE "EntitlementGrantSource" AS ENUM (
-    'FREE_ACQUISITION',
     'ORDER',
     'ADMIN_GRANT'
 );
@@ -183,19 +151,19 @@ CREATE TABLE "Entitlement" (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     "customerId" UUID NOT NULL REFERENCES "User" (id),
     "productId" UUID NOT NULL REFERENCES "Product" (id),
-    "productOfferId" UUID REFERENCES "ProductOffer" (id),
-    "orderItemId" UUID REFERENCES "OrderItem" (id),
+    "latestProductOfferId" UUID REFERENCES "ProductOffer" (id),
+    "latestOrderItemId" UUID REFERENCES "OrderItem" (id),
     status "EntitlementStatus" NOT NULL DEFAULT 'ACTIVE',
     "grantSource" "EntitlementGrantSource" NOT NULL,
     "startsAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
     "expiresAt" TIMESTAMPTZ,
+    "oneTimePurchasedAt" TIMESTAMPTZ,
 
-    -- Mock JSON: immutable snapshot of effective usage rights.
+    -- Mock JSON: current effective usage rights; OrderItem keeps immutable purchase terms.
     -- {
     --   "schemaVersion": "1.0",
     --   "releaseAccess": "CURRENT_AND_SUPPORTED",
-    --   "allowUpdates": true,
-    --   "sourceOfferVersion": 1
+    --   "allowUpdates": true
     -- }
     "grantSnapshot" JSONB NOT NULL,
 
@@ -213,15 +181,18 @@ CREATE TABLE "Entitlement" (
     CONSTRAINT "Entitlement_revoke_fields_check" CHECK (
         status <> 'REVOKED'
         OR ("revokedAt" IS NOT NULL AND "revokedById" IS NOT NULL AND "revokedReason" IS NOT NULL)
-    )
+    ),
+    CONSTRAINT "Entitlement_customer_product_key"
+        UNIQUE ("customerId", "productId")
 );
-
-CREATE UNIQUE INDEX "Entitlement_active_customer_product_idx"
-ON "Entitlement" ("customerId", "productId")
-WHERE status = 'ACTIVE';
 ```
 
-Expiration time vẫn phải được kiểm tra bằng `expiresAt > now()`; partial index không thể tự chuyển status theo thời gian. Worker/lazy update có thể chuyển record sang `EXPIRED`.
+Một customer có đúng một durable Entitlement row cho mỗi Product. Order mới bị block nếu
+`expiresAt IS NULL` hoặc `expiresAt > transactionNow`; status stale không thay thế time check. Khi
+access đã expire, customer có thể mua `SUBSCRIPTION` mới và period bắt đầu từ transaction time, không
+stack/extend period cũ. `oneTimePurchasedAt` được set ở lần `ONE_TIME` thành công đầu tiên và không
+bao giờ clear, kể cả khi access expire. Order feature spec sẽ chốt transaction lock và balance
+deduction; Entitlement Module sẽ chốt reactivation/revocation chi tiết.
 
 ## 5. Execution Lease
 
@@ -400,7 +371,7 @@ ON "ProductReport" (status, "createdAt");
 ```text
 Product
 ├── ProductOffer[]
-├── OrderItem[] ── Order ── PaymentTransaction[]
+├── OrderItem[] ── Order
 ├── Entitlement[]
 │   └── ExecutionLease[] ── ProductRelease
 │       └── ExecutionReport
