@@ -74,16 +74,54 @@ Required fields must exist in `properties`; editor fields must exist in config o
 ports, fields, policies and capabilities are invalid. `ERROR_BRANCH` and the `error` port must be
 declared together. No executable expression or JavaScript is accepted.
 
+### Agreed v1 update — pending implementation
+
+Add optional string `editorHints.documentation` for type-level help. Omission and
+the empty string are both valid; Studio hides Help in either case. Keep the short
+`description` and `fieldOrder`. Studio maps icon and color from `type` and provides
+a fallback for unmapped types. Switch Studio to that mapping before removing the
+existing `editorHints.icon` from the Backend definition and response. No backend
+color field, new database column, or Runtime IR change is needed. Catalog hashing
+and ETag continue to cover the returned catalog content.
+
 ## 5. Initial catalog
 
 | Category | Node types                                                                                                                                   |
 | -------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | Flow     | `flow.start`, `flow.end`, `flow.delay`                                                                                                       |
 | Utility  | `utility.log`                                                                                                                                |
-| Android  | `android.launch_app`, `android.tap`, `android.swipe`, `android.input_text`, `android.press_back`, `android.press_home`, `android.screenshot` |
+| Android  | `android.launch_app`, `android.tap`, `android.swipe`, `android.input_text`, `android.press_back`, `android.press_home`, `android.screenshot`, `android.long_press` |
 
-These 11 nodes are sufficient for the first linear Android workflow. Control flow beyond delay is
-deferred.
+The Backend source catalog contains 12 definitions. Control flow beyond delay is deferred.
+
+### Planned targeting modes and Long Press
+
+The seed includes Long Press. Catalog presence does not indicate Runtime handler
+availability. Tap, Swipe, and Long Press expose a list of mode names in
+`editorHints.targetModes`; their flat `inputSchema` and `fieldOrder` still describe
+pixel inputs and duration where applicable. The percentage and selector fields
+below describe the planned forms; they are not published as input schemas.
+
+| Node type | Absolute pixels (`ABSOLUTE_PIXELS`) | Screen percentage (`SCREEN_PERCENT`) | Element ID (`SELECTOR_ID`) | Additional input |
+|---|---|---|---|---|
+| `android.tap` | `x`, `y` (existing) | `xPercent`, `yPercent` | `selector_id` | None |
+| `android.swipe` | `startX`, `startY`, `endX`, `endY` (existing) | `startXPercent`, `startYPercent`, `endXPercent`, `endYPercent` | Unsupported | Existing gesture `durationMs` in both modes |
+| `android.long_press` (new) | `x`, `y` | `xPercent`, `yPercent` | `selector_id` | Required positive integer hold `durationMs`; execution bounds to be agreed with the handler |
+
+- Percentages are integers from 0 to 100, measured from the top-left of the
+  current device screen in its current orientation. Resolve each axis against
+  its own dimension: `round(percent × (dimension - 1) / 100)`. Scaling does
+  not compensate for controls that move after a layout or orientation change.
+- `selector_id` is the non-empty, full Android UI XML `resource-id`, for
+  example `com.example.app:id/login_button`. At execution, resolve an exact
+  match in the current hierarchy and act at the center of its visible bounds.
+  Missing matches, multiple matches, or unusable bounds fail the action;
+  never fall back to coordinates. The authoring XML is not an execution input.
+- Long Press is an Android device-control action. Its handler is planned;
+  the existing Input Text remains a focused-field action and can follow Tap.
+  No input changes for the other nine existing nodes. Scroll is out of scope.
+- The [Editor Graph rules](workflow_validation.md#planned-targeting-in-editor-graph-v1)
+  describe the planned draft representation. Runtime IR remains unchanged.
 
 ## 6. Publication
 
@@ -118,9 +156,12 @@ existing permissions.
 
 ## 8. Acceptance evidence and remaining integration gate
 
-Verified: source-contract tests, publication behavior, compatibility/disabled filtering,
+Historical verification (11-node catalog): source-contract tests, publication behavior, compatibility/disabled filtering,
 serialization, ETag handling, `200` with 11 nodes for `0.1.0`, `422`, `304`, `401`, `403`, and an
 empty compatible catalog for `0.0.0`.
+
+The 12-definition source catalog passed focused Backend tests and build; the updated
+catalog has not been seeded or verified against a live database in this change.
 
 Not yet verified: Runtime has a registered executable handler for every returned
 `runtimeHandler`. Check this at the Runtime integration phase before claiming end-to-end execution.

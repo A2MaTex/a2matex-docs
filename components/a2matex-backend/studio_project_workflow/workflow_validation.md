@@ -96,6 +96,15 @@ a valid token, active session, active user, active role, and active device.
 
 ## 6. Graph contract and schema version
 
+**Implemented in Backend and local Runtime validation:** The strict node `editor`
+object accepts `label` and `description`, each a non-empty string or `null`.
+Reject empty strings and other types. Accept omission in existing graphs and
+handle it as `null`. Existing `x` and `y` remain
+required. Studio falls back to the definition name for a null label and
+hides a null note. The fields are saved with the project graph,
+have no semantic validation effect, and are omitted from Runtime IR.
+
+
 Editor Graph v1 requires:
 
 - positive integer `schemaVersion` with supported value `1`;
@@ -112,6 +121,38 @@ Contract/type failures use `EDITOR_GRAPH_CONTRACT_INVALID`. Another positive sch
 `schemaVersion` versions the graph JSON structure, not the Node Catalog. Adding node types keeps
 existing graphs on version `1`. A future breaking graph-format version should have its own parser
 and normalize to the shared internal representation before semantic validation.
+
+### Planned targeting in Editor Graph v1
+
+**Pending:** Mode-specific validation, Studio support, and submission gating
+are not implemented. The current validator checks static config against the
+catalog; the three definitions have empty config schemas, so an explicit
+`config.targetMode` is rejected today. Bindings are still opaque.
+
+Keep `schemaVersion: 1` and the existing node envelope. The planned
+`config.targetMode` values for Tap, Swipe, and Long Press are
+`ABSOLUTE_PIXELS`, `SCREEN_PERCENT`, and `SELECTOR_ID`, where supported by the
+node. Existing Tap and Swipe drafts omit the field and retain their pixel
+behavior. Keep their current shape until mode-aware validation is implemented.
+Put the mode's input bindings in the existing `bindings` object. For example,
+a selector Tap uses `config: { "targetMode": "SELECTOR_ID" }` and a
+`bindings.selector_id` literal containing the resource ID. Do not save the
+UI hierarchy or dummy pixel values.
+
+Validate exactly one allowed mode per node against the
+[catalog targeting matrix](node_catalog.md#planned-targeting-modes-and-long-press).
+Require all input bindings for that mode and reject target fields from other
+modes. A Swipe uses one mode for both endpoints. Keep the action's duration
+binding where required. For Studio preparation, the new target fields use
+literal values; broader binding support is outside this update.
+
+Draft storage may preserve these planned configurations even though current
+semantic validators cannot accept them for execution. Studio must identify
+planned modes before invoking execution validation, invalidate any stale
+compiled IR after a targeting change, and prevent test runs and submission
+until supported. Backend submission must independently reject planned nodes
+and modes; saving a draft is not approval to execute it. No new graph or
+Runtime IR version is introduced by this update.
 
 ## 7. Semantic rules
 

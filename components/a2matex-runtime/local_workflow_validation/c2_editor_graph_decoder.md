@@ -108,6 +108,14 @@ A node contains exactly:
 | `errorPolicy` | string | `STOP` or `ERROR_BRANCH` |
 | `editor` | object | Strict object containing finite numeric `x` and `y` |
 
+**Agreed v1 update — pending implementation:** The strict `editor` object will
+also accept `label` and `description`, each a non-empty string or `null`.
+Reject empty strings and other types. Accept omission in existing graphs and
+handle it as `null`. Keep `x` and `y`
+required and reject other unknown fields. This metadata has no effect on local
+semantic validation and does not enter Runtime IR. Verify parity with Backend
+for omitted, null, non-empty, empty, and wrong-type values before Studio sends the fields.
+
 The node-type pattern is:
 
 ```text

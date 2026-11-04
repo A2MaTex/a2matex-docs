@@ -28,23 +28,32 @@ Mục tiêu đúng là:
 |---|---|
 | Launch App | Mở ứng dụng theo package |
 | Stop App | Dừng ứng dụng |
-| Tap | Bấm theo tọa độ hoặc target |
-| Long Press | Nhấn giữ |
-| Swipe | Vuốt |
+| Tap | Tọa độ pixel hiện có; phần trăm màn hình hoặc ID phần tử đang lên kế hoạch |
+| Long Press | Đã có definition trong Backend; form Studio và Runtime handler chưa triển khai. Dùng các chế độ target của Tap, thêm thời gian giữ |
+| Swipe | Hai điểm theo pixel hiện có hoặc theo phần trăm màn hình đang lên kế hoạch |
 | Scroll | Cuộn |
 | Input Text | Nhập text |
 | Clear Text | Xóa nội dung |
 | Key Event | Back, Home, Enter… |
 | Open URL/Deep Link | Mở URI được cho phép |
 
-`Tap` có thể hỗ trợ nhiều target mode:
+Khi triển khai, Studio dùng một bộ chọn chế độ trên mỗi node: **Pixel** (`ABSOLUTE_PIXELS`), **Phần trăm màn hình**,
+hoặc **ID phần tử** theo [ma trận Catalog](../a2matex-backend/studio_project_workflow/node_catalog.md#planned-targeting-modes-and-long-press).
+Catalog cung cấp tên chế độ qua `editorHints.targetModes`. `inputSchema` hiện
+chỉ mô tả form pixel và thời lượng nếu có; chưa thể sinh form phần trăm hoặc ID từ schema này.
+Tap và Long Press dùng chung form target. Swipe dùng cùng chế độ cho cả hai đầu
+và luôn giữ thời gian vuốt. Form phần trăm nhập số nguyên 0–100; ví dụ, vuốt từ
+`(50%, 80%)` đến `(50%, 20%)`. Khi đổi chế độ, bỏ các trường target không còn áp dụng.
 
-- tọa độ cố định;
-- tọa độ theo tỷ lệ màn hình;
-- output từ node nhận diện;
-- UI element selector.
+Với ID phần tử, cho phép nhập `resource-id` đầy đủ hoặc chọn từ XML do extension
+dự kiến cung cấp. Studio có thể chuẩn bị picker bằng XML fixture; chỉ lưu ID đã
+chọn vào draft. Không lưu XML hay tọa độ thay thế vào workflow.
 
-Không nhất thiết tạo bốn node Tap khác nhau.
+Gắn nhãn **Planned** cho các chế độ mới và Long Press. Cho phép lưu/mở lại draft
+theo hợp đồng Editor Graph v1. Khóa chạy thử và submit nếu workflow dùng tính năng
+chưa được Runtime hỗ trợ. Publisher review có thể hiển thị chế độ đã chọn và lý
+do chưa thể submit; không thêm trường nhập liệu cho khách hàng chỉ vì node dùng
+một chế độ target mới. Scroll và target từ output nhận diện nằm ngoài lần này.
 
 ## 9.3. Android observation nodes
 
