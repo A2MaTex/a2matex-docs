@@ -35,6 +35,7 @@ The MVP command set is closed. Exactly these variants are supported:
 | `LAUNCH_APP` | `packageName` | `android.launch_app` |
 | `TAP` | `x`, `y` | `android.tap` |
 | `SWIPE` | `startX`, `startY`, `endX`, `endY`, `durationMs` | `android.swipe` |
+| `LONG_PRESS` | `x`, `y`, `durationMs` | `android.long_press` |
 | `INPUT_TEXT` | `text` | `android.input_text` |
 | `PRESS_BACK` | None | `android.press_back` |
 | `PRESS_HOME` | None | `android.press_home` |
@@ -52,7 +53,7 @@ input validation. A4 preserves the approved Backend Node Catalog constraints:
 |---|---|
 | `packageName` | String of 3–255 characters matching the approved Android package-name pattern |
 | Coordinates | Integers from 0 through 100,000 |
-| Swipe `durationMs` | Integer from 1 through 60,000 |
+| Swipe and Long Press `durationMs` | Integer from 1 through 60,000 |
 | `text` | String accepted by the `android.input_text` node contract, with a maximum length of 10,000 |
 
 The command contract does not perform implicit type conversion, truncation,
@@ -93,7 +94,7 @@ separate argument array; it never joins workflow values into a shell string.
 
 ## 5. Command outcomes
 
-For Launch App, Tap, Swipe, Input Text, Back, and Home, successful dispatch has
+For Launch App, Tap, Swipe, Long Press, Input Text, Back, and Home, successful dispatch has
 no command payload and produces no workflow-visible node output. Failure
 returns an A6 error.
 
@@ -140,7 +141,7 @@ A4 does not define:
 
 ## 8. Checkout condition
 
-A4 is complete when all seven current Android nodes map to one of seven closed
+A4 is complete when all eight current Android nodes map to one of eight closed
 command variants, all fields preserve the approved node constraints, and no
 workflow-controlled value can choose an executable, raw argument sequence,
 target serial, shell syntax, or artifact path.

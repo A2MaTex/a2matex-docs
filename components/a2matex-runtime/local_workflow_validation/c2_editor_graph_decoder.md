@@ -104,17 +104,22 @@ A node contains exactly:
 | `id` | string | Editor Graph identifier |
 | `type` | string | Trimmed node type, maximum 255 characters, matching the node-type pattern |
 | `config` | object | Required JSON object; values remain opaque until C4 |
-| `bindings` | object | Required JSON object; values remain opaque until later binding validation |
+| `bindings` | object | Required JSON object; C2 preserves values for C4 targeting checks |
 | `errorPolicy` | string | `STOP` or `ERROR_BRANCH` |
-| `editor` | object | Strict object containing finite numeric `x` and `y` |
+| `editor` | object | Strict Studio canvas metadata with required finite numeric `x` and `y` |
 
-**Agreed v1 update — pending implementation:** The strict `editor` object will
-also accept `label` and `description`, each a non-empty string or `null`.
-Reject empty strings and other types. Accept omission in existing graphs and
-handle it as `null`. Keep `x` and `y`
-required and reject other unknown fields. This metadata has no effect on local
-semantic validation and does not enter Runtime IR. Verify parity with Backend
-for omitted, null, non-empty, empty, and wrong-type values before Studio sends the fields.
+The Runtime Agent receives the full Editor Graph for local authoring
+validation. Its decoder checks the `editor` object against the same shape
+as Backend validation. The Go `Position` struct represents this object.
+`x` and `y` place the node on the Studio canvas. Optional `label` gives the
+node a custom display name, and optional `description` stores the
+publisher's note. Both accept non-empty strings or `null`. Omission is
+equivalent to `null`. Unknown fields are rejected.
+
+Studio omits the entire `editor` object when compiling Runtime IR. Android
+targeting comes from the action's target mode and target input bindings.
+Moving or renaming a node on the canvas leaves the action and its stable node
+ID unchanged.
 
 The node-type pattern is:
 

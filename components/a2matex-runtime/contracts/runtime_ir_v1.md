@@ -11,12 +11,14 @@ by Runtime. Backend stores it in `ProjectDraft.runtimeIr` and later freezes it
 inside a Workflow Revision, but the Project Draft and Editor Graph are separate
 contracts.
 
-Runtime IR contains execution semantics only. It excludes canvas positions,
-viewport state, selection, colors, timestamps, publisher identity, device
-selection, and execution input values.
+Runtime IR contains execution semantics only. Studio omits the entire
+Editor Graph `editor` object during compilation, including canvas coordinates,
+labels, and descriptions. The local Editor Graph validator checks that
+metadata as part of the authoring document. Device actions use the executable
+node inputs. Runtime IR also excludes viewport state, selection, colors,
+timestamps, publisher identity, device selection, and execution input values.
 
-The current Backend Node Catalog is the source of truth for the 11 supported
-node contracts. A runtime-semantic Node Definition change must increase its
+The Backend Node Catalog defines node contracts. A runtime-semantic Node Definition change must increase its
 `minimumRuntimeVersion`; adding a node type does not by itself change Runtime IR
 `formatVersion`.
 
@@ -125,14 +127,16 @@ Each node contains exactly:
 | `id` | Unique node ID retained from the Editor Graph |
 | `type` | Node contract identity |
 | `runtimeHandler` | Handler registry key; no handler version in v1 |
-| `config` | Static object validated by the node's `configSchema` |
+| `config` | Static object validated by the node's config contract |
 | `inputs` | Map from handler input field to one input source |
 | `timeoutMs` | Per-attempt integer timeout from 1 to 600,000 |
 | `retryPolicy` | Strict object containing `maxAttempts` and `delayMs` |
 | `errorPolicy` | `STOP` or `ERROR_BRANCH` |
 
-`config` and `inputs` each contain at most 100 properties. All current nodes
-require `config: {}`. Runtime validates `type`, `runtimeHandler`, config, inputs,
+`config` and `inputs` each contain at most 100 properties. Tap, Swipe, and
+Long Press require `config.targetMode` as specified by the
+[Android targeting contract](android_targeting.md). Other current nodes use
+`config: {}`. Runtime validates `type`, `runtimeHandler`, config, inputs,
 outputs, ports, error policy, and capabilities against its approved node
 contract registry.
 
@@ -246,7 +250,8 @@ node contracts. Runtime requires all three conditions:
 ## 9. Current node matrix
 
 Notation: `int[a..b]`, `string[a..b]`, and `int>=a` describe reduced-schema
-constraints. All nodes use `config: {}`.
+constraints. The Android targeting contract defines the mode-specific inputs
+for Tap, Swipe, and Long Press.
 
 | Type / handler | Inputs | Output payload | Ports | Default timeout | Error policies | Capabilities |
 |---|---|---|---|---:|---|---|
@@ -255,8 +260,9 @@ constraints. All nodes use `config: {}`.
 | `flow.delay` | `durationMs: int[0..300000]` | `durationMs: int>=0` | `success`, `error` | 300,000 | `STOP`, `ERROR_BRANCH` | None |
 | `utility.log` | `message: string[1..4000]` | `{}` | `success`, `error` | 1,000 | `STOP`, `ERROR_BRANCH` | None |
 | `android.launch_app` | `packageName: string[3..255]` with approved package pattern | `{}` | `success`, `error` | 30,000 | `STOP`, `ERROR_BRANCH` | `android.device.control` |
-| `android.tap` | `x`, `y: int[0..100000]` | `{}` | `success`, `error` | 30,000 | `STOP`, `ERROR_BRANCH` | `android.device.control` |
-| `android.swipe` | `startX`, `startY`, `endX`, `endY: int[0..100000]`; `durationMs: int[1..60000]` | `{}` | `success`, `error` | 30,000 | `STOP`, `ERROR_BRANCH` | `android.device.control` |
+| `android.tap` | Mode-specific point | `{}` | `success`, `error` | 30,000 | `STOP`, `ERROR_BRANCH` | `android.device.control` |
+| `android.swipe` | Mode-specific endpoints and duration | `{}` | `success`, `error` | 30,000 | `STOP`, `ERROR_BRANCH` | `android.device.control` |
+| `android.long_press` | Mode-specific point and duration | `{}` | `success`, `error` | 30,000 | `STOP`, `ERROR_BRANCH` | `android.device.control` |
 | `android.input_text` | `text: string[0..10000]` | `{}` | `success`, `error` | 30,000 | `STOP`, `ERROR_BRANCH` | `android.device.control` |
 | `android.press_back` | `{}` | `{}` | `success`, `error` | 30,000 | `STOP`, `ERROR_BRANCH` | `android.device.control` |
 | `android.press_home` | `{}` | `{}` | `success`, `error` | 30,000 | `STOP`, `ERROR_BRANCH` | `android.device.control` |

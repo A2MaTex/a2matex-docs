@@ -48,6 +48,7 @@ C4 owns:
 - the reduced static-config schema language;
 - required, additional-property, scalar-type, range, length, and pattern
   validation for `config`;
+- mode-specific literal binding checks for explicit Android targeting;
 - exact C1 diagnostic paths and references for these checks; and
 - focused tests for registry invariants and node-contract validation.
 
@@ -58,7 +59,7 @@ C4 does not own:
 - diagnostic messages, final ordering, capping, truncation, or status (C1);
 - authentication, request bytes, or HTTP handling (C5);
 - Backend/Runtime validation-test parity (C6);
-- `bindings`, node input/output values, or binding references;
+- general binding references or resolved node input/output values;
 - node-specific error-policy compatibility or control-flow cardinality;
 - executable handler registration or `runtime-info.supportedNodes` (F9);
 - Runtime IR admission (G1); or
@@ -135,24 +136,46 @@ discovered differently per request.
 
 ## 3. Initial installed contracts
 
-The initial C4 registry contains the following 11 Backend-approved contracts.
-All currently declare a closed empty static-config schema, so any supplied
-`config` property is invalid. Node inputs remain in `bindings` and are outside
-C4.
+The C4 registry contains 15 authoring contracts. The table lists the
+configuration accepted for each node.
 
 | Node type | Backend runtime handler | Static `config` | Allowed source ports |
 |---|---|---|---|
 | `flow.start` | `flow.start` | `{}` only | `success` |
 | `flow.end` | `flow.end` | `{}` only | None |
 | `flow.delay` | `flow.delay` | `{}` only | `success`, `error` |
+| `flow.set_variable` | `flow.set_variable` | Required `name`, optional `scope` (`FLOW` or `RUN_GROUP`) | `success`, `error` |
+| `flow.switch` | `flow.switch` | Ordered `rules` | Instance rule IDs, `default`, conditional `error` |
+| `flow.wait_variable` | `flow.wait_variable` | Required Global key `name` and integer `timeoutMs` (1–600,000) | `success`, `error` |
 | `utility.log` | `utility.log` | `{}` only | `success`, `error` |
 | `android.launch_app` | `android.launch_app` | `{}` only | `success`, `error` |
-| `android.tap` | `android.tap` | `{}` only | `success`, `error` |
-| `android.swipe` | `android.swipe` | `{}` only | `success`, `error` |
+| `android.tap` | `android.tap` | Required `targetMode` | `success`, `error` |
+| `android.swipe` | `android.swipe` | Required `targetMode` | `success`, `error` |
+| `android.long_press` | `android.long_press` | Required `targetMode` | `success`, `error` |
 | `android.input_text` | `android.input_text` | `{}` only | `success`, `error` |
 | `android.press_back` | `android.press_back` | `{}` only | `success`, `error` |
 | `android.press_home` | `android.press_home` | `{}` only | `success`, `error` |
 | `android.screenshot` | `android.screenshot` | `{}` only | `success`, `error` |
+
+### Workflow bindings
+
+Stage 3 validates direct output references, Flow reads, and Set Variable's
+authoring shape. See the [workflow binding contract](../contracts/workflow_bindings.md).
+
+### Explicit targeting
+
+C4 validates the [Backend targeting matrix](../../a2matex-backend/studio_project_workflow/node_catalog.md#planned-targeting-modes-and-long-press).
+Tap and Long Press support pixels, percentages, and selector IDs. Swipe
+supports pixels and percentages. Each explicit mode requires exactly its own
+binding fields as strict `{ "kind": "literal", "value": ... }` objects. Swipe
+duration is 1–60,000 ms. Long Press requires a positive safe integer at
+authoring time. Its execution cap belongs to Stage 2. Tap, Swipe, and Long
+Press require `targetMode`, including `ABSOLUTE_PIXELS` for pixel bindings.
+
+A missing or invalid mode produces `NODE_CONFIG_INVALID` at `config.targetMode`.
+Invalid literal members identify their field and member. Extra binding keys
+produce one `NODE_BINDINGS_INVALID` at the containing object. Long Press
+catalog membership establishes authoring support only.
 
 Port kind and label are Backend catalog concerns for this phase. C4 needs only
 the unique port key because the Editor Graph edge contains only `sourcePort`.
@@ -313,7 +336,7 @@ existing validation boundary without introducing an executable handler API:
 internal/validation/nodecontract/
 ├── contract.go          # Contract and reduced field-schema types
 ├── registry.go          # Explicit construction, invariant checks, immutable lookup
-├── definitions.go       # Initial 11 installed validation contracts
+├── definitions.go       # Installed authoring contracts
 ├── config.go            # Pure reduced-schema value checks
 ├── validator.go         # Node type, config, and source-port passes
 ├── registry_test.go     # Construction and immutability tests
@@ -335,7 +358,7 @@ generated Wire file is edited manually.
 
 Focused table-driven tests should cover:
 
-- default-registry construction and the exact 11 types above;
+- default-registry construction and the exact 15 types above;
 - exact allowed port sets for Start, End, and every remaining node;
 - all current contracts accept `{}` and reject every supplied config field;
 - unknown and case-mismatched node types;
@@ -385,7 +408,7 @@ The Go implementation and focused C4 verification are complete.
 
 ## 12. Deferred work
 
-C4 does not validate `bindings`, input/output values, binding references,
+C4 does not validate general binding references, resolved input/output values,
 node-specific error-policy support, edge cardinality, conditional or loop
 semantics, Runtime IR, minimum Runtime versions, capabilities, handler
 availability, devices, assets, credentials, or execution. F9 owns executable

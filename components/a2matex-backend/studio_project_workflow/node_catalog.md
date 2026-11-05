@@ -99,14 +99,15 @@ The Backend source catalog contains 12 definitions. Control flow beyond delay is
 The seed includes Long Press. Catalog presence does not indicate Runtime handler
 availability. Tap, Swipe, and Long Press expose a list of mode names in
 `editorHints.targetModes`; their flat `inputSchema` and `fieldOrder` still describe
-pixel inputs and duration where applicable. The percentage and selector fields
-below describe the planned forms; they are not published as input schemas.
+pixel inputs and duration where applicable. Backend and local Runtime validate
+the explicit authoring modes below. Percentage and selector fields are not
+published as input schemas. Executable support belongs to Stage 2.
 
 | Node type | Absolute pixels (`ABSOLUTE_PIXELS`) | Screen percentage (`SCREEN_PERCENT`) | Element ID (`SELECTOR_ID`) | Additional input |
 |---|---|---|---|---|
 | `android.tap` | `x`, `y` (existing) | `xPercent`, `yPercent` | `selector_id` | None |
 | `android.swipe` | `startX`, `startY`, `endX`, `endY` (existing) | `startXPercent`, `startYPercent`, `endXPercent`, `endYPercent` | Unsupported | Existing gesture `durationMs` in both modes |
-| `android.long_press` (new) | `x`, `y` | `xPercent`, `yPercent` | `selector_id` | Required positive integer hold `durationMs`; execution bounds to be agreed with the handler |
+| `android.long_press` (new) | `x`, `y` | `xPercent`, `yPercent` | `selector_id` | Required positive safe integer hold `durationMs`. Stage 2 plans a 60,000 ms cap. |
 
 - Percentages are integers from 0 to 100, measured from the top-left of the
   current device screen in its current orientation. Resolve each axis against
@@ -117,11 +118,12 @@ below describe the planned forms; they are not published as input schemas.
   match in the current hierarchy and act at the center of its visible bounds.
   Missing matches, multiple matches, or unusable bounds fail the action;
   never fall back to coordinates. The authoring XML is not an execution input.
-- Long Press is an Android device-control action. Its handler is planned;
+- Long Press is an Android device-control action. The Runtime targeting
+  adapter and workflow handler are planned for Phase F.
   the existing Input Text remains a focused-field action and can follow Tap.
   No input changes for the other nine existing nodes. Scroll is out of scope.
 - The [Editor Graph rules](workflow_validation.md#planned-targeting-in-editor-graph-v1)
-  describe the planned draft representation. Runtime IR remains unchanged.
+  describe the validated draft representation. Runtime IR remains unchanged.
 
 ## 6. Publication
 

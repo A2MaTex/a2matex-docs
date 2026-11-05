@@ -233,7 +233,7 @@ Backend commit is recorded in the testdata directory and test failure output.
 
 ## 6. Initial Node Definition boundary
 
-Production C4 uses the 11 Node Definitions copied from the implemented Backend
+The original C6 baseline uses the 11 Node Definitions copied from the implemented Backend
 validator's approved catalog snapshot. Phase C does not implement automatic
 catalog synchronization or node upgrades.
 
@@ -324,6 +324,12 @@ commands, passed case count, unavailable tools, and any deliberately deferred
 transport-only coverage.
 
 ## 11. Acceptance criteria
+
+Stage 1 adds 21 targeting cases in identical `targeting-parity.json` fixtures
+in Backend and Runtime. Both suites compare the full result against explicit
+expected paths. The cases cover missing modes, every supported mode, invalid
+or mixed fields, and strict literal binding shapes. Backend sorts paths by
+typed segments and puts a parent before its descendants, matching C1.
 
 C6 is complete when:
 

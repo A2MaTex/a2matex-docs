@@ -177,6 +177,11 @@ Reference:
 
 ## Phase boundary
 
+The Stage 1 targeting extension adds mode-specific literal checks and Long
+Press authoring support to C4. Studio can use the same validation endpoint
+for these drafts and should gate Test Run on executable Runtime support.
+Runtime IR compilation and Android execution belong to Stage 2.
+
 Phase C answers whether an Editor Graph is valid for local authoring against the
 installed Runtime's supported contracts. The same Runtime may also expose the
 separate later Production API family, but Phase C does not:

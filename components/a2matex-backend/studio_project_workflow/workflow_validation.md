@@ -103,6 +103,9 @@ handle it as `null`. Existing `x` and `y` remain
 required. Studio falls back to the definition name for a null label and
 hides a null note. The fields are saved with the project graph,
 have no semantic validation effect, and are omitted from Runtime IR.
+`editor.x` and `editor.y` are Studio canvas coordinates. The local Runtime
+validator receives them because it validates the full Editor Graph.
+Android targeting uses the action's target mode and input bindings.
 
 
 Editor Graph v1 requires:
@@ -124,37 +127,43 @@ and normalize to the shared internal representation before semantic validation.
 
 ### Planned targeting in Editor Graph v1
 
-**Pending:** Mode-specific validation, Studio support, and submission gating
-are not implemented. The current validator checks static config against the
-catalog; the three definitions have empty config schemas, so an explicit
-`config.targetMode` is rejected today. Bindings are still opaque.
+**Stage 1:** Backend and local Runtime validate explicit targeting modes.
+Studio integration, submission gating, and executable targeting have separate
+delivery gates.
 
-Keep `schemaVersion: 1` and the existing node envelope. The planned
+Keep `schemaVersion: 1` and the existing node envelope. The supported authoring
 `config.targetMode` values for Tap, Swipe, and Long Press are
 `ABSOLUTE_PIXELS`, `SCREEN_PERCENT`, and `SELECTOR_ID`, where supported by the
-node. Existing Tap and Swipe drafts omit the field and retain their pixel
-behavior. Keep their current shape until mode-aware validation is implemented.
+node. Tap, Swipe, and Long Press all require an explicit mode. Pixel drafts
+must specify `ABSOLUTE_PIXELS` and supply the required pixel literal bindings.
+Omitting the mode produces `NODE_CONFIG_INVALID` at `config.targetMode`.
 Put the mode's input bindings in the existing `bindings` object. For example,
 a selector Tap uses `config: { "targetMode": "SELECTOR_ID" }` and a
-`bindings.selector_id` literal containing the resource ID. Do not save the
+`bindings.selector_id: { "kind": "literal", "value": "com.example.app:id/login" }`.
+Do not save the
 UI hierarchy or dummy pixel values.
 
 Validate exactly one allowed mode per node against the
 [catalog targeting matrix](node_catalog.md#planned-targeting-modes-and-long-press).
 Require all input bindings for that mode and reject target fields from other
 modes. A Swipe uses one mode for both endpoints. Keep the action's duration
-binding where required. For Studio preparation, the new target fields use
-literal values; broader binding support is outside this update.
+binding where required. Explicit modes require strict literal objects.
+Invalid mode configuration yields `NODE_CONFIG_INVALID`. Invalid target
+bindings yield `NODE_BINDINGS_INVALID` with the binding path.
 
-Draft storage may preserve these planned configurations even though current
-semantic validators cannot accept them for execution. Studio must identify
-planned modes before invoking execution validation, invalidate any stale
+Authoring validation can accept these drafts before Runtime can execute them.
+Studio must identify unsupported execution modes, invalidate any stale
 compiled IR after a targeting change, and prevent test runs and submission
 until supported. Backend submission must independently reject planned nodes
 and modes; saving a draft is not approval to execute it. No new graph or
 Runtime IR version is introduced by this update.
 
 ## 7. Semantic rules
+
+Stage 3 adds direct output and Flow variable binding checks and Set Variable
+authoring validation. The existing batched catalog lookup also loads input
+and output schemas. See the
+[shared binding contract](../../a2matex-runtime/contracts/workflow_bindings.md).
 
 - Unique node and edge IDs.
 - Exactly one Start matching `entryNodeId`.

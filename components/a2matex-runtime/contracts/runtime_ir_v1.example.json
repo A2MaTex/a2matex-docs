@@ -76,15 +76,15 @@
       "id": "tap_01",
       "type": "android.tap",
       "runtimeHandler": "android.tap",
-      "config": {},
+      "config": {"targetMode": "ABSOLUTE_PIXELS"},
       "inputs": {
         "x": {
           "source": "LITERAL",
           "value": 100
         },
         "y": {
-          "source": "WORKFLOW_INPUT",
-          "inputName": "tapY"
+          "source": "LITERAL",
+          "value": 100
         }
       },
       "timeoutMs": 30000,

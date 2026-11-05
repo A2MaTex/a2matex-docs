@@ -139,6 +139,9 @@ C1 freezes the following MVP codes and default messages:
 | `GRAPH_CYCLE_DETECTED`             | Graph contains an uncontrolled cycle                          | C3            |
 | `NODE_TYPE_NOT_ACTIVE`             | Node type does not exist in the active Node Catalog           | C4            |
 | `NODE_CONFIG_INVALID`              | Node configuration does not match its definition              | C4            |
+| `NODE_BINDINGS_INVALID`            | Node bindings do not match the selected targeting mode        | C4            |
+| `NODE_VALUE_BINDING_INVALID`       | Node input binding is invalid or its source is unavailable    | C4            |
+| `SWITCH_PORT_EDGE_COUNT_INVALID`  | Switch port must have exactly one outgoing edge              | C4            |
 | `GRAPH_NODE_LIMIT_EXCEEDED`        | Graph exceeds the maximum node count                          | C3            |
 | `GRAPH_EDGE_LIMIT_EXCEEDED`        | Graph exceeds the maximum edge count                          | C3            |
 
