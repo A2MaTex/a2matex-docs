@@ -280,48 +280,16 @@ ON "Notification" ("userId", "createdAt" DESC)
 WHERE "readAt" IS NULL;
 ```
 
-## 7. Encryption Key Reference
+## 7. Product Release key storage
 
 ### Trách nhiệm
 
-`EncryptionKeyReference` lưu reference tới KMS/secret provider. Không lưu raw key material trong PostgreSQL.
+MVP không tạo `EncryptionKeyReference` hoặc KMS table. Mỗi ProductRelease lưu trực tiếp protected
+`wrappedKey` và non-secret `keyNonce`; plaintext content key chỉ tồn tại tạm thời bên trong Key
+Service callback.
 
-```sql
-CREATE TYPE "EncryptionKeyStatus" AS ENUM (
-    'ACTIVE',
-    'RETIRED',
-    'REVOKED'
-);
-
-CREATE TABLE "EncryptionKeyReference" (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    purpose VARCHAR(100) NOT NULL,
-    provider VARCHAR(100) NOT NULL,
-    "externalKeyId" TEXT NOT NULL,
-    status "EncryptionKeyStatus" NOT NULL DEFAULT 'ACTIVE',
-
-    -- Mock JSON: non-secret KMS metadata.
-    -- {
-    --   "schemaVersion": "1.0",
-    --   "algorithm": "AES-256-GCM",
-    --   "providerRegion": "ap-southeast-1",
-    --   "rotationVersion": 1
-    -- }
-    metadata JSONB NOT NULL DEFAULT '{}'::JSONB,
-
-    "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
-    "retiredAt" TIMESTAMPTZ,
-    CONSTRAINT "EncryptionKeyReference_provider_external_key"
-        UNIQUE (provider, "externalKeyId"),
-    CONSTRAINT "EncryptionKeyReference_metadata_object_check"
-        CHECK (jsonb_typeof(metadata) = 'object')
-);
-
-ALTER TABLE "ProductRelease"
-ADD COLUMN "releaseKeyId" UUID REFERENCES "EncryptionKeyReference" (id);
-```
-
-Trong migration thật, `releaseKeyId` nên được thêm cùng slice Package Builder/Encryption và chuyển `NOT NULL` trước khi release đầu tiên được publish.
+Exact fields, AES-256-GCM wrapping, `MASTER_KEY`, lifecycle, and deferred rotation are defined by
+`components/a2matex-backend/security/key_service.md` and the Product Release feature spec.
 
 ## 8. Không cần PostgreSQL table riêng
 

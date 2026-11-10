@@ -1,6 +1,6 @@
 # Production Execution Authorization v1
 
-## 1. Purpose and scope
+## 1. Overview and scope
 
 This contract defines how an entitled customer runs an encrypted Product
 Release through Launcher and Runtime without giving Launcher the plaintext
@@ -16,17 +16,59 @@ defined by `components/a2matex-runtime/contracts/local_api_v1.md`. Runtime may
 register both API families concurrently; selecting an endpoint selects the
 operation, so no global Development/Production mode switch is required.
 
+```mermaid
+sequenceDiagram
+    actor Customer
+    participant Launcher
+    participant Runtime
+    participant Backend
+    participant DB as PostgreSQL
+    participant KS as Key Service
+    participant R2 as Private R2
+
+    Customer->>Launcher: Run Product
+    Launcher->>Backend: Request package download
+    Backend->>DB: Verify Entitlement and ProductRelease
+    Backend-->>Launcher: Presigned URL + packageHash
+    Launcher->>R2: Download product.a2m
+    Launcher->>Launcher: Verify packageHash
+
+    Launcher->>Runtime: Start with encrypted package
+    Runtime->>Runtime: Generate ephemeral RSA key pair
+    Runtime-->>Launcher: Session ID + public key + thumbprint
+    Launcher->>Backend: Request execution authorization
+
+    Backend->>DB: Recheck Entitlement and ProductRelease
+    DB-->>Backend: Protected Release key data
+    Backend->>KS: Unwrap content key K
+    KS-->>Backend: K inside bounded callback
+    Backend->>Backend: Wrap K with Runtime public key
+    Backend->>Backend: Sign execution lease
+    Backend-->>Launcher: Lease + encrypted key envelope
+    Launcher-->>Runtime: Forward unchanged
+
+    Runtime->>Runtime: Verify lease and envelope bindings
+    Runtime->>Runtime: Decrypt K with ephemeral private key
+    Runtime->>Runtime: Decrypt and validate workflow.enc
+    Runtime->>Runtime: Execute workflow
+    Runtime->>Runtime: Clear keys and plaintext on completion or expiry
+```
+
+The stop paths are fail-closed: a denied entitlement, invalid Release, package mismatch, invalid
+lease/envelope, or failed authenticated decryption dispatches no workflow node. Renewal and hard
+expiry behavior are shown in Sections 7–8.
+
 ## 2. Cryptographic model
 
-| Item | Purpose | Lifetime and location |
-| --- | --- | --- |
-| Release content key | Encrypt and decrypt `workflow.enc` | Created during release build; protected by the Backend key service |
-| Runtime session public key | Let Backend wrap the content key for one Runtime session | Returned to Launcher and Backend |
-| Runtime session private key | Open the key envelope | Runtime memory only; destroyed at hard expiry or session end |
-| Backend signing private key | Sign execution leases | Backend signing service only |
-| Backend verification key | Verify execution leases | Runtime trust configuration |
-| Key envelope | Content key encrypted for one Runtime session | May pass through Launcher; contains no plaintext key |
-| Execution lease | Signed, time-bounded permission to execute | Launcher and Runtime memory; contains no decryption key |
+| Item                        | Purpose                                                  | Lifetime and location                                              |
+| --------------------------- | -------------------------------------------------------- | ------------------------------------------------------------------ |
+| Release content key         | Encrypt and decrypt `workflow.enc`                       | Created during release build; protected by the Backend key service |
+| Runtime session public key  | Let Backend wrap the content key for one Runtime session | Returned to Launcher and Backend                                   |
+| Runtime session private key | Open the key envelope                                    | Runtime memory only; destroyed at hard expiry or session end       |
+| Backend signing private key | Sign execution leases                                    | Backend signing service only                                       |
+| Backend verification key    | Verify execution leases                                  | Runtime trust configuration                                        |
+| Key envelope                | Content key encrypted for one Runtime session            | May pass through Launcher; contains no plaintext key               |
+| Execution lease             | Signed, time-bounded permission to execute               | Launcher and Runtime memory; contains no decryption key            |
 
 The keys are independent. The Runtime key pair transports the release content
 key; the Backend signing key proves who issued the lease.
@@ -57,11 +99,13 @@ authorization material.
 
 For every immutable Product Release, Backend:
 
-1. validates and compiles the approved Workflow Revision into Runtime IR;
-2. obtains a random 256-bit content key from the key service;
+1. loads the approved immutable Workflow Revision Runtime IR;
+2. asks Key Service to unwrap the Release's random 256-bit content key using the ProductRelease ID,
+   `wrappedKey`, and `keyNonce`;
 3. encrypts Runtime IR with AES-256-GCM and stores required nonce/tag metadata;
-4. builds the immutable `.a2m` package and calculates payload/package hashes;
-5. stores only an external key reference in `ProductRelease`;
+4. builds the immutable standard ZIP package using the `product.a2m` filename and calculates its
+   package hash;
+5. stores only protected `wrappedKey` and non-secret `keyNonce` on ProductRelease;
 6. uploads the encrypted package to object storage.
 
 Launcher downloads the encrypted package after entitlement-based download
@@ -70,17 +114,9 @@ disk.
 
 ## 4. Initial Product Run
 
-```text
-Customer clicks Run
-  -> Runtime creates a pending Product Run session and ephemeral RSA key pair
-  -> Runtime returns runtimeSessionId, public key, algorithm, and thumbprint
-  -> Launcher requests Backend authorization with that session information
-  -> Backend validates customer, entitlement, Product, Release, and packageHash
-  -> Backend signs a short execution lease
-  -> Backend wraps the release content key for the Runtime public key
-  -> Launcher forwards encrypted package reference, lease, and envelope
-  -> Runtime verifies, decrypts in memory, validates Runtime IR, and executes
-```
+The initial run follows the overview sequence. Launcher transports the encrypted package and
+authorization material, while Runtime owns the ephemeral private key, authenticated decryption, and
+execution admission.
 
 Backend authorization checks only:
 
@@ -138,22 +174,21 @@ logging.
 
 The lease is a compact signed token with these required claims:
 
-| Claim | Meaning |
-| --- | --- |
-| `leaseId` | Unique issued-token ID; also used for replay/idempotency checks |
-| `leaseFamilyId` | Stable ID across successful renewals of one active authorization |
-| `sequence` | Strictly increasing renewal number, beginning at `1` |
-| `entitlementId` | Entitlement used for the decision |
-| `customerId` | Authorized customer |
-| `productId` | Authorized Product |
-| `releaseId` | Exact immutable Product Release |
-| `packageHash` | Exact encrypted package |
-| `releaseKeyId` | Key reference that the accepted envelope must carry |
-| `runtimeSessionId` | Pending Runtime session receiving the run |
-| `runtimeKeyThumbprint` | SHA-256 identity of the Runtime public key |
-| `issuedAt` / `notBefore` | Issue and earliest-valid times |
-| `refreshAfter` | Time at which Launcher should begin renewal |
-| `expiresAt` | Hard authorization deadline |
+| Claim                    | Meaning                                                          |
+| ------------------------ | ---------------------------------------------------------------- |
+| `leaseId`                | Unique issued-token ID; also used for replay/idempotency checks  |
+| `leaseFamilyId`          | Stable ID across successful renewals of one active authorization |
+| `sequence`               | Strictly increasing renewal number, beginning at `1`             |
+| `entitlementId`          | Entitlement used for the decision                                |
+| `customerId`             | Authorized customer                                              |
+| `productId`              | Authorized Product                                               |
+| `releaseId`              | Exact immutable Product Release                                  |
+| `packageHash`            | Exact encrypted package                                          |
+| `runtimeSessionId`       | Pending Runtime session receiving the run                        |
+| `runtimeKeyThumbprint`   | SHA-256 identity of the Runtime public key                       |
+| `issuedAt` / `notBefore` | Issue and earliest-valid times                                   |
+| `refreshAfter`           | Time at which Launcher should begin renewal                      |
+| `expiresAt`              | Hard authorization deadline                                      |
 
 The protected signature header includes the token type, `EdDSA`, and Backend
 signing-key ID. Runtime trusts only configured active Backend verification keys.
@@ -179,7 +214,7 @@ The envelope contains:
 
 ```json
 {
-  "keyId": "release-key-reference",
+  "releaseId": "product-release-id",
   "algorithm": "RSA-OAEP-SHA256",
   "runtimeSessionId": "runtime-session-id",
   "runtimeKeyThumbprint": "sha256:...",
@@ -190,7 +225,7 @@ The envelope contains:
 Backend transiently obtains the content key through the key service and wraps
 it with the supplied Runtime public key. Launcher transports the envelope but
 cannot open it through the normal application flow. Runtime accepts it only
-when its key ID, session, and thumbprint match the signed lease.
+when its Release ID, session, and thumbprint match the signed lease.
 
 This raises extraction cost but is not hardware-backed DRM. A customer who
 controls the machine can modify software or inspect privileged memory. Hardware
@@ -200,6 +235,27 @@ attestation and TPM-backed keys are deferred hardening.
 
 Launcher owns Backend communication because it owns the customer login session.
 Runtime owns the authoritative local deadline and enforcement.
+
+```mermaid
+stateDiagram-v2
+    [*] --> PendingAuthorization
+    PendingAuthorization --> Active: valid lease + envelope
+    PendingAuthorization --> Rejected: authorization denied
+
+    Active --> RenewalRequired: refreshAfter reached
+    RenewalRequired --> Active: renewed lease accepted
+    RenewalRequired --> RenewalRequired: bounded retry while lease valid
+    RenewalRequired --> Paused: hard expiry reached
+    Active --> Paused: hard expiry reached
+    Active --> Completed: workflow completed
+    Active --> Cancelled: customer cancels
+
+    Paused --> PendingAuthorization: resume with new Runtime session
+
+    Rejected --> [*]
+    Completed --> [*]
+    Cancelled --> [*]
+```
 
 At `refreshAfter`, Runtime emits `AUTHORIZATION_RENEWAL_REQUIRED`. Launcher
 requests renewal while the old lease remains valid. A successful renewal must:
@@ -259,11 +315,11 @@ when their outcome is ambiguous.
 
 ## 9. Ownership and API boundary
 
-| Component | Responsibility |
-| --- | --- |
-| Backend | Entitlement decision, Release/key lookup, lease signing, renewal, revocation, and key wrapping |
-| Launcher | Customer authentication, package download, authorization/renewal requests, and forwarding responses to Runtime |
-| Runtime | Session key generation, signature/envelope verification, in-memory decryption, deadline enforcement, cleanup, checkpoint, and execution |
+| Component | Responsibility                                                                                                                          |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Backend   | Entitlement decision, Release/key lookup, lease signing, renewal, revocation, and key wrapping                                          |
+| Launcher  | Customer authentication, package download, authorization/renewal requests, and forwarding responses to Runtime                          |
+| Runtime   | Session key generation, signature/envelope verification, in-memory decryption, deadline enforcement, cleanup, checkpoint, and execution |
 
 Production endpoints are an I2 contract and do not alter Studio authoring API
 v1.
