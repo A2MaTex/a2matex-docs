@@ -203,16 +203,16 @@ Each numbered item is one independently reviewable checkout. We stop for review 
 
 ### Phase A — Freeze contracts before writing the engine
 
-| ID  | Module                     | Deliverable                                                                                                                                  | Checkout condition                                                                      |
-| --- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| A1  | Contract decision register | Decide Runtime IR version representation, local transport, event transport, ADB resolution policy, artifact location, and identifier formats | No unresolved decision blocks schema authoring                                          |
-| A2  | Runtime IR v1 contract     | Strict workflow, node, edge, binding, timeout, retry, error-policy, capability, and metadata rules                                           | All 11 current nodes can be represented; unknown fields and invalid graphs are rejected |
-| A3  | Session device selection   | Freeze ephemeral ADB discovery, selection by current serial, start-time revalidation, and no-Device-entity rule                              | Device ownership does not overlap A5, A6, or A7                                         |
-| A4  | Typed device command contract | Seven closed Android commands; non-screenshot success has no payload and Screenshot returns only `artifactId`                              | Workflow data cannot control an executable, raw arguments, target serial, shell syntax, or artifact path |
-| A5  | Execution schemas          | Three persisted records, reduced lifecycle states, atomic checkpoint operation, single-active-run invariant, and derived summary             | Every transition, selected serial, node output, and interruption has one owner          |
-| A6  | Event and error schemas    | Four typed state events, Runtime-wide replay cursor, reduced stable errors, retryability, expiry recovery, and sanitization                   | Client can replay changes or recover from a watermarked snapshot without parsing logs   |
-| A7  | Local API schema           | Protected token handoff, compatibility info, validation, devices, idempotent start, status/control, watermarked snapshot, SSE replay, and screenshots | Every endpoint has strict request, response, error, authentication, and cursor semantics |
-| A8  | Contract fixtures          | Versioned manifest plus 19 hashed Editor Graph, Runtime IR, event/error, Local API, and SSE cases                                             | Canonical bytes and expectations are reviewable; later Go and TypeScript suites consume them |
+| ID  | Module                        | Deliverable                                                                                                                                           | Checkout condition                                                                                       |
+| --- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| A1  | Contract decision register    | Decide Runtime IR version representation, local transport, event transport, ADB resolution policy, artifact location, and identifier formats          | No unresolved decision blocks schema authoring                                                           |
+| A2  | Runtime IR v1 contract        | Strict workflow, node, edge, binding, timeout, retry, error-policy, capability, and metadata rules                                                    | All 11 current nodes can be represented; unknown fields and invalid graphs are rejected                  |
+| A3  | Session device selection      | Freeze ephemeral ADB discovery, selection by current serial, start-time revalidation, and no-Device-entity rule                                       | Device ownership does not overlap A5, A6, or A7                                                          |
+| A4  | Typed device command contract | Seven closed Android commands; non-screenshot success has no payload and Screenshot returns only `artifactId`                                         | Workflow data cannot control an executable, raw arguments, target serial, shell syntax, or artifact path |
+| A5  | Execution schemas             | Three persisted records, reduced lifecycle states, atomic checkpoint operation, single-active-run invariant, and derived summary                      | Every transition, selected serial, node output, and interruption has one owner                           |
+| A6  | Event and error schemas       | Four typed state events, Runtime-wide replay cursor, reduced stable errors, retryability, expiry recovery, and sanitization                           | Client can replay changes or recover from a watermarked snapshot without parsing logs                    |
+| A7  | Local API schema              | Protected token handoff, compatibility info, validation, devices, idempotent start, status/control, watermarked snapshot, SSE replay, and screenshots | Every endpoint has strict request, response, error, authentication, and cursor semantics                 |
+| A8  | Contract fixtures             | Versioned manifest plus 19 hashed Editor Graph, Runtime IR, event/error, Local API, and SSE cases                                                     | Canonical bytes and expectations are reviewable; later Go and TypeScript suites consume them             |
 
 A1 through A8 are accepted. Their authoritative decisions are recorded in
 [`phase_a.md`](./phase_a.md).
@@ -234,14 +234,14 @@ Important contract rules:
 
 ### Phase B — Runtime process foundation
 
-| ID  | Module                | Depends on | Deliverable and checkout condition                                                                                  |
-| --- | --------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------- |
-| B1  | Go project skeleton   | A1         | Minimal executable, internal packages, build metadata, and test layout; no unnecessary framework                    |
+| ID  | Module                | Depends on | Deliverable and checkout condition                                                                                                  |
+| --- | --------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| B1  | Go project skeleton   | A1         | Minimal executable, internal packages, build metadata, and test layout; no unnecessary framework                                    |
 | B2  | Configuration         | B1         | Strict startup configuration for shutdown, loopback HTTP, and logging; later subsystems add settings only with their implementation |
-| B3  | Supervisor            | B1–B2      | Root context, component startup ordering, graceful shutdown, and bounded shutdown timeout                           |
-| B4  | Logging and redaction | B1         | Structured logs containing run/device/node correlations without secrets or protected workflow payloads              |
-| B5  | Local authentication  | A7, B2     | Per-startup random token, protected per-user connection-file handoff, constant-time verification, and cleanup       |
-| B6  | Minimal local API     | B3–B5      | Loopback-only minimal health plus the authenticated A7 runtime-information handshake                                |
+| B3  | Supervisor            | B1–B2      | Root context, component startup ordering, graceful shutdown, and bounded shutdown timeout                                           |
+| B4  | Logging and redaction | B1         | Structured logs containing run/device/node correlations without secrets or protected workflow payloads                              |
+| B5  | Local authentication  | A7, B2     | Per-startup random token, protected per-user connection-file handoff, constant-time verification, and cleanup                       |
+| B6  | Minimal local API     | B3–B5      | Loopback-only minimal health plus the authenticated A7 runtime-information handshake                                                |
 
 Gate: the agent starts, reports readiness, rejects unauthenticated requests, and exits cleanly without goroutine leaks.
 
@@ -252,19 +252,16 @@ deterministic authoring feedback before compilation and before any persistence,
 ADB discovery, run creation, or device command. It follows the approved Backend
 Editor Graph behavior but is implemented independently in Go.
 
-| ID | Module | Deliverable and checkout condition |
-|---|---|---|
-| C1 | Validation contracts | Implement the A7 result envelope, stable diagnostic codes, deterministic ordering, diagnostic cap, and payload limits |
-| C2 | Editor Graph decoder | Strictly decode the supported Editor Graph version and reject unknown fields and invalid bounded values |
-| C3 | Topology validator | Validate limits, unique IDs, Start/entry, endpoints, End rules, reachability, and acyclicity using bounded traversals |
-| C4 | Node-contract validator | Validate node types, source ports, and static configuration against the Runtime's immutable supported-node registry |
-| C5 | Local validation API | Expose authenticated content-only validation for Studio without saving, compiling, enqueuing, or executing the workflow |
-| C6 | Cross-language parity | Vendor and run A8 Editor Graph fixtures against Backend/TypeScript and Runtime/Go; compare classifications and ordered diagnostic codes |
+| ID  | Module                  | Deliverable and checkout condition                                                                                                      |
+| --- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| C1  | Validation contracts    | Implement the A7 result envelope, stable diagnostic codes, deterministic ordering, diagnostic cap, and payload limits                   |
+| C2  | Editor Graph decoder    | Strictly decode the supported Editor Graph version and reject unknown fields and invalid bounded values                                 |
+| C3  | Topology validator      | Validate limits, unique IDs, Start/entry, endpoints, End rules, reachability, and acyclicity using bounded traversals                   |
+| C4  | Node-contract validator | Validate node types, source ports, and static configuration against the Runtime's immutable supported-node registry                     |
+| C5  | Local validation API    | Expose authenticated content-only validation for Studio without saving, compiling, enqueuing, or executing the workflow                 |
+| C6  | Cross-language parity   | Vendor and run A8 Editor Graph fixtures against Backend/TypeScript and Runtime/Go; compare classifications and ordered diagnostic codes |
 
-The local validator answers whether an Editor Graph is valid for authoring. It
-does not authorize execution and does not validate device availability. A saved
-`validationSummary` is evidence of an earlier check, not a trusted Runtime
-decision.
+The local validator answers whether an Editor Graph is valid for authoring. It does not authorize execution and does not validate device availability. A saved `validationSummary` is evidence of an earlier check, not a trusted Runtime decision.
 
 Gate: Studio can submit valid and invalid Editor Graph fixtures and receive the
 same bounded, deterministic result from repeated calls. Validation performs no
@@ -272,25 +269,34 @@ database write, creates no run, and invokes no ADB command.
 
 ### Phase D — Persistence and observability foundation
 
+See the [Phase D specifications and integration review](phase_d.md).
+
 Persistence comes before workflow execution so the first real execution is observable.
 
-| ID  | Module                       | Deliverable and checkout condition                                                                  |
-| --- | ---------------------------- | --------------------------------------------------------------------------------------------------- |
-| D1  | SQLite schema and migrations | Reviewed tables, unique RunGroup request IDs, constraints, indexes, migration mechanism, and retention model       |
-| D2  | Execution repository         | Context-aware, parameterized state reads/writes with explicit transaction boundaries                |
-| D3  | Event repository             | A1 Runtime-wide monotonic cursor allocation, retention, and reconnect queries                        |
+| ID  | Module                       | Deliverable and checkout condition                                                                                       |
+| --- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| D1  | SQLite schema and migrations | Reviewed tables, unique RunGroup request IDs, constraints, indexes, migration mechanism, and retention model             |
+| D2  | Execution repository         | Context-aware, parameterized state reads/writes with explicit transaction boundaries                                     |
+| D3  | Event repository             | A1 Runtime-wide monotonic cursor allocation, retention, and reconnect queries                                            |
 | D4  | Atomic checkpoint writer     | Attempt result, validated node output, next position, execution state, and resulting events persisted in one transaction |
-| D5  | Artifact store               | Binary files outside SQLite; safe paths, hashes, dimensions, media type, and metadata inside SQLite |
-| D6  | Startup recovery             | Previously active executions become `INTERRUPTED`; no automatic uncertain replay                    |
+| D5  | Artifact store               | Binary files outside SQLite; safe paths, hashes, dimensions, media type, and metadata inside SQLite                      |
+| D6  | Startup recovery             | Previously active executions become `INTERRUPTED`; no automatic uncertain replay                                         |
 
 Gate: committed state always exists before an event is broadcast.
+
+The first real run uses D1–D4 and D6. Deliver D5 with F7 Screenshot, when the
+engine needs to commit a retrievable image reference with a successful attempt.
+
+Stage 3 Flow and Stage 5 Global variables will add per-device and RunGroup
+variable state to the checkpoint. Specify store ownership and commit behavior
+before implementing variable writes.
 
 ### Phase E — Generic Android device subsystem
 
 | ID  | Module                 | Deliverable and checkout condition                                                                                                  |
 | --- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | E1  | Safe process runner    | Executes an explicit binary with separate arguments, timeout, cancellation, bounded output, exit code, stdout, stderr, and duration |
-| E2  | ADB toolchain resolver | Selects a Runtime-controlled or explicitly configured ADB executable                                                               |
+| E2  | ADB toolchain resolver | Selects a Runtime-controlled or explicitly configured ADB executable                                                                |
 | E3  | ADB discovery parser   | Parses `adb devices -l`, including device, offline, unauthorized, and malformed output                                              |
 | E4  | Device readiness probe | Checks boot completion and fixed command prerequisites without collecting unused platform or screen metadata                        |
 | E5  | Session inventory      | Keeps the latest discovery result in memory only; no Device table, UUID, alias, history, or provider correlation                    |
@@ -307,17 +313,24 @@ Gate:
 
 ### Phase F — Real device commands and current handlers
 
-| ID  | Module             | Real operation                                                                                              |
-| --- | ------------------ | ----------------------------------------------------------------------------------------------------------- |
-| F1  | Command dispatcher | Binds every command to one explicit ADB serial and rejects arbitrary commands                               |
-| F2  | Launch App         | Dispatches launch for the configured package; success has no workflow-visible payload                       |
-| F3  | Tap                | Performs an absolute-coordinate tap                                                                         |
-| F4  | Swipe              | Performs an absolute-coordinate swipe with bounded duration                                                 |
-| F5  | Input Text         | Safely encodes the configured text without shell interpretation                                             |
-| F6  | Key events         | Implements Back and Home                                                                                    |
-| F7  | Screenshot         | Captures a real PNG, verifies it, extracts dimensions, and stores it as an artifact                         |
+| ID  | Module             | Real operation                                                                                                  |
+| --- | ------------------ | --------------------------------------------------------------------------------------------------------------- |
+| F1  | Command dispatcher | Binds every command to one explicit ADB serial and rejects arbitrary commands                                   |
+| F2  | Launch App         | Dispatches launch for the configured package; success has no workflow-visible payload                           |
+| F3  | Tap                | Taps using explicit pixel, screen-percentage, or selector-ID targeting                                          |
+| F4  | Swipe              | Swipes between two pixel or percentage targets with a bounded duration                                          |
+| F5  | Input Text         | Safely encodes the configured text without shell interpretation                                                 |
+| F6  | Key events         | Implements Back and Home                                                                                        |
+| F7  | Screenshot         | Captures a real PNG, verifies it, extracts dimensions, and stores it as an artifact                             |
 | F8  | Flow handlers      | Implements Start, End, and cancellable Delay; implements Log only after its sensitive-data behavior is approved |
-| F9  | Handler registry   | Registers exactly one handler for every supported `runtimeHandler`; rejects duplicates and unknown handlers |
+| F9  | Handler registry   | Registers exactly one handler for every supported `runtimeHandler`; rejects duplicates and unknown handlers     |
+| F10 | Long Press         | Holds a pixel, percentage, or selector-ID target for the requested bounded duration                             |
+
+The [Android targeting component](../contracts/android_targeting.md) is
+planned for Phase F. Phase E provides the shared process runner, ADB toolchain,
+and device selection. Phase F owns target resolution, dispatcher and handler
+registration, execution error mapping, and real-device acceptance. Percentage
+and selector lookups run on demand against the selected device.
 
 A fake device executor may exist only as a test double. Passing a fake test does not satisfy the product checkout. Each Android handler needs a real-device acceptance test.
 
@@ -331,34 +344,57 @@ For example, a successful tap means ADB accepted the tap command; it does not pr
 
 ### Phase G — Workflow engine
 
-| ID  | Module                   | Deliverable and checkout condition                                                                                             |
-| --- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| ID  | Module                         | Deliverable and checkout condition                                                                                                                                    |
+| --- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | G1  | Runtime IR admission validator | Strictly validates the exact executable document, version, graph, bindings, workflow inputs, handler availability, compatibility, and size limits before run creation |
-| G2  | Binding resolver               | Resolves literals, per-device workflow inputs, and prior node outputs without cross-device leakage                                                |
-| G3  | Transition engine              | Supports deterministic success and error edges; no condition, switch, or loop semantics yet                                                        |
-| G4  | Timeout and retry engine        | Per-attempt timeout, bounded retries, recorded attempts, cancellation, and retry classification                                                    |
-| G5  | Single-device runner            | Executes nodes sequentially for one device and persists every transition                                                                           |
-| G6  | Output validator                | Rejects handler results that violate the declared node output schema                                                                               |
-| G7  | Final result calculator         | Produces authoritative device-execution status and summary from persisted results                                                                  |
+| G2  | Binding resolver               | Resolves literals, per-device workflow inputs, and prior node outputs without cross-device leakage                                                                    |
+| G3  | Transition engine              | Supports deterministic success and error edges plus Switch first-match routing using stable rule ports and Default                                                    |
+| G4  | Timeout and retry engine       | Per-attempt timeout, bounded retries, recorded attempts, cancellation, and retry classification                                                                       |
+| G5  | Single-device runner           | Executes nodes sequentially for one device and persists every transition                                                                                              |
+| G6  | Output validator               | Rejects handler results that violate the declared node output schema                                                                                                  |
+| G7  | Final result calculator        | Produces authoritative device-execution status and summary from persisted results                                                                                     |
 
 `G1` is mandatory even when Phase C, Studio, or Backend previously reported the
 workflow as valid. It validates the exact Runtime IR and execution inputs at the
 trust boundary. Failure creates no active run and dispatches no device command.
 
-Gate: one real device can run a complete workflow using all applicable current nodes, including an error branch and retry/timeout behavior.
+For Android targeting, G1 checks the explicit mode and allowed literal inputs.
+G2 resolves the inputs, and G4–G5 invoke the registered handler and record the
+result through Phase D checkpoints. Studio compiles the targeting inputs and
+enables Test Run after Runtime integration and real-device acceptance.
+
+The [Stage 3 binding contract](../contracts/workflow_bindings.md) is available
+for authoring. G1 owns executable validation, G2 resolves direct outputs and
+Flow and Global values, and G5 runs the single Set Variable handler and
+commits its scope-aware write through Phase D. Phase H verifies shared
+RunGroup visibility and last-committed-write-wins across device workers.
+
+**First runnable milestone.** Run `Start → Tap → End` on one real Android
+device. Verify a successful run, a failed Tap that ends the run, replay after
+reconnect, and `INTERRUPTED` after a restart during Tap with no redispatch.
+Use the D4 checkpoints and D6 recovery for these cases.
+
+**Full Phase G gate.** One real device can run a complete workflow using all
+applicable current nodes, including an error branch and retry/timeout behavior.
+Automatic retries and error routes follow the first milestone. Phase H then
+adds multi-device scheduling and lifecycle controls.
 
 ### Phase H — Multi-device scheduling and lifecycle
 
-| ID  | Module                   | Deliverable and checkout condition                                                          |
-| --- | ------------------------ | ------------------------------------------------------------------------------------------- |
+Stage 6 Global waits release worker capacity and wake after a committed
+write. Verify the one-slot, two-device handoff, timeout, and cancellation
+against the [Wait for Variable contract](../contracts/workflow_bindings.md#wait-for-variable).
+
+| ID  | Module                   | Deliverable and checkout condition                                                                                                                                         |
+| --- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | H1  | Run-group coordinator    | After G1 and device preflight pass, idempotently admits at most one non-terminal run group by A7 request ID and creates one persisted device execution per accepted serial |
-| H2  | Bounded scheduler        | Starts only the configured number of device executions concurrently and queues the rest     |
-| H3  | Per-device worker        | One supervised goroutine per active device execution; nodes remain sequential within it     |
-| H4  | Failure isolation        | One device failure does not stop unaffected devices under the fixed MVP rule                 |
-| H5  | Pause/resume             | Stops before the next node, persists a safe checkpoint, and resumes only from a valid state |
-| H6  | Cancellation             | Propagates context cancellation into delays and ADB processes before releasing run resources |
-| H7  | Device disconnect policy | Fails only the affected device execution with the approved A6 device error                  |
-| H8  | Group result aggregation | Derives group counters and terminal state from persisted device-execution states            |
+| H2  | Bounded scheduler        | Starts only the configured number of device executions concurrently and queues the rest                                                                                    |
+| H3  | Per-device worker        | One supervised goroutine per active device execution; nodes remain sequential within it                                                                                    |
+| H4  | Failure isolation        | One device failure does not stop unaffected devices under the fixed MVP rule                                                                                               |
+| H5  | Pause/resume             | Stops before the next node, persists a safe checkpoint, and resumes only from a valid state                                                                                |
+| H6  | Cancellation             | Propagates context cancellation into delays and ADB processes before releasing run resources                                                                               |
+| H7  | Device disconnect policy | Fails only the affected device execution with the approved A6 device error                                                                                                 |
+| H8  | Group result aggregation | Derives group counters and terminal state from persisted device-execution states                                                                                           |
 
 Context ownership should be:
 
@@ -452,7 +488,7 @@ Tests remain part of each proposed checkout, but I will confirm the test scope w
 | --------------------------- | ---------------------------------------------------------------- |
 | M1 — Contract ready         | Contracts and cross-language fixtures approved                   |
 | M2 — Validation ready       | Studio receives bounded local diagnostics without execution      |
-| M3 — Device ready           | Runtime lists, selects, and revalidates generic ADB endpoints     |
+| M3 — Device ready           | Runtime lists, selects, and revalidates generic ADB endpoints    |
 | M4 — Command ready          | All seven Android operations execute on real devices             |
 | M5 — Engine ready           | All 11 current handlers run on one device with persisted events  |
 | M6 — Multi-device ready     | Bounded, isolated concurrent execution works                     |
