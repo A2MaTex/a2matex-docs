@@ -161,7 +161,7 @@ Web Marketplace Frontend không sở hữu business rule. Frontend hiển thị 
 - [ ] Publisher activation và current terms acceptance.
 - [ ] Publisher status/blocked reason.
 - [ ] Danh sách project đã được Studio lưu lên Backend.
-- [ ] Project summary và self-review checklist.
+- [ ] Project summary và submission review context.
 - [ ] Tạo/chọn Product; nhập Product text và chọn ordered image media đã upload qua Static/R2.
 - [ ] Nhập release version, changelog và compatibility.
 - [ ] Review toàn bộ submission data trước khi gửi.
@@ -211,7 +211,7 @@ Studio chịu trách nhiệm tạo project automation và lưu project lên Back
 - [ ] Save/sync mutable project draft lên Backend.
 - [ ] Upload assets và lưu asset references.
 - [ ] Hiển thị save/sync state và conflict.
-- [ ] Mở project tương ứng trong Publisher Portal để self-review và tạo Submission.
+- [ ] Mở project tương ứng trong Publisher Portal để chuẩn bị và tạo Submission.
 - [ ] Không có luồng submit thẳng từ Studio trong MVP.
 
 ---
@@ -304,7 +304,7 @@ Customer xem/nhận/mua Product trên Web
 - [ ] Runtime IR schema và compiler contract.
 - [ ] Project draft version/conflict contract.
 - [ ] Workflow Revision immutable snapshot contract.
-- [ ] Submission payload và self-review checklist contract.
+- [ ] Submission payload và review-context contract.
 - [ ] Product snapshot/Release metadata contract.
 - [ ] `.a2m` manifest, payload hash và package hash contract.
 - [ ] Minimum Studio/Launcher/Runtime compatibility rules.
@@ -324,7 +324,7 @@ Database ownership, entity relation, constraint, indexes, retention và detailed
 3. Node Catalog contract tối thiểu. **Đã hoàn thành ở Backend.**
 4. Project cloud container + ownership + archive lifecycle.
 5. Project Draft + Asset upload + Studio save/sync.
-6. Product aggregate/media tối thiểu + Web project selection/self-review.
+6. Product aggregate/media tối thiểu + Web project selection/submission preparation.
 7. Workflow Revision + Submission + scan/validation.
 8. Admin Review + request changes/approve/reject.
 9. ProductRelease + package/encryption + publish.

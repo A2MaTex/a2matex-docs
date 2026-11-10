@@ -33,7 +33,10 @@ Năm platform được tính trong plan:
 
 - [ ] Home/Product catalog chỉ hiển thị Product `ACTIVE` có current published release hợp lệ.
 - [ ] Text search cơ bản.
-- [ ] Product detail: description, publisher, offer, compatibility và current release.
+- [ ] Product catalog hiển thị minimum SUBSCRIPTION price và duration; không dùng ONE_TIME Offer cho
+      list projection.
+- [ ] Product detail: description, publisher, current ONE_TIME/SUBSCRIPTION offers, compatibility và
+      current release; Product không có offer vẫn visible nhưng không purchasable.
 - [ ] Public publisher profile.
 - [ ] Download active Launcher release và hiển thị version hiện tại.
 - [ ] Login/register entry.
@@ -42,7 +45,7 @@ Năm platform được tính trong plan:
 
 - [ ] My Products.
 - [ ] Entitlement status và expiration; MVP không hiển thị machine/device/concurrency limit.
-- [ ] Free acquisition hoặc purchase entry.
+- [ ] Zero-value hoặc balance purchase entry; disable purchase khi customer còn active Entitlement.
 - [ ] Open in Launcher action.
 - [ ] Order/ownership history cơ bản.
 - [ ] Account/profile settings dùng chung.
@@ -62,7 +65,7 @@ Năm platform được tính trong plan:
 - [ ] Publisher dashboard tối giản.
 - [ ] Cloud Project list do Studio lưu lên Backend.
 - [ ] Project detail summary: saved version, graph summary, assets, validation, capabilities và test summary.
-- [ ] Project self-review checklist.
+- [ ] Submission review-context form.
 - [ ] Submission wizard:
   - [ ] Step 1 — chọn Project và exact draft version.
   - [ ] Step 2 — xem validation/capability/asset summary.
@@ -74,6 +77,9 @@ Năm platform được tính trong plan:
 - [ ] Request-changes handoff: mở đúng Project trong Studio để sửa.
 - [ ] My Products.
 - [ ] Product draft editor tối thiểu; save theo MVP last-write-wins và không thay đổi release đang public.
+- [ ] Product Offer collection editor: replace complete type/price/duration set, handle Backend
+      cooldown rejection, không hiển thị deleted Offer trong default dashboard, và reload Product
+      detail sau `SUCCESS_RESPONSE` để lấy state mới nhất.
 - [ ] Release history và current release.
 
 ## 2.5. Admin Portal — P0
@@ -89,7 +95,7 @@ Năm platform được tính trong plan:
   - [ ] Request changes, reject và approve actions.
 - [ ] Publisher Account list/detail và block/unblock.
 - [ ] Terms list, draft editor và publish action.
-- [ ] Product/release list và suspend/disable action.
+- [ ] Product/release list, current Offer read-only view và suspend/disable action.
 - [ ] Launcher Release list/detail, create/update và activate action.
 - [ ] Manual Entitlement grant/revoke.
 

@@ -35,7 +35,7 @@ This module does not own:
 - Static upload/processing or Cloudflare R2 objects; it stores only validated `staticId` references;
 - public Marketplace Product list/detail projections, which require Submission and Product Release;
 - Category, Tag, ProductTag, required-app classification, or connector taxonomy;
-- self-review data, Workflow Revision creation, or Submission state;
+- Submission review context, Workflow Revision creation, or Submission state;
 - automated scan findings or admin Submission review decisions;
 - package building, package encryption, package/payload hashes, or release manifests;
 - advanced Catalog ranking, recommendations, and full-text infrastructure;

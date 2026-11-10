@@ -52,7 +52,7 @@ Mỗi JSONB column trong tài liệu có mock shape ở SQL comment:
 
 Thiết kế ưu tiên hai hành trình:
 
-1. Customer activate Publisher → Studio save Project → Web self-review/submit → admin review → publish ProductRelease.
+1. Customer activate Publisher → Studio save Project → Web prepare/submit → admin review → publish ProductRelease.
 2. Customer nhận/mua Product → Launcher download → Backend cấp lease → Runtime Agent execute → sync run summary.
 
 Payment production, recommendation, rating/review, coupon, payout và publisher team không phải critical path của MVP đầu tiên.

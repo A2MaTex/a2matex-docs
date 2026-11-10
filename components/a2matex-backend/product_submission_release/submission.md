@@ -50,8 +50,7 @@ A `Submission` is an immutable request to review one exact combination of:
 - an existing Product working copy and its ordered ProductMedia rows;
 - one exact current Project Draft version, frozen as a WorkflowRevision;
 - requested release metadata;
-- Publisher review instructions and known limitations; and
-- the Publisher's self-review confirmations.
+- Publisher review instructions and known limitations.
 
 The Submission row changes status, but its snapshots never change. Editing Product or Project Draft
 after submission does not alter an existing Submission. A correction always creates a new
@@ -354,31 +353,17 @@ type ReleaseRequestSnapshotV1 = {
   minimumRuntimeVersion: string; // valid SemVer, maximum 100 characters
 };
 
-type SubmissionSelfReviewCode =
-  | "PRODUCT_PRESENTATION_MATCHES_BEHAVIOR"
-  | "WORKFLOW_TESTED"
-  | "NO_RAW_CREDENTIALS"
-  | "NO_ASSET_REFERENCES"
-  | "RELEASE_INFORMATION_ACCURATE";
-
 type SubmissionReviewContextV1 = {
   schemaVersion: 1;
   purpose: string; // trimmed, 1..2,000 characters
   testInstructions: string; // trimmed, 1..5,000 characters
   knownLimitations: string[]; // maximum 20 unique items, each 1..500 characters
-  selfReview: {
-    confirmed: true;
-    items: Array<{
-      code: SubmissionSelfReviewCode;
-      checked: true;
-    }>;
-  };
 };
 ```
 
-All five self-review codes are required exactly once. The combined review context is always written
-and read as one Publisher-authored snapshot. Self-review is Publisher evidence, not proof; the
-scanner independently evaluates machine-checkable rules.
+The review context is always written and read as one Publisher-authored snapshot. It helps the Admin
+understand and test the submitted workflow but is not validation evidence. The scanner independently
+evaluates machine-checkable rules, and the Admin remains responsible for the review decision.
 
 ### 4.4 Embedded scan result
 
@@ -539,13 +524,6 @@ type CreateSubmissionInput = {
     purpose: string;
     testInstructions: string;
     knownLimitations: string[];
-    selfReview: {
-      confirmed: true;
-      items: Array<{
-        code: SubmissionSelfReviewCode;
-        checked: true;
-      }>;
-    };
   };
 };
 
@@ -943,7 +921,7 @@ Required rule groups:
      it.
 6. **Product/release snapshot integrity**
    - validate stored snapshot schema versions and required Product presentation fields;
-   - validate release/minimum version strings and self-review completeness;
+   - validate release/minimum version strings and review-context bounds;
    - confirm ordered media snapshot rules without re-snapshotting mutable ProductMedia.
 
 The existing cloud Workflow Validation service covers Editor Graph contract, topology, catalog,
@@ -995,7 +973,7 @@ never credentials, full node config, full graph, Runtime IR, tokens, or private 
 ## 12. Security, privacy, and logging
 
 - Never log Product snapshot JSON, Editor Graph, Runtime IR, bindings, input schema, node config,
-  self-review text, test instructions, credentials, tokens, Static keys, or Kafka message values.
+  review-context content, credentials, tokens, Static keys, or Kafka message values.
 - Error logs may include trace ID, Submission ID, WorkflowRevision ID, message ID, scan attempt,
   status, safe rule code, and chained error message.
 - Do not add routine success logs for create/list/detail. The consumer may log scan start/completion
@@ -1040,7 +1018,7 @@ never credentials, full node config, full graph, Runtime IR, tokens, or private 
 | `submission.repo.ts`          | Access-scoped reads, locks, snapshot queries, and persistence       |
 | `submission-access.policy.ts` | Convert permission scope and Publisher identity to typed predicates |
 | `submission.error.ts`         | Stable HTTP/domain exceptions                                       |
-| `submission.constant.ts`      | Statuses, limits, self-review codes, queue type, retry constants    |
+| `submission.constant.ts`      | Statuses, limits, queue type, and retry constants                   |
 | `submission.module.ts`        | Providers, controller, WorkflowRevision and queue integration       |
 
 The service calls the existing Product snapshot and WorkflowRevision contracts rather than copying

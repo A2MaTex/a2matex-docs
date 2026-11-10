@@ -33,7 +33,7 @@ This module owns:
 This module does not own:
 
 - Studio draft editing, optimistic save conflicts, or draft history;
-- Web self-review, editable Product presentation/media, Release metadata, or Submission status;
+- Submission review context, editable Product presentation/media, Release metadata, or Submission status;
 - asynchronous cloud validation, policy scanning, review, package building, or encryption;
 - Asset upload/storage lifecycle;
 - Launcher download authorization or Runtime execution.

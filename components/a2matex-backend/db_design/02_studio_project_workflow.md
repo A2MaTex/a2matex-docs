@@ -202,7 +202,7 @@ CREATE TABLE "ProjectDraft" (
     -- }
     "inputSchema" JSONB NOT NULL,
 
-    -- Mock JSON: compiler output cached for Web self-review; Backend revalidates on finalize.
+    -- Mock JSON: compiler output cached for submission preparation; Backend revalidates on finalize.
     -- {
     --   "irVersion": "1.0",
     --   "entryNodeId": "start_01",
@@ -258,7 +258,7 @@ canonical UTF-8 content tối đa 1 MiB. API `GET` trả content và metadata đ
 `savedById`; API `PUT` chỉ trả `id`, `version`, `contentHash`, `savedAt` để Studio tiếp tục optimistic
 save mà không echo toàn bộ payload. Conflict trả `details.currentVersion`. Project và ProjectDraft
 dùng chung một access policy; read cho phép `NULL` hoặc `OWN`, còn save draft bắt buộc `OWN` và
-PublisherAccount `ACTIVE`. Web submission phải gửi exact draft version đã self-review.
+PublisherAccount `ACTIVE`. Web submission phải gửi exact draft version đã chọn để submit.
 
 Studio chỉ tạo Project cloud khi user chọn Save to Cloud lần đầu, sau đó lưu ngay draft hiện tại;
 Backend không tạo draft rỗng cùng Project. Cloud là source of truth cho state đã sync và thiết bị mới

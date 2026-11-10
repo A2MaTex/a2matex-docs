@@ -95,16 +95,18 @@ This module does not own:
 - Product authoring, Product media, Product Offer, price, or duration;
 - Submission creation, scan execution, or Admin review;
 - mutation of Submission or WorkflowRevision snapshots;
-- cryptographic key persistence, wrapping, rotation, or Runtime key envelopes;
+- content-key generation/wrapping or Runtime key envelopes;
 - public Marketplace controllers;
 - customer acquisition, Order, Entitlement, payment, or refund;
 - package download authorization or presigned URL delivery;
 - execution leases or Runtime admission; or
 - public Product media delivery.
 
-The Key Service owns protected encryption-key records. ProductRelease stores `encryptionKeyId` as
-the reference used to load the correct record; it never stores plaintext or wrapped key material.
-The cross-flow key contract is defined in `specifications/cryptographic_key_security.md`.
+Key Service owns content-key generation, wrapping, and bounded plaintext-key use. ProductRelease
+stores only the protected `wrappedKey` and non-secret `keyNonce`; it never stores plaintext key
+bytes. The implementation contract is defined in [Key Service](../security/key_service.md); the
+system-wide inventory remains in
+[Cryptographic Keys and Security Credentials](../../../specifications/cryptographic_key_security.md).
 
 Product Offers are independent commercial records. Build, publication, rollback, and disable paths
 must never create, edit, delete, or snapshot Product Offers.
@@ -131,8 +133,7 @@ When approved, this specification supersedes the draft ProductRelease section in
 - The final package has one Static record and one private R2 object.
 - ProductRelease stores `packageStaticId` and `packageHash`; Static owns object key, filename, content
   type, and byte size.
-- ProductRelease stores the Key Service reference in `encryptionKeyId`, but no key bytes, wrapped
-  key material, or nonce.
+- ProductRelease stores `wrappedKey` and `keyNonce` directly; plaintext key bytes are never stored.
 - A Release becomes `PUBLISHED` only after its complete package exists and Static/package metadata
   can commit.
 - Published package identity, hash, version, Submission, and timestamps are immutable.
@@ -163,7 +164,8 @@ ProductRelease
 
   packageStaticId UUID FK Static, nullable
   packageHash VARCHAR(64), nullable
-  encryptionKeyId UUID, nullable, unique
+  wrappedKey BYTEA, nullable
+  keyNonce BYTEA, nullable
   buildFailureCode VARCHAR(100), nullable, internal-only
 
   publishedAt TIMESTAMPTZ, nullable
@@ -184,9 +186,10 @@ Field responsibilities:
 - `packageStaticId` is null until artifact reservation. While the Release is `BUILDING`, it may point
   to the one private reserved Static object; it is required for publication.
 - `packageHash` is lowercase SHA-256 of the exact final ZIP bytes; it is required for publication.
-- `encryptionKeyId` references the Key Service record that protects this Release's AES content key.
-  It may be null only before key allocation or after an early build failure and is required before
-  package encryption and publication.
+- `wrappedKey` is the Release's 32-byte content key protected by `MASTER_KEY`; it is exactly 48
+  bytes (`ciphertext || 16-byte tag`) and is required before package encryption and publication.
+- `keyNonce` is the non-secret 12-byte AES-GCM nonce used only to wrap that content key. It is not
+  the workflow-encryption nonce stored in `manifest.json`.
 - `buildFailureCode` is a stable Admin-only reason code, never an exception message.
 - `publishedAt` is set exactly once.
 - `disabledAt`, `disabledReason`, `updatedAt`, and `updatedById` audit the terminal Admin disable.
@@ -199,8 +202,8 @@ The model intentionally does not duplicate:
 - Runtime IR, input schema, or capabilities, because WorkflowRevision owns them;
 - object key, filename, content type, or size, because Static owns them;
 - manifest or payload hash, because they live inside the immutable ZIP;
-- encryption nonce, wrapped key material, or plaintext key, because the manifest and Key Service own
-  them; or
+- plaintext key or workflow-encryption nonce, because plaintext is transient and the workflow nonce
+  lives in the manifest; or
 - `disabledById`, because the terminal disable actor is `updatedById`.
 
 ProductRelease has no soft-delete fields. Historical Releases remain addressable.
@@ -212,8 +215,8 @@ Keep only identity/concurrency integrity:
 ```text
 UNIQUE(submissionId)
 UNIQUE(productId, version)
-UNIQUE(encryptionKeyId) WHERE encryptionKeyId IS NOT NULL
 FK Product.currentReleaseId -> ProductRelease.id
+CHECK ((wrappedKey IS NULL) = (keyNonce IS NULL))
 ```
 
 Release-history pagination uses:
@@ -363,8 +366,8 @@ packaging.
 
 ### 6.3 `workflow.enc`
 
-`workflow.enc` is the canonically serialized Runtime IR encrypted with the key referenced by
-`ProductRelease.encryptionKeyId`. Its complete binary format is exactly
+`workflow.enc` is the canonically serialized Runtime IR encrypted with the content key protected by
+`ProductRelease.wrappedKey` and `ProductRelease.keyNonce`. Its complete binary format is exactly
 `ciphertext || 16-byte authentication tag`; it has no wrapper or embedded nonce. Section 6.7 defines
 the byte-level construction algorithm.
 
@@ -452,9 +455,10 @@ keys, device values, defaults containing secrets, or execution-time input.
 #### Step 3: create `workflow.enc`
 
 1. Canonically serialize the complete `WorkflowRevision.runtimeIr` as `runtimeIrBytes`.
-2. Resolve the immutable `ProductRelease.encryptionKeyId`, creating and assigning one idempotently
-   when it has not yet been allocated.
-3. Ask Key Service to unwrap the referenced random 32-byte content key `K` transiently.
+2. Resolve the immutable `ProductRelease.wrappedKey` and `ProductRelease.keyNonce`, allocating and
+   storing one complete pair through the idempotent contract in the Key Service spec when absent.
+3. Call `KeyService.withKey(releaseId, wrappedKey, keyNonce, callback)` and perform the remaining
+   encryption steps inside that bounded callback using the supplied random 32-byte content key `K`.
 4. Generate a cryptographically random 12-byte nonce that has never been used with `K`.
 5. Encrypt `runtimeIrBytes` using AES-256-GCM with `K`, that nonce, and empty additional
    authenticated data for the MVP.
@@ -488,8 +492,8 @@ Construct the manifest from these exact sources:
 | `requiredCapabilities`                       | parsed `WorkflowRevision.runtimeIr.requiredCapabilities`, preserving its validated sorted order |
 
 Canonically serialize that object as `manifestBytes`. `manifest.json` is exactly `manifestBytes`.
-The manifest does not contain `packageHash`, `encryptionKeyId`, content-key material, R2 identity, or
-a permanent download URL.
+The manifest does not contain `packageHash`, `wrappedKey`, `keyNonce`, plaintext content-key
+material, R2 identity, or a permanent download URL.
 
 For the MVP, `minimumRuntimeVersion` remains the Publisher-supplied, Admin-reviewed value frozen in
 `Submission.releaseRequest`. Product Release does not compare it with
@@ -575,7 +579,7 @@ deletion endpoint. Redelivery after committed `PUBLISHED` never deletes the obje
 Publication uses only this prepared data:
 
 ```text
-ProductRelease: id, productId, submissionId, status, encryptionKeyId, packageStaticId
+ProductRelease: id, productId, submissionId, status, wrappedKey, keyNonce, packageStaticId
 Submission: status, number
 Static: id, objectKey, originalFileName, contentType, size
 Built artifact: packageHash and verified uploaded size/content type
@@ -584,8 +588,9 @@ Current Release when present: productId, status, Submission.number
 Publisher/User: current release eligibility
 ```
 
-Before opening the transaction, verify the uploaded object size/content type and resolve the Key
-Service reference. No R2 or Key Service network call runs while database locks are held.
+Before opening the transaction, verify the uploaded object size/content type. No R2 work runs while
+database locks are held. Publication does not unwrap the content key again because successful
+package construction already authenticated it.
 
 After those checks, one short transaction follows the shared Product-first lock order:
 
@@ -595,7 +600,7 @@ After those checks, one short transaction follows the shared Product-first lock 
    Static ID that was uploaded.
 4. Recheck only mutable Product status/deletion and Publisher eligibility.
 5. Load the reserved Static metadata and require the expected object key, content type, and size.
-6. Require `encryptionKeyId` and the previously verified Key Service association.
+6. Require a complete `wrappedKey`/`keyNonce` pair with the documented byte lengths.
 7. Read the current Release and its Submission number while the Product lock keeps
    `currentReleaseId` stable.
 8. Set ProductRelease `PUBLISHED`, `packageHash`, clear the failure code, and set `publishedAt`.
@@ -672,8 +677,9 @@ type ProductReleaseDetailOutput = ProductReleaseSummaryOutput & {
 };
 ```
 
-Never expose Static ID/object key, Key Service records, plaintext/wrapped key material, nonce outside
-the package manifest, private URLs, stack traces, or raw internal exceptions.
+Never expose Static ID/object key, stored wrapped-key fields, plaintext key material, key-wrapping
+nonce, workflow nonce outside the package manifest, private URLs, stack traces, or raw internal
+exceptions.
 
 ### 9.3 Select current Release
 
@@ -792,7 +798,8 @@ PUT /api/v1/products/:productId/releases/:releaseId/lifecycle, null -> ADMIN
 - Cross-owner and missing resources are indistinguishable.
 - R2 object is private; clients never receive permanent object keys/URLs.
 - Plaintext Runtime IR and content key exist only transiently during build/decryption.
-- Product Release persists only `encryptionKeyId`; Key Service owns the protected key material.
+- Product Release persists only protected `wrappedKey` and non-secret `keyNonce`; plaintext key
+  material exists only inside Key Service's bounded callback.
 - Publisher output omits failure internals and all key/storage internals.
 - Admin sees stable failure code, not raw exception or secret.
 - Logs contain trace/message/Submission/Product/Release IDs, transition, duration, size, hash prefix,
@@ -841,8 +848,9 @@ adding one requires explanation and approval.
 - Entry bytes, hashes, source fields, encryption layout, order, compression methods, and normalized
   ZIP metadata follow the explicit Section 6 construction pipeline.
 - Runtime IR is AES-256-GCM encrypted; no plaintext key is persisted.
-- ProductRelease contains `encryptionKeyId` but no nonce, key material, manifest, Runtime IR, input
-  schema, capability, object-key, or duplicated release-request columns.
+- ProductRelease contains protected `wrappedKey` and wrapping `keyNonce`, but no plaintext key,
+  workflow nonce, manifest, Runtime IR, input schema, capability, object-key, or duplicated
+  release-request columns.
 - Product Release reserves one Static record before upload, uses the existing UUID-sharded key
   generator, and reuses that reservation across retries.
 - Published Release has Static-backed private ZIP and immutable package hash.

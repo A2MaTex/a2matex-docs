@@ -6,7 +6,7 @@ Nhóm này quản lý hành trình publish trên Marketplace:
 
 ```text
 Saved Project
-→ Web self-review
+→ Web submission preparation
 → editable Product + ProductMedia
 → immutable WorkflowRevision
 → Submission
@@ -175,18 +175,7 @@ CREATE TABLE "Submission" (
     --   "testInstructions": "Use the provided test account",
     --   "knownLimitations": ["English UI only"]
     -- }
-    "reviewMetadata" JSONB NOT NULL,
-
-    -- Mock JSON:
-    -- {
-    --   "schemaVersion": "1.0",
-    --   "confirmed": true,
-    --   "items": [
-    --     {"code":"PRODUCT_PRESENTATION_MATCHES_BEHAVIOR","checked":true},
-    --     {"code":"NO_RAW_CREDENTIALS","checked":true}
-    --   ]
-    -- }
-    "selfReview" JSONB NOT NULL,
+    "reviewContext" JSONB NOT NULL,
 
     "submittedAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
     "submittedById" UUID NOT NULL REFERENCES "User" (id),
@@ -196,8 +185,7 @@ CREATE TABLE "Submission" (
     CONSTRAINT "Submission_json_objects_check" CHECK (
         jsonb_typeof("productSnapshot") = 'object'
         AND jsonb_typeof("releaseRequest") = 'object'
-        AND jsonb_typeof("reviewMetadata") = 'object'
-        AND jsonb_typeof("selfReview") = 'object'
+        AND jsonb_typeof("reviewContext") = 'object'
     )
 );
 
@@ -210,7 +198,7 @@ Một transaction submit nên:
 1. Resolve Publisher và lock Product hiện có, Project, rồi ProjectDraft exact version theo lock order.
 2. Validate Product publish fields và toàn bộ Static image refs từ Product row đã lock.
 3. Revalidate graph/IR/assets và create WorkflowRevision immutable.
-4. Snapshot Product fields + ordered media và release request; không update mutable Product.
+4. Snapshot Product fields + ordered media, release request và review context; không update mutable Product.
 5. Create Submission.
 6. Create outbox event cho scan job.
 
