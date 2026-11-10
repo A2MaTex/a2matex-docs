@@ -38,12 +38,16 @@ Mục tiêu đúng là:
 | Open URL/Deep Link | Mở URI được cho phép |
 
 Khi triển khai, Studio dùng một bộ chọn chế độ trên mỗi node: **Pixel** (`ABSOLUTE_PIXELS`), **Phần trăm màn hình**,
-hoặc **ID phần tử** theo [ma trận Catalog](../a2matex-backend/studio_project_workflow/node_catalog.md#planned-targeting-modes-and-long-press).
-Catalog cung cấp tên chế độ qua `editorHints.targetModes`. `inputSchema` hiện
-chỉ mô tả form pixel và thời lượng nếu có; chưa thể sinh form phần trăm hoặc ID từ schema này.
+hoặc **ID phần tử** theo [ma trận Catalog](../a2matex-backend/studio_project_workflow/node_catalog.md#targeting-modes-and-long-press).
+Catalog cung cấp toàn bộ form contract qua `editorHints.targeting.modes`. Mỗi mode
+có `bindingSchema`, vì vậy Studio không giữ một `TARGET_FIELDS` hardcode riêng.
+Studio tự quyết định thứ tự hiển thị field. `inputSchema` của targeting node để
+trống; chỉ schema của mode được chọn mới quyết định fields và bindings hợp lệ.
 Tap và Long Press dùng chung form target. Swipe dùng cùng chế độ cho cả hai đầu
 và luôn giữ thời gian vuốt. Form phần trăm nhập số nguyên 0–100; ví dụ, vuốt từ
 `(50%, 80%)` đến `(50%, 20%)`. Khi đổi chế độ, bỏ các trường target không còn áp dụng.
+Project Draft chỉ lưu `config.targetMode` và bindings của mode hiện tại, không
+lưu schema hoặc values của những mode còn lại.
 
 Với ID phần tử, cho phép nhập `resource-id` đầy đủ hoặc chọn từ XML do extension
 dự kiến cung cấp. Studio có thể chuẩn bị picker bằng XML fixture; chỉ lưu ID đã

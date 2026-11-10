@@ -107,7 +107,6 @@ have no semantic validation effect, and are omitted from Runtime IR.
 validator receives them because it validates the full Editor Graph.
 Android targeting uses the action's target mode and input bindings.
 
-
 Editor Graph v1 requires:
 
 - positive integer `schemaVersion` with supported value `1`;
@@ -139,17 +138,23 @@ must specify `ABSOLUTE_PIXELS` and supply the required pixel literal bindings.
 Omitting the mode produces `NODE_CONFIG_INVALID` at `config.targetMode`.
 Put the mode's input bindings in the existing `bindings` object. For example,
 a selector Tap uses `config: { "targetMode": "SELECTOR_ID" }` and a
-`bindings.selector_id: { "kind": "literal", "value": "com.example.app:id/login" }`.
+`bindings.selector_id: { "kind": "LITERAL", "value": "com.example.app:id/login" }`.
 Do not save the
 UI hierarchy or dummy pixel values.
 
-Validate exactly one allowed mode per node against the
-[catalog targeting matrix](node_catalog.md#planned-targeting-modes-and-long-press).
+Validate exactly one allowed mode per node against its current
+`editorHints.targeting.modes` definition from the active Node Catalog. The
+[catalog targeting matrix](node_catalog.md#targeting-modes-and-long-press)
+summarizes those schemas.
 Require all input bindings for that mode and reject target fields from other
 modes. A Swipe uses one mode for both endpoints. Keep the action's duration
 binding where required. Explicit modes require strict literal objects.
 Invalid mode configuration yields `NODE_CONFIG_INVALID`. Invalid target
 bindings yield `NODE_BINDINGS_INVALID` with the binding path.
+
+Every node accepts `STOP`. `ERROR_BRANCH` is valid only when the active Node
+Definition declares the static `error` output-port key. Otherwise Backend and
+Runtime return `NODE_ERROR_POLICY_INVALID` at the node's `errorPolicy` path.
 
 Authoring validation can accept these drafts before Runtime can execute them.
 Studio must identify unsupported execution modes, invalidate any stale

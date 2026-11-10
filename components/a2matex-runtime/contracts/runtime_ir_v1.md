@@ -133,6 +133,11 @@ Each node contains exactly:
 | `retryPolicy` | Strict object containing `maxAttempts` and `delayMs` |
 | `errorPolicy` | `STOP` or `ERROR_BRANCH` |
 
+`STOP` is valid for every node. `ERROR_BRANCH` is valid only when the node's
+approved contract contains the static `error` output-port key. Runtime derives
+this support from the port list and rejects an unsupported choice with
+`NODE_ERROR_POLICY_INVALID`; Node Definitions do not duplicate a supported-policy list.
+
 `config` and `inputs` each contain at most 100 properties. Tap, Swipe, and
 Long Press require `config.targetMode` as specified by the
 [Android targeting contract](android_targeting.md). Other current nodes use

@@ -100,27 +100,27 @@ Registry không chỉ chứa tên node. Nó chứa `NodeDefinition`:
 ```ts
 interface NodeDefinition {
   type: string;
-  version: number;
-
-  displayName: string;
+  name: string;
   category: string;
   description: string;
-  icon: string;
+
+  runtimeHandler: string;
+  minimumRuntimeVersion: string;
+  defaultTimeoutMs: number;
 
   configSchema: JsonSchema;
   inputSchema: JsonSchema;
   outputSchema: JsonSchema;
 
-  outputs: OutputPortDefinition[];
-  requiredCapabilities: string[];
-
-  runtimeHandler: string;
-  editorHints: EditorHints;
-
-  defaultTimeoutMs: number;
-  supportedErrorPolicies: string[];
+  outputPorts: { ports: string[] };
+  editorHints: { targeting?: TargetingDefinition };
+  capabilities: Capability[];
 }
 ```
+
+Studio owns icons, colors, labels, and field layout. It renders static connection
+handles from the ordered output-port keys. `STOP` is always available and
+`ERROR_BRANCH` is available only when the definition contains the `error` port.
 
 Một definition có thể được dùng để tự động sinh:
 

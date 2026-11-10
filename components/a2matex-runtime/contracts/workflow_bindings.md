@@ -23,11 +23,11 @@ authoring support before exposing these forms.
 
 | Source | Editor Graph binding | Validation |
 |---|---|---|
-| Prior output | `{"kind":"nodeOutput","nodeId":"capture","field":"artifactId"}` | The producer must declare the field as required in its output schema. The field type must match the consumer's declared input type. Every path to the consumer must cross a success edge from the producer. |
-| Flow read | `{"kind":"flowVariable","name":"lastScreenshot"}` | The destination must be a declared input. The name is case-sensitive and matches `^[A-Za-z_][A-Za-z0-9_]{0,99}$`. Existence and value type are checked at execution. |
-| Global read | `{"kind":"globalVariable","name":"bestScore"}` | Same name and binding checks as Flow. The value comes from the current RunGroup. |
-| Literal in Set Variable | `{"kind":"literal","value":0}` | String, safe integer, or boolean. |
-| Workflow input in Set Variable | `{"kind":"workflowInput","inputName":"message"}` | Validate the name shape at authoring time. The project input schema and supplied value are checked at executable admission. |
+| Prior output | `{"kind":"NODE_OUTPUT","nodeId":"capture","field":"artifactId"}` | The producer must declare the field as required in its output schema. The field type must match the consumer's declared input type. Every path to the consumer must cross a success edge from the producer. |
+| Flow read | `{"kind":"FLOW_VARIABLE","name":"lastScreenshot"}` | The destination must be a declared input. The name is case-sensitive and matches `^[A-Za-z_][A-Za-z0-9_]{0,99}$`. Existence and value type are checked at execution. |
+| Global read | `{"kind":"GLOBAL_VARIABLE","name":"bestScore"}` | Same name and binding checks as Flow. The value comes from the current RunGroup. |
+| Literal in Set Variable | `{"kind":"LITERAL","value":0}` | String, safe integer, or boolean. |
+| Workflow input in Set Variable | `{"kind":"WORKFLOW_INPUT","inputName":"message"}` | Validate the name shape at authoring time. The project input schema and supplied value are checked at executable admission. |
 
 There is one Set Variable node type, `flow.set_variable`. Its
 `config.scope` selects `FLOW` for the current device execution or
@@ -38,8 +38,8 @@ table. This special input accepts any supported scalar type, so Studio
 uses a dedicated editor instead of the Catalog's flat typed input form.
 Set Variable exposes success/error control ports and no output data fields.
 
-For other nodes, authoring validation checks `nodeOutput`, `flowVariable`,
-and `globalVariable`
+For other nodes, authoring validation checks `NODE_OUTPUT`, `FLOW_VARIABLE`,
+and `GLOBAL_VARIABLE`
 forms. Other binding kinds keep their existing validation. Android targeting
 fields continue to use Stage 1's literal-only checks. Each rejected value
 binding produces `NODE_VALUE_BINDING_INVALID` at the consumer's binding path.
@@ -64,8 +64,8 @@ source port ID. Reordering rules changes priority while preserving edges.
 {
   "config": { "rules": [{ "id": "rule_low", "operator": "LTE" }] },
   "bindings": {
-    "value": { "kind": "flowVariable", "name": "score" },
-    "rule_low": { "kind": "literal", "value": 100 }
+    "value": { "kind": "FLOW_VARIABLE", "name": "score" },
+    "rule_low": { "kind": "LITERAL", "value": 100 }
   }
 }
 ```

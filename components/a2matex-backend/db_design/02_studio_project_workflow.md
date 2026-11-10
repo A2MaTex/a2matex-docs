@@ -75,7 +75,6 @@ CREATE TABLE "NodeDefinition" (
     "outputSchema" JSONB NOT NULL,
     "outputPorts" JSONB NOT NULL,
     "editorHints" JSONB NOT NULL,
-    "supportedErrorPolicies" JSONB NOT NULL,
     "contentHash" VARCHAR(64) NOT NULL,
     "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
     "updatedAt" TIMESTAMPTZ,
@@ -89,7 +88,6 @@ CREATE TABLE "NodeDefinition" (
         AND jsonb_typeof("outputSchema") = 'object'
         AND jsonb_typeof("outputPorts") = 'object'
         AND jsonb_typeof("editorHints") = 'object'
-        AND jsonb_typeof("supportedErrorPolicies") = 'object'
     )
 );
 
@@ -388,9 +386,8 @@ CREATE TABLE "WorkflowRevision" (
     --       "configSchema": {},
     --       "inputSchema": {},
     --       "outputSchema": {},
-    --       "outputPorts": {},
+    --       "outputPorts": {"ports": ["success", "error"]},
     --       "editorHints": {},
-    --       "supportedErrorPolicies": {},
     --       "capabilityCodes": ["android.device.control"],
     --       "contentHash": "64-char-lowercase-sha256"
     --     }

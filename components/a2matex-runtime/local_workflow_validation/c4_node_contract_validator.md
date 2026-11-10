@@ -164,10 +164,10 @@ authoring shape. See the [workflow binding contract](../contracts/workflow_bindi
 
 ### Explicit targeting
 
-C4 validates the [Backend targeting matrix](../../a2matex-backend/studio_project_workflow/node_catalog.md#planned-targeting-modes-and-long-press).
+C4 validates the [Backend targeting matrix](../../a2matex-backend/studio_project_workflow/node_catalog.md#targeting-modes-and-long-press).
 Tap and Long Press support pixels, percentages, and selector IDs. Swipe
 supports pixels and percentages. Each explicit mode requires exactly its own
-binding fields as strict `{ "kind": "literal", "value": ... }` objects. Swipe
+binding fields as strict `{ "kind": "LITERAL", "value": ... }` objects. Swipe
 duration is 1–60,000 ms. Long Press requires a positive safe integer at
 authoring time. Its execution cap belongs to Stage 2. Tap, Swipe, and Long
 Press require `targetMode`, including `ABSOLUTE_PIXELS` for pixel bindings.

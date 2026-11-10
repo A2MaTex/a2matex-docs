@@ -27,7 +27,8 @@ parameter binding and executable Runtime handler verification.
   caller version is greater than or equal to its minimum version.
 - `contentHash` is SHA-256 of one definition. `catalogHash` is SHA-256 of the ordered compatible
   response nodes and is used as the ETag.
-- The current supported error policies are `STOP` and `ERROR_BRANCH`.
+- `STOP` is always supported. `ERROR_BRANCH` is supported only when the
+  definition contains the static `error` output port.
 
 ## 3. Persisted model
 
@@ -47,10 +48,10 @@ Required fields:
 | Identity/display | `id`, `type`, `name`, `description`, `category`, `status`     |
 | Runtime          | `runtimeHandler`, `minimumRuntimeVersion`, `defaultTimeoutMs` |
 | Contract         | `configSchema`, `inputSchema`, `outputSchema`, `outputPorts`  |
-| Studio/error     | `editorHints`, `supportedErrorPolicies`                       |
+| Studio           | `editorHints`                                                 |
 | Sync/audit       | `contentHash`, `createdAt`, `updatedAt`, `deletedAt`          |
 
-Database invariants: unique `type`, positive timeout, 64-character lowercase hex hash, all six JSON
+Database invariants: unique `type`, positive timeout, 64-character lowercase hex hash, all five JSON
 fields are objects, and index `(status, type)`.
 
 ### `NodeDefinitionCapability`
@@ -66,48 +67,47 @@ Each definition declares:
 - execution: `runtimeHandler`, strict `minimumRuntimeVersion`, bounded positive timeout;
 - three object schemas with `type: "object"`, `properties`, `required`, and
   `additionalProperties: false`;
-- unique output ports from `success`, `error`, `true`, `false`, `body`, `completed`;
-- editor icon and ordered fields;
-- error policies and capability codes.
+- unique output-port keys from `success`, `error`, `true`, `false`, `body`, `completed`;
+- optional targeting-mode binding schemas in `editorHints`;
+- capability codes.
 
-Required fields must exist in `properties`; editor fields must exist in config or input; duplicate
-ports, fields, policies and capabilities are invalid. `ERROR_BRANCH` and the `error` port must be
-declared together. No executable expression or JavaScript is accepted.
+Required fields must exist in `properties`; duplicate ports and capabilities are
+invalid. Port labels, port kinds, icons, documentation, field ordering, and
+target-mode labels belong to Studio. `ERROR_BRANCH` is derived from the presence
+of the `error` port rather than duplicated in each definition. No executable
+expression or JavaScript is accepted.
 
-### Agreed v1 update — pending implementation
+### Reduced Studio metadata
 
-Add optional string `editorHints.documentation` for type-level help. Omission and
-the empty string are both valid; Studio hides Help in either case. Keep the short
-`description` and `fieldOrder`. Studio maps icon and color from `type` and provides
-a fallback for unmapped types. Switch Studio to that mapping before removing the
-existing `editorHints.icon` from the Backend definition and response. No backend
-color field, new database column, or Runtime IR change is needed. Catalog hashing
-and ETag continue to cover the returned catalog content.
+Studio maps icon, color, field layout, port labels, and target-mode labels from
+stable identifiers, with fallbacks for unknown values. The Backend keeps only
+semantic targeting schemas under `editorHints.targeting`. Catalog hashing and
+ETag continue to cover the returned catalog content.
 
 ## 5. Initial catalog
 
-| Category | Node types                                                                                                                                   |
-| -------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| Flow     | `flow.start`, `flow.end`, `flow.delay`                                                                                                       |
-| Utility  | `utility.log`                                                                                                                                |
+| Category | Node types                                                                                                                                                         |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Flow     | `flow.start`, `flow.end`, `flow.delay`, `flow.wait_variable`, `flow.switch`, `flow.set_variable`                                                                     |
+| Utility  | `utility.log`                                                                                                                                                      |
 | Android  | `android.launch_app`, `android.tap`, `android.swipe`, `android.input_text`, `android.press_back`, `android.press_home`, `android.screenshot`, `android.long_press` |
 
-The Backend source catalog contains 12 definitions. Control flow beyond delay is deferred.
+The Backend source catalog contains 15 definitions.
 
-### Planned targeting modes and Long Press
+### Targeting modes and Long Press
 
 The seed includes Long Press. Catalog presence does not indicate Runtime handler
-availability. Tap, Swipe, and Long Press expose a list of mode names in
-`editorHints.targetModes`; their flat `inputSchema` and `fieldOrder` still describe
-pixel inputs and duration where applicable. Backend and local Runtime validate
-the explicit authoring modes below. Percentage and selector fields are not
-published as input schemas. Executable support belongs to Stage 2.
+availability. Tap, Swipe, and Long Press publish their form contract through
+`editorHints.targeting.modes`. Each mode contains `mode` and a strict
+`bindingSchema`. Their top-level `inputSchema` is empty because
+the selected mode owns the valid bindings. Backend and local Runtime validate
+the explicit authoring modes below. Executable support belongs to Stage 2.
 
-| Node type | Absolute pixels (`ABSOLUTE_PIXELS`) | Screen percentage (`SCREEN_PERCENT`) | Element ID (`SELECTOR_ID`) | Additional input |
-|---|---|---|---|---|
-| `android.tap` | `x`, `y` (existing) | `xPercent`, `yPercent` | `selector_id` | None |
-| `android.swipe` | `startX`, `startY`, `endX`, `endY` (existing) | `startXPercent`, `startYPercent`, `endXPercent`, `endYPercent` | Unsupported | Existing gesture `durationMs` in both modes |
-| `android.long_press` (new) | `x`, `y` | `xPercent`, `yPercent` | `selector_id` | Required positive safe integer hold `durationMs`. Stage 2 plans a 60,000 ms cap. |
+| Node type                  | Absolute pixels (`ABSOLUTE_PIXELS`)           | Screen percentage (`SCREEN_PERCENT`)                           | Element ID (`SELECTOR_ID`) | Additional input                                                                 |
+| -------------------------- | --------------------------------------------- | -------------------------------------------------------------- | -------------------------- | -------------------------------------------------------------------------------- |
+| `android.tap`              | `x`, `y` (existing)                           | `xPercent`, `yPercent`                                         | `selector_id`              | None                                                                             |
+| `android.swipe`            | `startX`, `startY`, `endX`, `endY` (existing) | `startXPercent`, `startYPercent`, `endXPercent`, `endYPercent` | Unsupported                | Existing gesture `durationMs` in both modes                                      |
+| `android.long_press` (new) | `x`, `y`                                      | `xPercent`, `yPercent`                                         | `selector_id`              | Required positive safe integer hold `durationMs`. Stage 2 plans a 60,000 ms cap. |
 
 - Percentages are integers from 0 to 100, measured from the top-left of the
   current device screen in its current orientation. Resolve each axis against
@@ -124,6 +124,12 @@ published as input schemas. Executable support belongs to Stage 2.
   No input changes for the other nine existing nodes. Scroll is out of scope.
 - The [Editor Graph rules](workflow_validation.md#planned-targeting-in-editor-graph-v1)
   describe the validated draft representation. Runtime IR remains unchanged.
+
+Studio must render the target-mode selector from `editorHints.targeting.modes`
+and render only the selected mode's `bindingSchema`. The Project Draft saves the
+selected string in `config.targetMode` and only that mode's strict literal
+bindings. When the user changes mode, Studio removes the previous mode's target
+bindings before saving; it never stores every mode's fields on one node.
 
 ## 6. Publication
 
@@ -162,8 +168,11 @@ Historical verification (11-node catalog): source-contract tests, publication be
 serialization, ETag handling, `200` with 11 nodes for `0.1.0`, `422`, `304`, `401`, `403`, and an
 empty compatible catalog for `0.0.0`.
 
-The 12-definition source catalog passed focused Backend tests and build; the updated
-catalog has not been seeded or verified against a live database in this change.
+The earlier catalog passed focused Backend tests and build.
+The mode-specific `editorHints.targeting` source contract has passed source parsing
+and focused lint only; tests were not requested, the current full build is blocked
+by an unrelated generated Prisma/User selection mismatch, and the updated catalog
+has not been seeded or verified against a live database in this change.
 
 Not yet verified: Runtime has a registered executable handler for every returned
 `runtimeHandler`. Check this at the Runtime integration phase before claiming end-to-end execution.

@@ -22,9 +22,15 @@ flowchart LR
 
 ## Compilation
 
+Studio discovers available modes and their authoring fields from the Backend
+Node Definition `editorHints.targeting.modes`; it does not maintain a separate
+`TARGET_FIELDS` map. The Runtime keeps an independent local validation contract
+because execution cannot depend on a live catalog request. Cross-language parity
+fixtures must keep the Runtime rules aligned with the published catalog.
+
 Keep the node ID and handler identity. Copy the required
 `config.targetMode`. Map each Editor Graph binding
-`{"kind":"literal","value":100}` to the same field in IR `inputs` as
+`{"kind":"LITERAL","value":100}` to the same field in IR `inputs` as
 `{"source":"LITERAL","value":100}`. Preserve the value type. Every targeting
 node must carry exactly the fields for its selected mode. Missing modes,
 extra fields, and non-literal binding sources fail admission.

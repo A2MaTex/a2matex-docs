@@ -140,9 +140,8 @@ missing, disabled, or soft-deleted definitions, and stores entries sorted lexico
       "configSchema": {},
       "inputSchema": {},
       "outputSchema": {},
-      "outputPorts": {},
+      "outputPorts": { "ports": ["success", "error"] },
       "editorHints": {},
-      "supportedErrorPolicies": {},
       "capabilityCodes": ["android.device.control"],
       "contentHash": "64-character-lowercase-sha256"
     }
