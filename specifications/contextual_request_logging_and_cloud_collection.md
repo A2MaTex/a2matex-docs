@@ -59,8 +59,8 @@ The feature shall:
   asynchronous controller, service, repository, and infrastructure calls;
 - gather explicitly written diagnostic messages instead of emitting one cloud
   log entry from every layer;
-- produce an outermost-to-innermost error message that ends with the concrete
-  root-cause message;
+- produce an outermost-to-innermost error message that ends with the root
+  cause text selected by the developer;
 - write one structured log record when the HTTP response completes or closes;
 - return the trace ID to the caller and make the header readable by browser
   clients;
@@ -96,19 +96,15 @@ context for the lifetime of a request.
 ```ts
 type RequestLogContext = {
   traceId: string;
-  method: string;
-  route: string;
   startedAt: number;
   userId?: string;
-  messages: RequestLogMessage[];
+  messages?: string[];
   rootError?: Error;
+  cause?: string;
   failureStatusCode?: number;
-  finalized: boolean;
-};
-
-type RequestLogMessage = {
-  level: 'info' | 'warn' | 'error';
-  message: string;
+  hasOperationalError?: boolean;
+  truncated?: boolean;
+  finalized?: boolean;
 };
 ```
 
@@ -119,7 +115,8 @@ The request middleware shall:
 
 1. generate a new server-controlled trace ID;
 2. set `X-Trace-Id` before the request continues;
-3. capture the HTTP method, normalized route, and start time;
+3. capture the start time and resolve the HTTP method and normalized route at
+   finalization;
 4. run the remainder of the NestJS lifecycle inside the context; and
 5. retain a reference to the context for response finalization.
 
@@ -147,6 +144,7 @@ The request-scoped operations are:
 logger.log(message: string): void;
 logger.warn(message: string): void;
 logger.error(message: string, error?: unknown): void;
+contextLogger.errorWithCause(message: string, error: Error, cause: string): void;
 ```
 
 Within an active HTTP request:
@@ -154,8 +152,9 @@ Within an active HTTP request:
 - `log` appends an informational message;
 - `warn` appends a warning message;
 - `error` appends an error-context message;
-- the first concrete `Error` passed to `error` is retained as the deepest known
-  root error; and
+- the first concrete `Error` passed to `error` or `errorWithCause` is retained
+  as the deepest known root error and supplies its name to the record;
+- `errorWithCause` also selects text to append as the final cause; and
 - none of these calls writes immediately to stdout.
 
 Outside an HTTP request, the logger shall write a structured record immediately
@@ -166,11 +165,11 @@ Messages shall describe the operation that failed, not repeat a class name.
 For example:
 
 ```ts
-// Repository
-this.logger.error('failed to check existing product name', error);
+// Repository, with an Error whose message is safe to log
+this.contextLogger.errorWithCause("failed to check existing product name", error, error.message);
 
 // Service
-this.logger.error('failed to create product', error);
+this.logger.error("failed to create product", error);
 ```
 
 The message text is the source-level identifier. Developers may use IDE global
@@ -198,7 +197,7 @@ repository catches the failure before the calling service. Finalization shall
 reverse the relevant diagnostic messages so the persisted message reads from
 the user-level operation toward the root cause.
 
-Given these calls:
+The calls in Section 5 contribute the following text:
 
 ```text
 Repository: failed to check existing product name
@@ -212,13 +211,16 @@ the final message shall be:
 failed to create product: failed to check existing product name: connection credentials is invalid
 ```
 
-The formatter shall not append the same root-error text more than once when a
-higher layer already included it in its message.
+The formatter appends the selected cause directly. Repeated text is allowed.
+Developers can also attach a fixed diagnostic message to an HTTP exception
+with `withRequestLogMessage(exception, message)`. The exception filter uses
+that text as the cause when the request has no cause already. Keep attached
+messages short and safe for production.
 
-Expected client and business exceptions may use their stable public error
-message as the final cause. Unexpected failures shall retain the deepest known
-internal error for server-side logging while the API continues to return a
-safe generic response.
+When a failed request has neither diagnostic text nor a selected cause, the
+logger uses the HTTP status text, such as `Unprocessable Entity`, or
+`request failed` if status text is unavailable. The API continues to return
+a safe generic response for unexpected failures.
 
 ## 7. Final structured log contract
 
@@ -251,26 +253,24 @@ The Backend shall write one JSON object per completed HTTP request.
   "route": "/api/v1/products",
   "statusCode": 500,
   "durationMs": 94,
+  "error": "PrismaClientInitializationError",
   "userId": "usr_123",
-  "message": "failed to create product: failed to check existing product name: connection credentials is invalid",
-  "error": {
-    "name": "PrismaClientInitializationError",
-    "stack": "PrismaClientInitializationError: ..."
-  }
+  "message": "failed to create product: failed to check existing product name: connection credentials is invalid"
 }
 ```
 
-`userId` and `error` are optional. The record shall not contain `entries`,
+`userId` and `error` are optional. When present, `error` is the error
+name as a string and immediately follows `durationMs`. The logger writes
+`message` last. The record shall not contain `entries`,
 `context`, `service`, `version`, `environment`, or `requestId`.
 
 The severity shall be selected as follows:
 
-| Condition | Severity |
-| --- | --- |
-| Successful response with no recorded error | `INFO` |
-| HTTP `4xx` response with no recorded operational error | `WARNING` |
-| HTTP `5xx` response | `ERROR` |
-| Successful response containing a deliberately swallowed operational error | `ERROR` |
+| Condition                                                                 | Severity  |
+| ------------------------------------------------------------------------- | --------- |
+| Successful response with no recorded error                                | `INFO`    |
+| HTTP `4xx` or `5xx` response                                              | `ERROR`   |
+| Successful response containing a deliberately swallowed operational error | `ERROR`   |
 
 ## 8. HTTP lifecycle and error ownership
 
@@ -298,7 +298,7 @@ repositories, Prisma, and exception filters.
 
 ## 9. Sensitive-data and size boundaries
 
-The logger shall never record:
+Contextual request records shall exclude:
 
 - authorization headers, cookies, access tokens, or refresh tokens;
 - passwords, OTP values, API keys, or connection credentials;
@@ -310,21 +310,31 @@ The logger shall never record:
 - raw private Profile data; or
 - arbitrary objects supplied as logger metadata.
 
-The existing unconditional Prisma query and parameter output shall be removed.
-Database failures shall instead contribute a sanitized root error to the final
-request record.
+Call sites shall use fixed diagnostic text or values reviewed for production
+logging, including any original exception message explicitly selected as the
+cause. For unexpected errors, the `error` field contains the error name.
+Stack traces are reserved for detailed debugging outside the request
+record. The request logger performs no regex redaction.
 
-Central sanitization shall remove recognized secret-bearing URL credentials,
-token patterns, and sensitive key/value text before serialization. Stack traces
-shall be sanitized by the same boundary.
+Before merging changes that affect production logging, reviewers shall verify
+the sources of values passed to logger calls, including interpolated values
+and forwarded errors. This check also covers direct console calls and
+library logging configuration.
+
+`PRISMA_LOG_IGNORED_ENVIRONMENTS` includes `production`. Environments in
+the array suppress Prisma's direct query, info, and error output. Development
+prints SQL and its bound parameter values as queries complete. Query
+output emitted before request finalization precedes that request's contextual
+record. Requests that run no queries produce no SQL output. Output from
+concurrent requests can interleave. Database failures can still contribute a
+safe cause description to the contextual record.
 
 The implementation shall define shared constants for these limits:
 
-| Limit | MVP value | Behavior when exceeded |
-| --- | ---: | --- |
-| Messages per request | 25 | Stop accepting additional messages and mark the final message as truncated |
-| One message | 2 KiB | Truncate before storing |
-| Stack trace | 16 KiB | Truncate before writing |
+| Limit                | MVP value | Behavior when exceeded                                                     |
+| -------------------- | --------: | -------------------------------------------------------------------------- |
+| Messages per request |        25 | Stop accepting additional messages and mark the final message as truncated |
+| One logger message or explicit cause passed to `errorWithCause` | 2 KiB | Truncate before storing |
 
 These limits bound temporary memory and Cloud Logging record size. They are
 operational constants, not business rules.
@@ -365,8 +375,7 @@ The expected Backend implementation is:
 src/shared/infrastructure/logging/
 ├── request-log-context.ts
 ├── request-log-context.service.ts
-├── context-logger.service.ts
-└── log-sanitizer.ts
+└── context-logger.service.ts
 
 src/shared/constants/logging.constant.ts
 deploy/google-cloud-ops-agent.yaml
@@ -382,11 +391,13 @@ The change is also expected to update:
   finalization;
 - the global exception filters to record failures without writing duplicates;
 - `src/shared/guards/access-token.guard.ts` to add the authenticated `userId`;
-- `src/shared/services/prisma.service.ts` to remove query and parameter output;
 - existing request-scoped error call sites whose messages need to contribute to
   the final chain;
 - `deploy/docker-compose.prod.yaml` for local log rotation; and
 - the deployment runbook and Backend shared-infrastructure notes.
+
+`src/shared/services/prisma.service.ts` suppresses direct Prisma output in
+ignored environments and prints SQL and bound parameters when enabled.
 
 The feature requires no database migration and no new application dependency.
 
@@ -415,15 +426,20 @@ The feature is accepted when all of the following behavior is demonstrated:
 3. A normal successful request produces exactly one structured request record.
 4. A failed request produces exactly one structured request record rather than
    separate repository, service, interceptor, filter, and completion records.
-5. Repository and service diagnostic messages appear once in the final
-   outermost-to-innermost `message` chain.
-6. The deepest sanitized error message terminates the chain, and an unexpected
-   error includes its name and stack.
+5. Repository and service diagnostics appear in the final `message` chain
+   from the outer operation to the inner operation. Repeated text is allowed.
+6. An explicitly selected cause terminates the chain, including the original
+   error message when selected with `errorWithCause`. The `error` field
+   contains the error name as a string when available. A failed request
+   without diagnostics or a selected cause uses fallback text.
 7. The persisted record contains no `entries` or per-layer context array.
 8. Concurrent requests retain independent trace IDs and message chains.
 9. Request bodies, credentials, tokens, Prisma parameters, workflow documents,
-   and presigned URLs do not appear in local or Cloud logs.
-10. Prisma no longer prints every query and parameter unconditionally.
+   and presigned URLs do not appear in contextual request records or in
+   production logs.
+10. Production suppresses direct Prisma output. In development, SQL and bound
+    parameter output emitted before request finalization appears before that
+    request's contextual record.
 11. Searching the response trace ID in Google Cloud Logging returns the
     structured request record from the staging deployment.
 12. Ops Agent or Cloud Logging unavailability does not block API request
@@ -443,4 +459,3 @@ need:
 - log-derived metrics, dashboards, and alert policies;
 - long-term log export to another storage system; and
 - frontend support UI beyond capturing and displaying the response trace ID.
-
