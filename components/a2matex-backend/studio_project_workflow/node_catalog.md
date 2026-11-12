@@ -64,10 +64,12 @@ Foreign keys use the database default `NO ACTION` behavior.
 Each definition declares:
 
 - identity/display: `type`, `name`, `description`, `category`;
-- execution: `runtimeHandler`, strict `minimumRuntimeVersion`, bounded positive timeout;
+- execution: `runtimeHandler`, strict `minimumRuntimeVersion`, and positive default timeout used
+  when a node instance omits `timeoutMs`;
 - three object schemas with `type: "object"`, `properties`, `required`, and
   `additionalProperties: false`;
-- unique output-port keys from `success`, `error`, `true`, `false`, `body`, `completed`;
+- unique static output-port keys; `flow.switch` additionally resolves its ordered rule IDs and
+  `default` as instance ports from validated config;
 - optional targeting-mode binding schemas in `editorHints`;
 - capability codes.
 
@@ -93,6 +95,15 @@ ETag continue to cover the returned catalog content.
 | Android  | `android.launch_app`, `android.tap`, `android.swipe`, `android.input_text`, `android.press_back`, `android.press_home`, `android.screenshot`, `android.long_press` |
 
 The Backend source catalog contains 15 definitions.
+
+Special Flow contracts:
+
+- `flow.set_variable` requires `config.name`, accepts optional `scope` (`FLOW` or `RUN_GROUP`), and
+  receives its value through `bindings.value`;
+- `flow.wait_variable` requires only `config.name`; the node instance's optional `timeoutMs`, or the
+  definition default when omitted, is the wait deadline;
+- `flow.switch` owns ordered `config.rules`; each rule ID and `default` is a required instance output
+  port, with conditional `error` when the node uses `ERROR_BRANCH`.
 
 ### Targeting modes and Long Press
 

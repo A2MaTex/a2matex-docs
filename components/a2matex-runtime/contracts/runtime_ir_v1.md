@@ -6,13 +6,14 @@
 
 ## 1. Purpose and ownership
 
-Runtime IR is the canonical executable document produced by Studio and consumed
-by Runtime. Backend stores it in `ProjectDraft.runtimeIr` and later freezes it
-inside a Workflow Revision, but the Project Draft and Editor Graph are separate
-contracts.
+Runtime IR is the canonical executable document consumed by Runtime. The Backend
+compiler produces the authoritative Runtime IR for a submitted Workflow Revision.
+Studio may use the same contract for local preview and execution, but
+`ProjectDraft.runtimeIr` is only a nullable authoring cache and is never trusted by
+Submission or Product Release.
 
-Runtime IR contains execution semantics only. Studio omits the entire
-Editor Graph `editor` object during compilation, including canvas coordinates,
+Runtime IR contains execution semantics only. A compiler omits the entire Editor
+Graph `editor` object, including canvas coordinates,
 labels, and descriptions. The local Editor Graph validator checks that
 metadata as part of the authoring document. Device actions use the executable
 node inputs. Runtime IR also excludes viewport state, selection, colors,
@@ -35,7 +36,7 @@ Every Runtime IR v1 document contains exactly these fields:
 | `inputSchema` | Reduced schema for per-device workflow inputs |
 | `nodes` | Two to 500 executable nodes; array order has no execution meaning |
 | `edges` | One to 1,000 control-flow transitions |
-| `requiredCapabilities` | Sorted unique capability union derived from the nodes |
+| `requiredCapabilities` | Unique capability union derived from the nodes |
 
 Unknown envelope fields are rejected. The maximum serialized UTF-8 size is
 1,048,576 bytes and is checked before full decoding.
@@ -48,9 +49,9 @@ Unknown envelope fields are rejected. The maximum serialized UTF-8 size is
 }
 ```
 
-The embedded `inputSchema` must equal `ProjectDraft.inputSchema`. Studio must
-produce the same value in both locations, and the future submission validator
-must reject inconsistent copies.
+The embedded `inputSchema` must equal the frozen Workflow Revision
+`inputSchema`. The Backend compiler copies that frozen value and the Submission
+scanner rejects inconsistent output.
 
 ## 3. Reduced field schema
 
@@ -129,7 +130,7 @@ Each node contains exactly:
 | `runtimeHandler` | Handler registry key; no handler version in v1 |
 | `config` | Static object validated by the node's config contract |
 | `inputs` | Map from handler input field to one input source |
-| `timeoutMs` | Per-attempt integer timeout from 1 to 600,000 |
+| `timeoutMs` | Effective per-attempt integer timeout from 1 to 600,000 |
 | `retryPolicy` | Strict object containing `maxAttempts` and `delayMs` |
 | `errorPolicy` | `STOP` or `ERROR_BRANCH` |
 
@@ -138,14 +139,17 @@ approved contract contains the static `error` output-port key. Runtime derives
 this support from the port list and rejects an unsupported choice with
 `NODE_ERROR_POLICY_INVALID`; Node Definitions do not duplicate a supported-policy list.
 
-`config` and `inputs` each contain at most 100 properties. Tap, Swipe, and
-Long Press require `config.targetMode` as specified by the
-[Android targeting contract](android_targeting.md). Other current nodes use
-`config: {}`. Runtime validates `type`, `runtimeHandler`, config, inputs,
-outputs, ports, error policy, and capabilities against its approved node
-contract registry.
+`config` and `inputs` each contain at most 100 properties. Tap, Swipe, and Long
+Press require `config.targetMode` as specified by the
+[Android targeting contract](android_targeting.md). Flow nodes use the specific
+configuration defined in the current node matrix and
+[workflow binding contract](workflow_bindings.md). Runtime validates `type`,
+`runtimeHandler`, config, inputs, outputs, ports, error policy, and capabilities
+against its approved node contract registry.
 
-The retry policy contains exactly:
+Every Editor Graph node may provide `timeoutMs` and `retryPolicy`. The compiler
+uses `NodeDefinition.defaultTimeoutMs` when `timeoutMs` is absent. A missing
+retry field resolves independently to the following default:
 
 ```json
 {
@@ -155,9 +159,10 @@ The retry policy contains exactly:
 ```
 
 `maxAttempts` is 1–3 and includes the first attempt. `delayMs` is 0–60,000.
-The timeout applies separately to each attempt. Compiled nodes always contain
-effective policy values; Runtime does not resolve mutable catalog defaults at
-execution time.
+The timeout applies separately to each attempt; `delayMs` is the wait after a
+retryable failure and before the next attempt. Compiled nodes always contain
+effective timeout and retry values; Runtime does not resolve mutable catalog
+defaults at execution time.
 
 An Android operation may retry only after an explicitly retryable failure known
 to occur before command dispatch. Runtime never automatically replays an
@@ -209,8 +214,36 @@ output field must exist, the output and destination types must match, and the
 producer must dominate the consumer: it executes before and on every path that
 can reach the consumer.
 
-Runtime IR v1 has no free-form expressions, string interpolation, mutable
-variables, fallback values, implicit conversions, or executable command text.
+### `FLOW_VARIABLE`
+
+```json
+{
+  "source": "FLOW_VARIABLE",
+  "name": "lastScreenshot"
+}
+```
+
+The object contains exactly `source` and `name`. Runtime resolves the
+case-sensitive key from the current device execution. An absent value or a
+value incompatible with the destination input fails the node and follows its
+error policy.
+
+### `GLOBAL_VARIABLE`
+
+```json
+{
+  "source": "GLOBAL_VARIABLE",
+  "name": "bestScore"
+}
+```
+
+The object contains exactly `source` and `name`. Runtime resolves the
+case-sensitive key from the current Run Group. An absent value or a value
+incompatible with the destination input fails the node and follows its error
+policy.
+
+Runtime IR v1 has no free-form expressions, string interpolation, fallback
+values, implicit conversions, or executable command text.
 
 ## 7. Edge and graph contract
 
@@ -220,7 +253,7 @@ Each edge contains exactly:
 |---|---|
 | `id` | Unique edge ID |
 | `sourceNodeId` | Existing source node |
-| `sourcePort` | `success` or `error` |
+| `sourcePort` | Port key declared by the source node contract or resolved node instance |
 | `targetNodeId` | Existing target node |
 
 Semantic rules:
@@ -231,7 +264,9 @@ Semantic rules:
 - End has no outgoing edge.
 - Every node is reachable from Start.
 - The graph is acyclic.
-- Every non-End node has exactly one `success` edge.
+- Every ordinary non-End node has exactly one `success` edge.
+- `flow.switch` has exactly one outgoing edge for each ordered rule ID and one
+  `default` edge; it has no `success` edge.
 - `ERROR_BRANCH` requires exactly one `error` edge.
 - `STOP` prohibits an `error` edge.
 - One source node and source port pair has at most one edge.
@@ -241,9 +276,10 @@ Semantic rules:
 
 ## 8. Capabilities and compatibility
 
-`requiredCapabilities` is the sorted, deduplicated union of capabilities from
-all node contracts. The publisher cannot add or remove entries. Runtime
-recomputes and compares the union before execution.
+`requiredCapabilities` is the deduplicated union of capabilities from all node
+contracts, preserving the first occurrence while traversing Runtime IR nodes and
+each definition's capability list. The publisher cannot add or remove entries.
+Runtime recomputes and compares the union before execution.
 
 `minimumRuntimeVersion` is the highest minimum version required by the included
 node contracts. Runtime requires all three conditions:
@@ -263,6 +299,9 @@ for Tap, Swipe, and Long Press.
 | `flow.start` | `{}` | `{}` | `success` | 1,000 | `STOP` | None |
 | `flow.end` | `{}` | `{}` | None | 1,000 | `STOP` | None |
 | `flow.delay` | `durationMs: int[0..300000]` | `durationMs: int>=0` | `success`, `error` | 300,000 | `STOP`, `ERROR_BRANCH` | None |
+| `flow.set_variable` | `value: supported scalar source` | `{}` | `success`, `error` | 1,000 | `STOP`, `ERROR_BRANCH` | None |
+| `flow.wait_variable` | `{}` | `{}` | `success`, `error` | 600,000 | `STOP`, `ERROR_BRANCH` | None |
+| `flow.switch` | `value` plus one operand per non-`IS_EMPTY` rule | `{}` | ordered rule IDs, `default`, conditional `error` | 1,000 | `STOP`, `ERROR_BRANCH` | None |
 | `utility.log` | `message: string[1..4000]` | `{}` | `success`, `error` | 1,000 | `STOP`, `ERROR_BRANCH` | None |
 | `android.launch_app` | `packageName: string[3..255]` with approved package pattern | `{}` | `success`, `error` | 30,000 | `STOP`, `ERROR_BRANCH` | `android.device.control` |
 | `android.tap` | Mode-specific point | `{}` | `success`, `error` | 30,000 | `STOP`, `ERROR_BRANCH` | `android.device.control` |
@@ -277,7 +316,44 @@ Node-specific output payloads remain separate because their business results
 differ. A5 defines one common execution-result envelope containing the
 node-specific payload under `output`.
 
-## 10. Validation pipeline
+`flow.set_variable.config` contains required `name` and optional `scope`; scope
+defaults to `FLOW` and accepts `FLOW` or `RUN_GROUP`. Its `value` input accepts
+any supported scalar source. `flow.wait_variable.config` contains only required
+Global variable `name`; the node's effective `timeoutMs` is its wait deadline.
+`flow.switch.config.rules` contains one to 32 ordered unique rule IDs and
+operators. It resolves `inputs.value` once, evaluates rules from first to last,
+follows the first matching rule port, and otherwise follows `default`.
+
+## 10. Compilation contract
+
+The compiler receives one Editor Graph, its Input Schema, and the exact Node
+Definitions selected for that source snapshot. It does not read mutable catalog
+rows during compilation and does not mutate its inputs.
+
+It constructs the envelope as follows:
+
+- set `formatVersion` to `1` and copy Editor Graph `schemaVersion` into
+  `metadata.sourceGraphSchemaVersion`;
+- copy `entryNodeId`, Input Schema, and edges in their existing array order;
+- derive `minimumRuntimeVersion` from the referenced Node Definitions;
+- compile nodes in Editor Graph array order;
+- derive `requiredCapabilities` by first-occurrence deduplication.
+
+For every node, the compiler:
+
+1. copies `id`, `type`, validated `config`, and `errorPolicy`;
+2. resolves `runtimeHandler` and default timeout from its frozen Node Definition;
+3. maps every binding `kind` to the corresponding Runtime IR input `source`;
+4. writes `timeoutMs = node.timeoutMs ?? definition.defaultTimeoutMs`;
+5. writes `retryPolicy.maxAttempts = node.retryPolicy.maxAttempts ?? 1`;
+6. writes `retryPolicy.delayMs = node.retryPolicy.delayMs ?? 0`; and
+7. omits the complete Editor Graph `editor` object and every catalog-only field.
+
+Set Variable, Wait Variable, Switch, variable sources, targeting modes, and
+dynamic Switch ports follow Sections 6, 7, and 9. Any validation or compilation
+diagnostic produces no Runtime IR result; the compiler never emits partial IR.
+
+## 11. Validation pipeline
 
 Runtime validates the complete document before creating an active execution:
 
@@ -287,14 +363,14 @@ Runtime validates the complete document before creating an active execution:
 4. Resolve each node contract and validate config, input names, handler, ports,
    policies, and literal values.
 5. Validate edge endpoints, Start/End rules, reachability, and acyclicity.
-6. Type-check workflow-input and node-output sources, including producer
-   dominance.
+6. Type-check every input source, including node-output producer dominance and
+   variable destination compatibility.
 7. Recompute capabilities and minimum Runtime compatibility.
 
 Validation failure creates no active execution and dispatches no device
 command. A6 defines the eventual error envelope and codes.
 
-## 11. Reference document
+## 12. Reference document
 
 [`runtime_ir_v1.example.json`](./runtime_ir_v1.example.json) is the canonical
 valid A2 example. Runtime implements the contract with strict Go types and

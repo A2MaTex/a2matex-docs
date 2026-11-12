@@ -64,7 +64,7 @@ Năm platform được tính trong plan:
 
 - [ ] Publisher dashboard tối giản.
 - [ ] Cloud Project list do Studio lưu lên Backend.
-- [ ] Project detail summary: saved version, graph summary, assets, validation, capabilities và test summary.
+- [ ] Project detail summary: saved version, graph summary, assets, validation và capabilities.
 - [ ] Submission review-context form.
 - [ ] Submission wizard:
   - [ ] Step 1 — chọn Project và exact draft version.

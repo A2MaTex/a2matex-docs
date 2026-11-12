@@ -11,7 +11,7 @@ dedicated multi-user checks pending
 only identity, metadata, ownership and lifecycle.
 
 Out of scope: `ProjectDraft`, graph/Runtime IR JSON, draft conflict/version handling, assets,
-validation/test summaries, workflow revisions, submissions, execution history, public delete and
+validation summary, workflow revisions, submissions, execution history, public delete and
 unarchive.
 
 ## 2. Contract decisions for approval

@@ -1,6 +1,7 @@
 # B3 — Runtime Supervisor
 
-**Status:** Implemented; focused B3 verification passed; lint pending  
+**Status:** Standalone supervisor implemented. UI-managed ownership is approved for MVP and pending implementation.
+
 **Phase:** B3 — Runtime process foundation
 
 ## Overview
@@ -102,6 +103,31 @@ operations.
 
 These names illustrate ordering only. State, events, scheduling, and connection
 file publication remain owned by their later phases.
+
+## UI-managed Runtime for MVP
+
+Studio and Launcher each start the Runtime as a native child process when
+their user needs it. The starting app owns that process until it exits.
+The other app displays **Runtime already in use** if its launch conflicts
+with the existing store owner. The D1 store lock arbitrates competing launches.
+`make run` remains the standalone development entry point.
+
+The native owner maintains a private control channel for readiness, shutdown,
+and owner-lifetime detection. Losing SSE, reloading a window, or minimizing
+the app does not close this channel. A managed child publishes readiness only
+after D6 succeeds and the local listener is ready.
+
+| Trigger | Supervisor behavior |
+|---|---|
+| Shutdown requested while idle | Close components and release the SQLite lock. |
+| Confirmed shutdown during a run | Block admission and dispatch. Give H6 the existing shutdown deadline to settle attempts and commit terminal state before closing the checkpoint service and SQLite. |
+| Owner channel closes unexpectedly | Block further work, perform bounded cleanup, and exit. D6 processes any unfinished rows at the next start. |
+| Shutdown deadline expires | Exit after bounded cleanup. Preserve durable results and let D6 handle unfinished rows. |
+
+The owner waits for actual process exit before displaying **Stopped**. A new
+launch requires an explicit user action. Verify ready startup, idle stop,
+owner loss, and competing launches with a test parent process before wiring
+the desktop apps. Verify cancellation during a real run before client release.
 
 ## Current B3 scope
 

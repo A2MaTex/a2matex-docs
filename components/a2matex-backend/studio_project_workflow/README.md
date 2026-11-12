@@ -10,7 +10,7 @@ The database overview remains in
 | Project Module            | Implemented, migrated, permissioned; multi-user checks pending | [`project_module.md`](project_module.md)           | `phase2.md`, checklist phase 5    |
 | Project Draft             | Backend complete; migrated, permissioned, and live-verified    | [`project_draft.md`](project_draft.md)             | `phase3.md`, checklist phase 6    |
 | Basic Workflow Validation | Backend complete and approved                                  | [`workflow_validation.md`](workflow_validation.md) | `phase4.md`, checklist phase 7    |
-| Workflow Revision         | Backend core implemented; Submission integration pending       | [`workflow_revision.md`](workflow_revision.md)     | `phase5.md`                       |
+| Workflow Revision         | Source snapshot core implemented; asynchronous compilation finalization pending | [`workflow_revision.md`](workflow_revision.md) | `phase5.md` |
 
 Decision precedence for these features:
 

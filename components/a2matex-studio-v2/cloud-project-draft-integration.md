@@ -44,7 +44,6 @@ Bao gồm:
 - Input schema.
 - Runtime IR.
 - Validation summary.
-- Test summary.
 - Local revision và trạng thái sync.
 
 Local Draft được tạo ngay khi project được tạo.
@@ -63,10 +62,12 @@ Cloud Draft chứa:
 - `inputSchema`
 - `runtimeIr`
 - `validationSummary`
-- `testSummary`
 - `version`
 - `contentHash`
 - `savedAt`
+
+`runtimeIr` trong Cloud Draft chỉ là authoring cache, có thể null hoặc stale. Submission không dùng
+field này; Backend compile lại exact frozen snapshot để tạo authoritative Workflow Revision.
 
 Mỗi Project có tối đa một current ProjectDraft trên backend.
 
@@ -191,7 +192,9 @@ Nếu metadata thay đổi, tăng `metadata_revision`.
 
 Nếu không có semantic changes so với snapshot đã lưu, bỏ qua transaction tăng revision không cần thiết.
 
-Nếu graph/input thay đổi làm kết quả cũ hết hiệu lực, đặt `runtimeIr = null` khi chưa có kết quả compile cho snapshot hiện tại và xóa các summary đã stale bằng `{}`. Có thể giữ diagnostics được tạo cho snapshot hiện tại.
+Nếu graph/input thay đổi, cached Runtime IR và validation summary cũ không còn đại diện cho snapshot
+mới. Studio có thể đánh dấu chúng stale trong metadata local mà không cần compile hoặc clear
+`runtimeIr` sau mỗi autosave. Trước local test, Studio compile lại immutable local snapshot hiện tại.
 
 Nếu transaction thất bại:
 
@@ -288,7 +291,8 @@ Thực hiện theo thứ tự:
 7. Detect version/name conflict.
 8. Nếu trùng tên hoặc có xung đột version, dừng Sync, hiển thị lỗi và giữ bản local.
 9. Nếu không conflict, đồng bộ metadata.
-10. Build ProjectDraft payload từ SQLite snapshot, kể cả khi workflow chưa hoàn chỉnh hoặc không hợp lệ. Dùng `runtimeIr: null` nếu chưa có IR cho snapshot hiện tại. Kiểm tra điều kiện submit và scan ở bước Submission.
+10. Build ProjectDraft payload từ SQLite snapshot, kể cả khi workflow chưa hoàn chỉnh hoặc không hợp
+    lệ. `runtimeIr` có thể null hoặc là local preview cache; Submission không tin field này.
 11. PUT Cloud Draft.
 12. Persist remote acknowledgement về SQLite.
 13. Cập nhật sync status.

@@ -146,7 +146,7 @@ configuration accepted for each node.
 | `flow.delay` | `flow.delay` | `{}` only | `success`, `error` |
 | `flow.set_variable` | `flow.set_variable` | Required `name`, optional `scope` (`FLOW` or `RUN_GROUP`) | `success`, `error` |
 | `flow.switch` | `flow.switch` | Ordered `rules` | Instance rule IDs, `default`, conditional `error` |
-| `flow.wait_variable` | `flow.wait_variable` | Required Global key `name` and integer `timeoutMs` (1–600,000) | `success`, `error` |
+| `flow.wait_variable` | `flow.wait_variable` | Required Global key `name`; wait deadline comes from node-level `timeoutMs` | `success`, `error` |
 | `utility.log` | `utility.log` | `{}` only | `success`, `error` |
 | `android.launch_app` | `android.launch_app` | `{}` only | `success`, `error` |
 | `android.tap` | `android.tap` | Required `targetMode` | `success`, `error` |

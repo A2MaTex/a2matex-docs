@@ -45,9 +45,8 @@ ProjectDraft
   version INTEGER, required, starts at 1
   editorGraph JSONB object, required
   inputSchema JSONB object, required
-  runtimeIr JSONB object, nullable
+  runtimeIr JSONB object, nullable, non-authoritative authoring cache
   validationSummary JSONB object, required, default {}
-  testSummary JSONB object, required, default {}
   contentHash VARCHAR(64), required, lowercase SHA-256
   savedAt TIMESTAMPTZ, required
   savedById UUID FK User, required
@@ -78,29 +77,48 @@ Save body:
   "editorGraph": {},
   "inputSchema": {},
   "runtimeIr": null,
-  "validationSummary": {},
-  "testSummary": {}
+  "validationSummary": {}
 }
 ```
 
-The `GET` response always exposes `projectStatus`. A present draft exposes the five content fields
+The `GET` response always exposes `projectStatus`. A present draft exposes the four content fields
 plus `id`, `projectId`, `version`, `contentHash`, and `savedAt`; `savedById` remains an internal audit
 field. The `PUT` response returns only `id`, `version`, `contentHash`, and `savedAt`; this explicit
 mutation-response exception avoids a second read while preventing the Backend from echoing up to
 1 MiB of content. Input is strict: every non-null content field must be a JSON object and
 `expectedVersion` must be a non-negative safe integer.
 
-`validationSummary` and `testSummary` are informational snapshots in this phase. They are never
-trusted as proof that a draft may be finalized or submitted.
+`runtimeIr` and `validationSummary` are informational authoring snapshots in this phase. Studio may
+leave `runtimeIr` null or stale while autosaving unfinished work; it does not need to clear or
+regenerate it after every local edit. Submission and Product Release never trust this field. The
+Submission consumer compiles the exact frozen Editor Graph and Input Schema into the authoritative
+`WorkflowRevision.runtimeIr`.
+
+The planned preview compile API is read/compute-only: it may compile any accessible Project Draft
+regardless of Project lifecycle status, returns Runtime IR or publisher-safe compiler diagnostics,
+and does not change the draft version, cache, hash, or timestamps.
 
 ## 5. Hash and idempotency
 
-Canonicalize the object containing exactly `editorGraph`, `inputSchema`, `runtimeIr`,
-`validationSummary`, and `testSummary`: recursively sort object keys, preserve array order and
-preserve JSON scalar values. Compute lowercase SHA-256 using `node:crypto`.
+Canonicalize the object containing exactly `editorGraph`, `inputSchema`, `runtimeIr`, and
+`validationSummary`: recursively sort object keys, preserve array order and preserve JSON scalar
+values. Compute lowercase SHA-256 using `node:crypto`.
 
 The canonical UTF-8 bytes are also used for the 1 MiB size check. This keeps size and hash behavior
 deterministic across request key orderings without adding a dependency.
+
+Removing the former `testSummary` field changes this hash envelope. Every active draft created
+before that migration must be saved once before it can be submitted; the normal conditional save
+recomputes the hash and advances the draft version. Archived drafts remain readable and cannot be
+submitted. Before applying the removal migration, deployment must verify that `WorkflowRevision` is
+empty. If any revision exists, deployment must stop because removing its frozen hash input would
+violate the revision integrity contract.
+
+```sql
+SELECT COUNT(*) FROM "WorkflowRevision";
+```
+
+The result must be `0` before migration deployment.
 
 The HTTP JSON parser uses a named 2 MiB transport ceiling so it can parse the envelope before the
 feature applies the exact 1 MiB canonical-content limit. The transport ceiling is not the business
@@ -171,6 +189,7 @@ never include draft JSON, credentials, secrets, or workflow input values.
 ## 9. Deferred
 
 Cloud graph-validation rules begin in checklist phase 7, but Draft Save does not invoke them. The
-future submission worker validates the immutable submitted revision. Studio conflict-tab/explicit-
-overwrite UX remains a client integration task. Runtime IR consistency, immutable revisions,
-submission, assets, credentials, and execution history remain separate later modules.
+future submission worker validates and compiles the immutable submitted revision. Studio
+conflict-tab/explicit-overwrite UX remains a client integration task. Authoritative Runtime IR,
+immutable revision finalization, submission, assets, credentials, and execution history remain
+separate later modules.

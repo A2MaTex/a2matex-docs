@@ -108,6 +108,16 @@ After decoding, it compares the fixed-length bytes with
 `crypto/subtle.ConstantTimeCompare`. It returns only authenticated or
 unauthenticated; B6 owns the HTTP `401` response.
 
+## Managed launch credential handoff
+
+For the approved MVP, a UI-managed child delivers its API base URL and fresh
+session token to the owning native app over the private control channel from
+B3, once recovery and listener startup succeed. The owner keeps credentials
+in its native process. Use a dedicated channel separate from stdout/stderr
+logging and apply the same bearer authentication to loopback HTTP. Standalone
+development uses the connection-file handoff below. The managed handoff is
+pending implementation.
+
 ## Connection file
 
 The Publisher writes exactly `runtime-connection.json`:

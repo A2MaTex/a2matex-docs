@@ -5,17 +5,19 @@
 Studio treats the Backend Node Catalog as the authoring contract. It uses a
 Node Definition to build the palette and inspector and saves only instance
 values in the Editor Graph. Studio must never copy Node Definition schemas into
-a Project Draft. Runtime IR compilation is a separate boundary described only
-where its contract is already finalized.
+a Project Draft. Studio may compile a local preview, while the Backend compiles
+the authoritative Runtime IR from the frozen Submission snapshot.
 
 ```mermaid
 flowchart LR
     C[Backend Node Catalog] --> F[Studio generates node form]
     F --> U[User selects mode and enters values]
     U --> D[Editor Graph in Project Draft]
-    D --> V[Backend and local validation]
-    V -->|Valid and executable| R[Studio compiles Runtime IR]
-    V -->|Invalid or unsupported| E[Show diagnostics and block run or submit]
+    D --> V[Backend or local validation]
+    V -->|Valid and executable| R[Compile Runtime IR]
+    V -->|Invalid or unsupported| E[Show authoring diagnostics]
+    D --> S[Submit exact draft snapshot]
+    S --> B[Backend validates and compiles for review]
 ```
 
 ## 1. Load and identify nodes
@@ -43,6 +45,21 @@ For a node without `editorHints.targeting`, generate controls from
 `configSchema` and `inputSchema`. Save static config values in `node.config`.
 Save input values as binding-source objects in `node.bindings`; a direct value
 uses `{ "kind": "LITERAL", "value": ... }`.
+
+Every node may also save optional execution settings:
+
+```json
+{
+  "timeoutMs": 30000,
+  "retryPolicy": {
+    "maxAttempts": 3,
+    "delayMs": 1000
+  }
+}
+```
+
+Omitted `timeoutMs` uses `NodeDefinition.defaultTimeoutMs`. Omitted retry fields
+resolve to `maxAttempts: 1` and `delayMs: 0` during compilation.
 
 The Project Draft node keeps only instance data:
 
@@ -97,9 +114,11 @@ Before changing a targeting mode, collect the union of binding names from all
 `config.targetMode`, and initialize only the new mode's form state. Keep future
 non-target bindings untouched if a targeting node later defines any.
 
-A targeting edit makes cached `runtimeIr`, validation results, and test results
-stale. Recompile and revalidate the same immutable local snapshot before a test
-run, cloud sync that carries compiled IR, or submission.
+A targeting edit makes cached local `runtimeIr`, validation results, and test
+results stale. Studio does not need to regenerate or clear that cache on every
+autosave. It must compile the current immutable local snapshot before a local
+test run. Submission ignores cached Project Draft Runtime IR and compiles the
+frozen server snapshot independently.
 
 ## 5. Runtime IR conversion
 
@@ -115,31 +134,39 @@ into the Runtime IR input source:
 { "source": "LITERAL", "value": 50 }
 ```
 
-Use the Node Definition for `runtimeHandler`, default timeout, capabilities,
-and ports. Copy the node instance's selected `errorPolicy` only after validating
-it against the definition's ports: `STOP` is always valid and `ERROR_BRANCH`
-requires an `error` port. Do not copy editor position, labels, descriptions,
-catalog schemas, or unused targeting modes into Runtime IR.
+Use the Node Definition for `runtimeHandler`, default timeout, capabilities, and
+ports. Use the node's `timeoutMs` when present, otherwise use
+`NodeDefinition.defaultTimeoutMs`. Resolve missing retry fields to
+`maxAttempts: 1` and `delayMs: 0`. Copy the node instance's selected
+`errorPolicy` only after validating it against the definition's ports: `STOP`
+is always valid and `ERROR_BRANCH` requires an `error` port. Do not copy editor
+position, labels, descriptions, catalog schemas, or unused targeting modes into
+Runtime IR.
 
-This guide finalizes only the `LITERAL` mapping needed by the current targeting
-nodes. The other currently executable mappings preserve their source metadata:
+All supported binding mappings preserve their source metadata:
 
 | Editor Graph binding | Runtime IR input |
 |---|---|
 | `{ "kind": "WORKFLOW_INPUT", "inputName": "name" }` | `{ "source": "WORKFLOW_INPUT", "inputName": "name" }` |
 | `{ "kind": "NODE_OUTPUT", "nodeId": "capture", "field": "artifactId" }` | `{ "source": "NODE_OUTPUT", "nodeId": "capture", "field": "artifactId" }` |
+| `{ "kind": "FLOW_VARIABLE", "name": "score" }` | `{ "source": "FLOW_VARIABLE", "name": "score" }` |
+| `{ "kind": "GLOBAL_VARIABLE", "name": "bestScore" }` | `{ "source": "GLOBAL_VARIABLE", "name": "bestScore" }` |
 
-Do not invent Runtime IR forms for `FLOW_VARIABLE` or `GLOBAL_VARIABLE`. Their
-executable mapping remains owned by the Runtime workflow-binding phase. Studio
-must not offer them for executable workflows until that phase is implemented.
+`flow.set_variable` maps `bindings.value` to `inputs.value` and keeps its
+validated `name` and optional `scope` config. `flow.wait_variable` keeps only
+`config.name`; its effective node `timeoutMs` is the wait deadline.
+`flow.switch` preserves ordered rules, maps the left and rule operands into
+`inputs`, and preserves each rule ID, `default`, and conditional `error` as edge
+`sourcePort` values.
 
 ## 6. Validation boundary
 
 Studio validation improves feedback but is not authoritative. Backend validates
-the Editor Graph against the active stored Node Definitions, and Runtime
-validates the compiled IR again before execution. Studio must block test or
-submission when the Runtime handshake does not advertise the selected node
-handler, even when the draft itself is valid and saveable.
+and compiles the frozen Submission snapshot, and Runtime validates the compiled
+IR again before execution. Studio must block a local test when it cannot compile
+the current snapshot or the Runtime cannot execute a selected handler. It may
+still save or submit unfinished content; the Submission scan keeps detailed
+findings private for Admin review and prevents approval when compilation fails.
 
 The complete Backend contracts are documented in
 [Node Catalog](../a2matex-backend/studio_project_workflow/node_catalog.md),

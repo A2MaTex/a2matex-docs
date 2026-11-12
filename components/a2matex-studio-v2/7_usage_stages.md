@@ -130,7 +130,6 @@ Một revision nên chứa:
 - node version lock;
 - capability manifest;
 - assets;
-- product metadata;
-- test summary.
+- product metadata.
 
 Marketplace review đúng revision đó, không review “product hiện tại” vốn còn có thể thay đổi.

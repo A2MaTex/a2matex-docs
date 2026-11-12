@@ -5,14 +5,15 @@ Phases E–G and Studio integration.
 
 ## Overview
 
-Studio compiles one explicit targeting mode and its literal fields into
-Runtime IR. The Runtime targeting component resolves those inputs against the
+The Backend compiler copies one explicit targeting mode and its literal fields
+into authoritative Runtime IR; Studio may apply the same mapping for local
+preview. The Runtime targeting component resolves those inputs against the
 selected Android device and dispatches a fixed command. Verify the component
 independently before integrating workflow admission and Studio Test Run.
 
 ```mermaid
 flowchart LR
-  S[Studio compiler — integration pending] --> I[IR mode and literal inputs]
+  S[Backend or Studio compiler] --> I[IR mode and literal inputs]
   I --> R[Runtime targeting resolver]
   R -->|Percent or selector| A[Read selected device state]
   A --> R
@@ -24,9 +25,11 @@ flowchart LR
 
 Studio discovers available modes and their authoring fields from the Backend
 Node Definition `editorHints.targeting.modes`; it does not maintain a separate
-`TARGET_FIELDS` map. The Runtime keeps an independent local validation contract
-because execution cannot depend on a live catalog request. Cross-language parity
-fixtures must keep the Runtime rules aligned with the published catalog.
+`TARGET_FIELDS` map. Backend authoritative compilation and Studio local
+compilation use that definition. The Runtime keeps an independent local
+validation contract because execution cannot depend on a live catalog request.
+Cross-language parity fixtures must keep the Runtime rules aligned with the
+published catalog.
 
 Keep the node ID and handler identity. Copy the required
 `config.targetMode`. Map each Editor Graph binding

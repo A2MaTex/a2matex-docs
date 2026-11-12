@@ -80,7 +80,7 @@ Publisher mở Publisher Portal
 → chọn project đã được Studio lưu trên Backend
 → tạo/chọn Product draft của project
 → lưu Product text và ordered image media bằng Static IDs
-→ xem project summary và local validation/test summary mang tính tham khảo
+→ xem project summary và local validation summary mang tính tham khảo
 → tự review project theo checklist
 → nhập Release metadata
 → xác nhận submit
@@ -268,7 +268,7 @@ Customer
 → tạo/phát triển project trong Studio
 → Studio save/sync project và assets lên Backend
 → Publisher chọn project trên Web
-→ tự review project và local validation/test summary
+→ tự review project và local validation summary
 → nhập Product draft và Release data
 → submit
 → Backend tạo immutable Workflow Revision và Submission

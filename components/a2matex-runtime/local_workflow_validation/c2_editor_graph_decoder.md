@@ -105,8 +105,15 @@ A node contains exactly:
 | `type` | string | Trimmed node type, maximum 255 characters, matching the node-type pattern |
 | `config` | object | Required JSON object; values remain opaque until C4 |
 | `bindings` | object | Required JSON object; C2 preserves values for C4 targeting checks |
+| `timeoutMs` | JSON number or omitted | Integer from 1 to 600,000; compiler uses the Node Definition default when omitted |
+| `retryPolicy` | object or omitted | Strict optional execution policy described below |
 | `errorPolicy` | string | `STOP` or `ERROR_BRANCH` |
 | `editor` | object | Strict Studio canvas metadata with required finite numeric `x` and `y` |
+
+When present, `retryPolicy` contains only optional `maxAttempts` and `delayMs`.
+`maxAttempts` is an integer from 1 to 3 and `delayMs` is an integer from 0 to
+60,000. The compiler resolves omitted fields to `1` and `0`; the decoder does
+not mutate the Editor Graph.
 
 The Runtime Agent receives the full Editor Graph for local authoring
 validation. Its decoder checks the `editor` object against the same shape

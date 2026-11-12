@@ -1,6 +1,6 @@
 # Cloud Workflow Validation Feature Spec
 
-**Status:** Backend complete and approved
+**Status:** Backend core complete; node execution-setting extension pending implementation
 
 **Phase:** `a2matex-be/phase4.md` / Studio workflow checklist phase 7
 
@@ -24,11 +24,15 @@ Included:
 - static node `config` validation;
 - workload limits and deterministic diagnostics.
 
+Accepted by the next compiler slice but not implemented by the current validator:
+
+- optional node-level timeout and retry settings;
+- Runtime IR consistency and compilation.
+
 Deferred:
 
 - binding values and references;
-- conditional, controlled-loop, retry, and error-flow semantics;
-- Runtime IR consistency and compilation;
+- controlled-loop semantics and future expression forms;
 - assets and credentials;
 - result persistence, queue orchestration, encryption, packaging, and execution.
 
@@ -113,12 +117,27 @@ Editor Graph v1 requires:
 - bounded identifiers and valid node type names;
 - `entryNodeId`, node array, and edge array;
 - JSON-object `config` and `bindings`;
+- optional `timeoutMs` integer from 1 to 600,000;
+- optional strict `retryPolicy` with optional `maxAttempts` from 1 to 3 and optional `delayMs` from
+  0 to 60,000;
 - `STOP` or `ERROR_BRANCH` policy;
 - finite editor coordinates;
 - strict graph/node/edge fields.
 
 Contract/type failures use `EDITOR_GRAPH_CONTRACT_INVALID`. Another positive schema version uses
 `GRAPH_SCHEMA_VERSION_UNSUPPORTED`.
+
+Compilation resolves missing execution settings without mutating the Editor Graph:
+
+```text
+timeoutMs = node.timeoutMs ?? nodeDefinition.defaultTimeoutMs
+maxAttempts = node.retryPolicy.maxAttempts ?? 1
+delayMs = node.retryPolicy.delayMs ?? 0
+```
+
+The Runtime IR node always contains all three effective values. For
+`flow.wait_variable`, `config` contains only the Global key `name`; the effective
+node-level `timeoutMs` is the wait deadline.
 
 `schemaVersion` versions the graph JSON structure, not the Node Catalog. Adding node types keeps
 existing graphs on version `1`. A future breaking graph-format version should have its own parser

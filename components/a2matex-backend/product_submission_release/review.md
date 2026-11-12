@@ -70,7 +70,8 @@ This module does not own:
   or technical exceptions. The Publisher sees only Admin-authored `reviewFeedback` through the
   existing owner Submission detail API.
 - `REQUEST_CHANGES` and `REJECT` require non-empty feedback. `APPROVE` may omit feedback.
-- A completed `PASSED` scan may receive any decision.
+- A completed `PASSED` scan with finalized Workflow Revision `runtimeIr` and `contentHash` may
+  receive any decision.
 - A completed `FAILED` scan may receive `REQUEST_CHANGES` or `REJECT`, but not `APPROVE` in the MVP.
   A future manual override requires a separate audited contract and is not implied by Admin access.
 - A technical scan `ERROR`, queued scan, or running scan cannot be reviewed because the Submission
@@ -279,7 +280,8 @@ Approval-time eligibility requires:
 - non-deleted Submission, Product, and PublisherAccount;
 - Product status `DRAFT` or `ACTIVE`;
 - active PublisherAccount; and
-- scan status `PASSED` with a stored completed scan result.
+- scan status `PASSED` with a stored completed scan result; and
+- non-null Workflow Revision `runtimeIr` and `contentHash`.
 
 Product Release must repeat the Product/Publisher eligibility checks because external state can
 change after review and before message consumption.
@@ -443,7 +445,8 @@ Submission controller or expose internal queue contracts as HTTP DTOs.
 ### Lifecycle and persistence
 
 - Only `READY_FOR_REVIEW` can receive a first decision.
-- A passed scan supports all three decisions.
+- A passed scan with finalized Workflow Revision Runtime IR and content hash supports all three
+  decisions.
 - A failed business scan cannot be approved but can receive changes-requested or rejected.
 - Request-changes and reject require bounded Publisher-safe feedback.
 - Exactly the five review-owned fields are updated; immutable snapshots and scan fields remain

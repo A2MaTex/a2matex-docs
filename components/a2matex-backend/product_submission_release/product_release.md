@@ -125,6 +125,8 @@ When approved, this specification supersedes the draft ProductRelease section in
 - Kafka redelivery resumes the same Release and version.
 - Review/scan/WorkflowRevision validation is not repeated. Product Release parses immutable build
   inputs but trusts earlier module invariants.
+- An approved build source must have non-null finalized `WorkflowRevision.runtimeIr` and
+  `WorkflowRevision.contentHash`. Product Release never compiles or repairs workflow content.
 - Product and Publisher mutable eligibility are checked before building and again before publishing.
 - The package is a standard ZIP named `product.a2m`; `.a2m` is the product-package extension, not a
   custom archive codec.
@@ -302,7 +304,8 @@ The consumer performs one short transaction:
 
 1. Validate `submissionId` as UUID.
 2. Load the non-deleted Submission with Product, Publisher, and WorkflowRevision.
-3. Require only `Submission.status = APPROVED`; Review already guarantees a passed scan.
+3. Require `Submission.status = APPROVED`; Review already guarantees a passed scan and finalized
+   Workflow Revision.
 4. Require Product is non-deleted and `DRAFT` or `ACTIVE`.
 5. Require Publisher remains release-eligible.
 6. Load ProductRelease by `submissionId`.
@@ -318,7 +321,8 @@ Product Release does not repeat:
 - Project/Revision identity comparisons already frozen by Submission;
 - release-request syntax validation;
 - WorkflowRevision hash recomputation; or
-- workflow topology/node-policy scanning.
+- workflow topology/node-policy scanning; or
+- Editor Graph to Runtime IR compilation.
 
 The package service still parses Runtime IR, input schema, and capabilities through their strict
 schemas before serialization. Parsing protects the builder; it is not another business scan.
@@ -347,7 +351,7 @@ ProductRelease/Product IDs            -> package identity
 ```
 
 `WorkflowRevision.capabilityManifest` remains frozen review/scan evidence; package creation does not
-invent capabilities from it. The package copies the already validated, sorted capability list from
+invent capabilities from it. The package copies the already validated, deduplicated capability list from
 Runtime IR. Mutable Product authoring fields and Product Offers are not package inputs.
 
 ### 6.2 Exact package layout
@@ -443,6 +447,9 @@ parse:
 This protects the builder from malformed storage. It does not repeat Submission scanning or compile
 Runtime IR.
 
+Missing `WorkflowRevision.runtimeIr` or `contentHash` is a permanent broken-invariant build failure;
+the builder must not fall back to Project Draft content or attempt compilation.
+
 #### Step 2: create `input-schema.json`
 
 1. Canonically serialize `WorkflowRevision.inputSchema`.
@@ -489,7 +496,7 @@ Construct the manifest from these exact sources:
 | `workflow.encryption.authenticationTagBytes` | constant `16`                                                                                   |
 | `inputSchema.path`                           | constant `input-schema.json`                                                                    |
 | `inputSchema.sha256`                         | `inputSchemaHash`, calculated over final `inputSchemaBytes`                                     |
-| `requiredCapabilities`                       | parsed `WorkflowRevision.runtimeIr.requiredCapabilities`, preserving its validated sorted order |
+| `requiredCapabilities`                       | parsed `WorkflowRevision.runtimeIr.requiredCapabilities`, preserving its validated deduplicated order |
 
 Canonically serialize that object as `manifestBytes`. `manifest.json` is exactly `manifestBytes`.
 The manifest does not contain `packageHash`, `wrappedKey`, `keyNonce`, plaintext content-key
@@ -842,6 +849,7 @@ adding one requires explanation and approval.
 ## 14. Acceptance criteria
 
 - Only approved Submission creates one Release.
+- Approved build input requires finalized Workflow Revision Runtime IR and content hash.
 - Consumer does not repeat scan or immutable snapshot validation.
 - One Submission/one Product-version concurrency rules hold.
 - Package contains exactly the documented three entries.

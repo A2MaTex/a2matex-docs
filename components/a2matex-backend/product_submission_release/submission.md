@@ -13,11 +13,12 @@ Product visible in the Marketplace.
 
 The implementation has two deliberately separate execution paths:
 
-- the synchronous HTTP path authorizes the Publisher, locks the exact source records, creates all
-  immutable snapshots and queued scan fields in one database transaction, then publishes a small
-  Kafka message after commit;
-- the background path consumes that message, validates only the frozen snapshot, persists scan
-  findings, and moves every completed business scan to `READY_FOR_REVIEW` for an Admin decision.
+- the synchronous HTTP path authorizes the Publisher, locks the exact source records, freezes all
+  Publisher-controlled snapshots with queued scan fields in one database transaction, then
+  publishes a small Kafka message after commit;
+- the background path consumes that message, validates and compiles only the frozen snapshot,
+  finalizes Workflow Revision Runtime IR once, persists scan findings, and moves every completed
+  business scan to `READY_FOR_REVIEW` for an Admin decision.
 
 ```mermaid
 flowchart LR
@@ -25,15 +26,16 @@ flowchart LR
     H -->|one DB transaction| DB[(WorkflowRevision<br/>Submission with scanStatus QUEUED)]
     DB -->|commit first| K[Kafka topic<br/>submission.scan.requested]
     K --> W[Submission scan consumer]
-    W --> V{Frozen snapshot valid?}
-    V -->|passed| R[READY_FOR_REVIEW]
+    W --> V{Validate and compile<br/>frozen snapshot}
+    V -->|passed + Runtime IR finalized| R[READY_FOR_REVIEW]
     V -->|business findings: Admin only| R
     V -->|technical failure| E[Scan ERROR + retry or DLQ]
     R -.->|deferred Review module| A[Admin decision]
     A -.->|deferred Release module| B[Build ProductRelease]
 ```
 
-The HTTP response does not wait for graph validation, Runtime IR validation, or policy scanning.
+The HTTP response does not wait for graph validation, Runtime IR compilation, Runtime IR validation,
+or policy scanning.
 At the current 1–2 MiB workflow limits, snapshot construction and hashing remain bounded enough for
 the request transaction. The more extensible and failure-prone validation pipeline runs after the
 transaction so it can be retried without recreating the immutable Submission.
@@ -60,16 +62,18 @@ This module owns:
 
 - Submission create, owner/Admin list, and owner/Admin detail APIs;
 - Publisher eligibility, ownership, lifecycle, completeness, and concurrency checks at submit time;
-- atomic WorkflowRevision and Submission creation, including initial queued scan state;
+- atomic WorkflowRevision source snapshot and Submission creation, including initial queued scan
+  state;
 - post-commit publication of the scan request;
-- scan-message consumption, idempotency, retry classification, findings, and scan status changes;
+- scan-message consumption, authoritative Runtime IR compilation, write-once revision finalization,
+  idempotency, retry classification, findings, and scan status changes;
 - the transition from `PENDING_SCAN` to `READY_FOR_REVIEW` after a completed business scan; and
 - recovery publication for a queued or technically failed scan.
 
 This module does not own:
 
 - Product creation or editing;
-- Project Draft editing, compilation, or version history;
+- Project Draft editing, preview compilation, or version history;
 - Admin review decision endpoints and feedback authoring;
 - Product Release creation, package building, encryption, publication, or rollback selection;
 - Marketplace Product list/detail APIs;
@@ -88,6 +92,9 @@ review fields.
 - The related Project must remain active and owned by the same Publisher.
 - The request selects the exact current `ProjectDraft.version`. A stale version is rejected; the
   Backend never silently submits the latest version.
+- Project Draft `runtimeIr` is a non-authoritative authoring cache. Submission ignores it and accepts
+  a safely stored draft even when the cache is null, stale, or the Editor Graph later produces
+  deterministic validation or compilation findings.
 - One Project Draft version can produce at most one WorkflowRevision and one Submission.
 - Product and ProductMedia remain editable after submission. Their frozen snapshot is authoritative
   for that Submission and any Product Release built from it.
@@ -419,9 +426,11 @@ The HTTP implementation owns only work required to commit a coherent immutable r
 6. Lock the owned Product, then its Project, then the exact ProjectDraft row in the documented lock
    order.
 7. Verify Product/Project lifecycle, ownership, publishing completeness, media eligibility, source
-   draft version/hash, object-shaped Runtime IR, active node definitions, asset-free restriction,
-   and revision size limits.
-8. Call `WorkflowRevisionService.createFromDraft(...)` within the same transaction.
+   draft version/hash, basic bounded JSON storage shape, asset-free restriction, and source snapshot
+   size limits. Do not require or trust Project Draft Runtime IR.
+8. Call `WorkflowRevisionService.createFromDraft(...)` within the same transaction to freeze the
+   Editor Graph, Input Schema, advisory validation summary, and available Node Definitions with
+   `runtimeIr = null` and `contentHash = null`.
 9. Build the Product, release request, and combined review-context snapshots.
 10. Allocate the next per-Product Submission number.
 11. Create Submission with `status = PENDING_SCAN`, `scanAttempt = 1`,
@@ -430,9 +439,9 @@ The HTTP implementation owns only work required to commit a coherent immutable r
 13. Publish `submission.scan.requested.v1` after commit.
 14. Return only `{ id }` after publication succeeds.
 
-The handler does not run cloud graph validation, Runtime IR semantic validation, capability policy,
-credential scanning, Admin review logic, or package construction. It does not call Kafka, Redis,
-R2, Runtime, or another network service while the transaction is open.
+The handler does not run cloud graph validation, Runtime IR compilation or semantic validation,
+capability policy, credential scanning, Admin review logic, or package construction. It does not
+call Kafka, Redis, R2, Runtime, or another network service while the transaction is open.
 
 The bounded synchronous work includes JSON canonicalization, SHA-256 hashing, set-based node/media lookups, and construction of at most a 2 MiB WorkflowRevision. This is acceptable at the expected Submission frequency and current limits. If measured transaction time later becomes unsafe, the architecture may move snapshot construction behind a reservation state, but that is not part of this MVP.
 
@@ -447,26 +456,35 @@ The consumer owns all work whose result can be retried independently of Submissi
 4. Return `SUCCESS` immediately if `scanStatus` is already `PASSED` or `FAILED`.
 5. Claim matching `QUEUED`, retryable `ERROR`, or redelivered `RUNNING` work by setting
    `scanStatus = RUNNING` in a short transaction.
-6. Load the immutable content required by the scanner and perform all checks outside a database
-   transaction.
-7. Build one bounded `scanResult` object in memory.
-8. If no `ERROR` finding exists, persist `scanStatus = PASSED` and `scanResult`.
-9. If an `ERROR` finding exists, persist `scanStatus = FAILED` and the Admin-only `scanResult`.
-10. For either completed business result, conditionally move Submission from `PENDING_SCAN` to
+6. Load the frozen Workflow Revision source and Submission snapshots outside a database transaction.
+7. Run the existing Workflow Validation service against the frozen Editor Graph.
+8. When validation permits compilation, invoke the shared compiler with the frozen Editor Graph,
+   Input Schema, and Node Definition manifest, then strictly validate its Runtime IR output.
+9. On successful compilation, conditionally write `runtimeIr` and final `contentHash` together only
+   when both are null. A retry that finds both already finalized compares the canonical result and
+   hash, then continues without overwriting them; a mismatch is a technical invariant error.
+10. Build one bounded `scanResult` object in memory. A deterministic validation or compilation
+    failure is an Admin-only business finding and leaves the revision compilation fields null.
+11. If no `ERROR` finding exists, persist `scanStatus = PASSED` and `scanResult`.
+12. If an `ERROR` finding exists, persist `scanStatus = FAILED` and the Admin-only `scanResult`.
+13. For either completed business result, conditionally move Submission from `PENDING_SCAN` to
     `READY_FOR_REVIEW` so an Admin—not the scanner—makes the review decision.
-11. Return `SUCCESS` for both completed business outcomes.
+14. Return `SUCCESS` for both completed business outcomes.
 
 For an unexpected database, catalog, or scanner failure, the handler records scan status `ERROR`
 when possible and returns `RETRY`. After the queue provider exhausts delivery retries, the original
 message is copied to the configured dead-letter topic and its Kafka offset is committed. The
 Submission remains `PENDING_SCAN`; Admin can increment `scanAttempt` and requeue it.
 
-The consumer never edits WorkflowRevision snapshot fields, Product, ProductMedia, Project Draft, or
-Publisher-authored Submission snapshots. It does not create Admin review or Product Release records.
+The consumer never edits WorkflowRevision source fields, Product, ProductMedia, Project Draft, or
+Publisher-authored Submission snapshots. Its only Workflow Revision mutation is the atomic first
+write of compiled `runtimeIr` and `contentHash`. It does not create Admin review or Product Release
+records.
 
 ### 5.3 Why the split is mandatory
 
-- A successful HTTP transaction always leaves a complete immutable Submission and durable scan intent, even when Kafka is temporarily unavailable.
+- A successful HTTP transaction always leaves a complete immutable source snapshot, Submission, and
+  durable scan intent, even when Kafka is temporarily unavailable.
 - Kafka receives only identifiers; large workflow JSON is read from PostgreSQL by the consumer.
 - At-least-once delivery may repeat work, so database state—not Kafka delivery count—is the source
   of truth.
@@ -668,14 +686,13 @@ type SubmissionOwnerDetailOutput = {
     projectId: string;
     sourceDraftVersion: number;
     sourceDraftContentHash: string;
-    contentHash: string;
+    contentHash: string | null;
     editorGraph: Record<string, unknown>;
-    runtimeIr: Record<string, unknown>;
+    runtimeIr: Record<string, unknown> | null;
     inputSchema: Record<string, unknown>;
     nodeDefinitionManifest: Record<string, unknown>;
     capabilityManifest: Record<string, unknown>;
     validationSummary: Record<string, unknown>;
-    testSummary: Record<string, unknown>;
     createdAt: string;
   };
   createdAt: string;
@@ -891,24 +908,28 @@ Submission create/retry cannot report success and the scan subscription is not r
 
 ## 10. Automated scan rules
 
-The scanner evaluates only immutable WorkflowRevision and Submission snapshots. Its output is
-deterministic for the same scanner version and inputs.
+The scanner evaluates only the frozen Workflow Revision source and immutable Submission snapshots.
+Its output is deterministic for the same inputs. The successful compile result finalizes the two
+server-derived Workflow Revision fields once.
 
 Required rule groups:
 
-1. **Revision integrity**
-   - recompute and compare the WorkflowRevision canonical `contentHash`;
-   - verify source hash format and snapshot object shapes;
+1. **Frozen source integrity**
+   - require `runtimeIr` and `contentHash` to be both null or both present;
+   - verify source hash format and frozen snapshot object shapes;
    - verify the Submission, Product snapshot, Project, and WorkflowRevision identities agree.
 2. **Editor Graph validation**
    - call the existing reusable `WorkflowValidationService.validate(editorGraph)`;
    - map its deterministic errors/warnings into the bounded `scanResult.findings` array;
    - preserve safe node/edge/path details without storing the whole graph in a finding.
-3. **Runtime IR v1 validation**
+3. **Runtime IR compilation and validation**
+   - compile from frozen `editorGraph`, `inputSchema`, and `nodeDefinitionManifest`, never from the
+     mutable Project Draft or its cached Runtime IR;
    - strictly validate the accepted Runtime IR v1 contract and supported format version;
    - validate graph identity/topology, bindings, input references, retry/error policy, timeouts, and
      bounded document limits required by the accepted Runtime contract;
    - confirm Runtime IR required capabilities agree with the frozen capability manifest;
+   - atomically write Runtime IR and recomputed revision `contentHash` once on success;
    - do not execute the workflow or contact a device.
 4. **Frozen Node Definition consistency**
    - validate every Runtime IR node against the frozen Node Definition manifest, not mutable current
@@ -925,10 +946,10 @@ Required rule groups:
    - confirm ordered media snapshot rules without re-snapshotting mutable ProductMedia.
 
 The existing cloud Workflow Validation service covers Editor Graph contract, topology, catalog,
-ports, and static config only. It does not currently prove Runtime IR consistency. Therefore
-`READY_FOR_REVIEW` must not be emitted until the Runtime IR v1 scan stage required above exists and
-completes with either a `PASSED` or business `FAILED` result. Reusing the accepted Runtime IR
-contract and its fixtures is preferred over inventing a second wire format.
+ports, and static config. The shared compiler owns Runtime IR construction and strict output
+validation. `READY_FOR_REVIEW` must not be emitted until compilation either finalizes the revision or
+produces a deterministic business failure. Reusing the accepted Runtime IR contract and its fixtures
+is preferred over inventing a second wire format.
 
 Rule messages must be safe for Admin display. They are never returned through Publisher-scoped
 responses. `details` may contain bounded paths, expected/actual scalar metadata, or identifiers, but
@@ -949,7 +970,7 @@ never credentials, full node config, full graph, Runtime IR, tokens, or private 
 | Product publishing fields/media are incomplete or invalid                            | `422 Error.SubmissionProductIncomplete`                                    |
 | Related Project is archived or unavailable                                           | `409 Error.ProjectArchived` or safe existing not-found error               |
 | Requested Project Draft version is stale                                             | `409 Error.WorkflowRevisionDraftVersionConflict` with safe current version |
-| Draft hash, Runtime IR presence, node definition, revision size, or asset rule fails | Existing WorkflowRevision stable error                                     |
+| Draft hash, source snapshot size, or asset rule fails                               | Existing WorkflowRevision stable error                                     |
 | Another open Submission already exists                                               | `409 Error.SubmissionAlreadyOpen`                                          |
 | Draft version was already submitted                                                  | `409 Error.WorkflowRevisionAlreadyExists`                                  |
 | `Idempotency-Key` missing/invalid                                                    | `422 Error.SubmissionIdempotencyKeyRequired`                               |
@@ -964,6 +985,7 @@ never credentials, full node config, full graph, Runtime IR, tokens, or private 
 | Condition                                         | Scan/Submission result                        | Queue result                              |
 | ------------------------------------------------- | --------------------------------------------- | ----------------------------------------- |
 | Required rule produces one or more error findings | `FAILED` / `READY_FOR_REVIEW`                 | `SUCCESS`                                 |
+| Validation or compilation produces deterministic findings | `FAILED`, Runtime IR remains null / `READY_FOR_REVIEW` | `SUCCESS`                     |
 | Rules pass with no error findings                 | `PASSED` / `READY_FOR_REVIEW`                 | `SUCCESS`                                 |
 | Scan already `PASSED` or `FAILED`                 | unchanged                                     | `SUCCESS`                                 |
 | Temporary database/scanner failure                | scan `ERROR`, Submission stays `PENDING_SCAN` | `RETRY`                                   |
@@ -1030,7 +1052,8 @@ their hashing/eligibility logic into the controller.
 | ---------------------------------------- | -------------------------------------------------------------------- |
 | `submission-scan.consumer.ts`            | Subscribe, validate envelope identity, map outcome to handler result |
 | `submission-scan.service.ts`             | Claim, load, scan, and atomically persist Submission scan fields     |
-| `submission-scanner.service.ts`          | Deterministic in-memory rule pipeline and result assembly            |
+| `submission-scanner.service.ts`          | Deterministic validation/compiler pipeline and result assembly       |
+| shared workflow compiler service         | Compile frozen Editor Graph and Node Definitions into strict Runtime IR |
 | `scanner/runtime-ir.validator.ts`        | Strict Runtime IR v1 validation for submission admission             |
 | `scanner/submission-policy.validator.ts` | Asset, credential, capability, and snapshot policy rules             |
 | `scanner/submission-scan.model.ts`       | Internal rule/finding/summary contracts                              |
@@ -1060,6 +1083,8 @@ assuming a clean database.
 - WorkflowRevision, immutable snapshots, Submission, and initial queued scan fields either commit
   together or all roll back.
 - Product and Project Draft remain unchanged after submission.
+- Project Draft cached Runtime IR is ignored; successful background compilation finalizes the
+  Workflow Revision fields exactly once.
 - Concurrent creates cannot allocate duplicate numbers, reuse one draft version, or create two open
   Submissions for one Product.
 - Same-key same-input create retry returns the same ID and can safely republish the queued scan;

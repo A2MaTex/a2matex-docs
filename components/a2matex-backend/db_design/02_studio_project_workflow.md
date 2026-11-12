@@ -200,7 +200,8 @@ CREATE TABLE "ProjectDraft" (
     -- }
     "inputSchema" JSONB NOT NULL,
 
-    -- Mock JSON: compiler output cached for submission preparation; Backend revalidates on finalize.
+    -- Mock JSON: non-authoritative Studio preview cache. Submission ignores it and recompiles the
+    -- frozen Workflow Revision source.
     -- {
     --   "irVersion": "1.0",
     --   "entryNodeId": "start_01",
@@ -218,16 +219,6 @@ CREATE TABLE "ProjectDraft" (
     -- }
     "validationSummary" JSONB NOT NULL DEFAULT '{}'::JSONB,
 
-    -- Mock JSON:
-    -- {
-    --   "schemaVersion": "1.0",
-    --   "runtimeVersion": "0.1.0",
-    --   "lastTestedAt": "2026-10-04T10:00:00Z",
-    --   "successfulRuns": 2,
-    --   "failedRuns": 0
-    -- }
-    "testSummary" JSONB NOT NULL DEFAULT '{}'::JSONB,
-
     "contentHash" VARCHAR(64) NOT NULL,
     "savedAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
     "savedById" UUID NOT NULL REFERENCES "User" (id) ON DELETE NO ACTION,
@@ -236,22 +227,15 @@ CREATE TABLE "ProjectDraft" (
     "deletedAt" TIMESTAMPTZ,
 
     CONSTRAINT "ProjectDraft_contentHash_check"
-        CHECK ("contentHash" ~ '^[0-9a-f]{64}$'),
-
-    CONSTRAINT "ProjectDraft_json_objects_check" CHECK (
-        jsonb_typeof("editorGraph") = 'object'
-        AND jsonb_typeof("inputSchema") = 'object'
-        AND ("runtimeIr" IS NULL OR jsonb_typeof("runtimeIr") = 'object')
-        AND jsonb_typeof("validationSummary") = 'object'
-        AND jsonb_typeof("testSummary") = 'object'
-    )
+        CHECK ("contentHash" ~ '^[0-9a-f]{64}$')
 );
 ```
 
 Draft được tạo lazy: `expectedVersion = 0` chỉ dùng cho lần save đầu và tạo version `1`; các lần
 save sau gửi version hiện tại. Conditional update chỉ tăng version khi content hash thay đổi. Retry
 cùng content hash là idempotent; stale version với content khác trả conflict cùng current version.
-Backend canonicalize năm field content và tự tính SHA-256; Studio không gửi hash/audit field. Tổng
+Backend kiểm tra bốn field JSON object, canonicalize chúng và tự tính SHA-256; Studio không gửi
+hash/audit field. Tổng
 canonical UTF-8 content tối đa 1 MiB. API `GET` trả content và metadata đồng bộ nhưng không expose
 `savedById`; API `PUT` chỉ trả `id`, `version`, `contentHash`, `savedAt` để Studio tiếp tục optimistic
 save mà không echo toàn bộ payload. Conflict trả `details.currentVersion`. Project và ProjectDraft
@@ -333,17 +317,18 @@ ON "ProjectAsset" ("projectId", "assetId")
 WHERE "deletedAt" IS NULL;
 ```
 
-## 6. Immutable Workflow Revision
+## 6. Frozen and finalized Workflow Revision
 
 ### Trách nhiệm
 
 Feature contract draft để review:
 [`../studio_project_workflow/workflow_revision.md`](../studio_project_workflow/workflow_revision.md).
 
-`WorkflowRevision` là snapshot Backend tạo từ đúng ProjectDraft version lúc submit trên Web. Record
-này không update content và không soft delete. Vì Node Catalog MVP chỉ giữ definition hiện hành,
-revision phải freeze đầy đủ contract của từng node type đã dùng; chỉ lưu `type + contentHash` không
-đủ để resolve definition lịch sử.
+`WorkflowRevision` là snapshot Backend tạo từ đúng ProjectDraft version lúc submit trên Web. Source
+fields không update và record không soft delete. Submission consumer chỉ được finalize
+`runtimeIr` + `contentHash` đúng một lần sau khi validate/compile thành công. Vì Node Catalog MVP chỉ
+giữ definition hiện hành, revision phải freeze đầy đủ contract của từng node type đã dùng; chỉ lưu
+`type + contentHash` không đủ để resolve definition lịch sử.
 
 ```sql
 CREATE TABLE "WorkflowRevision" (
@@ -369,7 +354,7 @@ CREATE TABLE "WorkflowRevision" (
     --     }
     --   ]
     -- }
-    "runtimeIr" JSONB NOT NULL,
+    "runtimeIr" JSONB,
 
     -- Mock JSON Schema: same meaning as ProjectDraft.inputSchema.
     "inputSchema" JSONB NOT NULL,
@@ -407,29 +392,20 @@ CREATE TABLE "WorkflowRevision" (
     -- {"schemaVersion":"1.0","status":"VALID","errors":[],"warnings":[]}
     "validationSummary" JSONB NOT NULL,
 
-    -- Mock JSON:
-    -- {"schemaVersion":"1.0","runtimeVersion":"0.1.0","successfulRuns":2}
-    "testSummary" JSONB NOT NULL DEFAULT '{}'::JSONB,
-
-    "contentHash" VARCHAR(64) NOT NULL,
+    "contentHash" VARCHAR(64),
     "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+    "updatedAt" TIMESTAMPTZ,
+    "deletedAt" TIMESTAMPTZ,
     "createdById" UUID NOT NULL REFERENCES "User" (id),
+    "updatedById" UUID REFERENCES "User" (id),
+    "deletedById" UUID REFERENCES "User" (id),
 
     CONSTRAINT "WorkflowRevision_project_draftVersion_key"
         UNIQUE ("projectId", "sourceDraftVersion"),
     CONSTRAINT "WorkflowRevision_sourceDraftContentHash_check"
         CHECK ("sourceDraftContentHash" ~ '^[0-9a-f]{64}$'),
     CONSTRAINT "WorkflowRevision_contentHash_check"
-        CHECK ("contentHash" ~ '^[0-9a-f]{64}$'),
-    CONSTRAINT "WorkflowRevision_json_objects_check" CHECK (
-        jsonb_typeof("editorGraph") = 'object'
-        AND jsonb_typeof("runtimeIr") = 'object'
-        AND jsonb_typeof("inputSchema") = 'object'
-        AND jsonb_typeof("nodeDefinitionManifest") = 'object'
-        AND jsonb_typeof("capabilityManifest") = 'object'
-        AND jsonb_typeof("validationSummary") = 'object'
-        AND jsonb_typeof("testSummary") = 'object'
-    )
+        CHECK ("contentHash" ~ '^[0-9a-f]{64}$')
 );
 
 CREATE TABLE "WorkflowRevisionAsset" (
@@ -448,9 +424,15 @@ CREATE TABLE "WorkflowRevisionAsset" (
 );
 ```
 
-`sourceDraftContentHash` giữ provenance của draft đã chọn. `contentHash` là SHA-256 của canonical
-revision content gồm graph, IR, input schema, full node manifest, capability manifest,
-validation/test summary và asset alias/hash; identity/audit field không tham gia hash.
+Backend schemas và runtime guards kiểm tra các JSON snapshot của Workflow Revision trước khi lưu và
+khi scan; PostgreSQL không lặp lại các JSON shape checks này.
+
+`sourceDraftContentHash` giữ provenance của draft đã chọn. `runtimeIr` và `contentHash` bắt đầu null.
+Sau compile thành công, consumer ghi atomically cả hai đúng một lần. `contentHash` là SHA-256 của
+canonical revision content gồm graph, IR, input schema, full node manifest, capability manifest,
+validation summary và asset alias/hash; identity/audit field không tham gia hash. Validation hoặc
+compile business failure giữ cả hai field null và lưu finding ở Submission scan. System
+finalization set `updatedAt` nhưng giữ `updatedById = NULL`; không có User actor cho queued work.
 
 `WorkflowRevisionAsset.assetHash` đóng băng expected content. Asset object không được overwrite;
 thay đổi asset tạo object/Asset mới. Quan hệ này chỉ được migrate sau khi Asset module tồn tại. Trong
