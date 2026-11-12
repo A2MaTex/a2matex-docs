@@ -200,7 +200,8 @@ CREATE TABLE "ProjectDraft" (
     -- }
     "inputSchema" JSONB NOT NULL,
 
-    -- Mock JSON: non-authoritative Studio preview cache. Submission ignores it and recompiles the
+    -- Mock JSON: non-authoritative Runtime-produced preview cache held by Studio.
+    -- Submission ignores it and recompiles the
     -- frozen Workflow Revision source.
     -- {
     --   "irVersion": "1.0",

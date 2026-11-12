@@ -123,7 +123,8 @@ node a custom display name, and optional `description` stores the
 publisher's note. Both accept non-empty strings or `null`. Omission is
 equivalent to `null`. Unknown fields are rejected.
 
-Studio omits the entire `editor` object when compiling Runtime IR. Android
+The Runtime local compiler and Backend compiler omit the entire `editor` object
+when compiling Runtime IR. Android
 targeting comes from the action's target mode and target input bindings.
 Moving or renaming a node on the canvas leaves the action and its stable node
 ID unchanged.

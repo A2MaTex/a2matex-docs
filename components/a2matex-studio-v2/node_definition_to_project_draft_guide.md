@@ -5,17 +5,18 @@
 Studio treats the Backend Node Catalog as the authoring contract. It uses a
 Node Definition to build the palette and inspector and saves only instance
 values in the Editor Graph. Studio must never copy Node Definition schemas into
-a Project Draft. Studio may compile a local preview, while the Backend compiles
-the authoritative Runtime IR from the frozen Submission snapshot.
+a Project Draft and never compiles Runtime IR. Runtime Agent compiles local Test
+Run IR, while Backend compiles authoritative IR from the frozen Submission snapshot.
 
 ```mermaid
 flowchart LR
     C[Backend Node Catalog] --> F[Studio generates node form]
     F --> U[User selects mode and enters values]
     U --> D[Editor Graph in Project Draft]
-    D --> V[Backend or local validation]
-    V -->|Valid and executable| R[Compile Runtime IR]
-    V -->|Invalid or unsupported| E[Show authoring diagnostics]
+    D --> V[Studio sends graph and input schema to Runtime]
+    V -->|Valid and executable| R[Runtime returns validation and Runtime IR]
+    V -->|Invalid or unsupported| E[Studio shows returned diagnostics]
+    R --> L[Studio caches result in SQLite Project Draft]
     D --> S[Submit exact draft snapshot]
     S --> B[Backend validates and compiles for review]
 ```
@@ -58,8 +59,9 @@ Every node may also save optional execution settings:
 }
 ```
 
-Omitted `timeoutMs` uses `NodeDefinition.defaultTimeoutMs`. Omitted retry fields
-resolve to `maxAttempts: 1` and `delayMs: 0` during compilation.
+Studio may explain the defaults in its UI, but does not resolve them. Runtime and
+Backend compilers use `NodeDefinition.defaultTimeoutMs` when `timeoutMs` is omitted
+and resolve missing retry fields to `maxAttempts: 1` and `delayMs: 0`.
 
 The Project Draft node keeps only instance data:
 
@@ -114,59 +116,55 @@ Before changing a targeting mode, collect the union of binding names from all
 `config.targetMode`, and initialize only the new mode's form state. Keep future
 non-target bindings untouched if a targeting node later defines any.
 
-A targeting edit makes cached local `runtimeIr`, validation results, and test
-results stale. Studio does not need to regenerate or clear that cache on every
-autosave. It must compile the current immutable local snapshot before a local
-test run. Submission ignores cached Project Draft Runtime IR and compiles the
-frozen server snapshot independently.
+A targeting edit makes cached `runtimeIr`, validation results, and test results
+stale. Studio does not regenerate or have to clear that cache on every autosave.
+It records which local draft revision produced the cache and must call Runtime
+again before executing a null or stale cache. Submission ignores cached Project
+Draft Runtime IR and compiles the frozen server snapshot independently.
 
-## 5. Runtime IR conversion
+## 5. Runtime compile API boundary
 
-Copy `config.targetMode`. Convert each Editor Graph literal binding:
-
-```json
-{ "kind": "LITERAL", "value": 50 }
-```
-
-into the Runtime IR input source:
+Studio sends an immutable content snapshot:
 
 ```json
-{ "source": "LITERAL", "value": 50 }
+{
+  "editorGraph": {},
+  "inputSchema": {}
+}
 ```
 
-Use the Node Definition for `runtimeHandler`, default timeout, capabilities, and
-ports. Use the node's `timeoutMs` when present, otherwise use
-`NodeDefinition.defaultTimeoutMs`. Resolve missing retry fields to
-`maxAttempts: 1` and `delayMs: 0`. Copy the node instance's selected
-`errorPolicy` only after validating it against the definition's ports: `STOP`
-is always valid and `ERROR_BRANCH` requires an `error` port. Do not copy editor
-position, labels, descriptions, catalog schemas, or unused targeting modes into
-Runtime IR.
+Runtime owns Node Definition resolution, validation, binding conversion, policy
+defaults, capability derivation, and Runtime IR construction. A successful
+response contains the validation output and complete Runtime IR; a failed
+compilation contains diagnostics and no partial Runtime IR.
 
-All supported binding mappings preserve their source metadata:
+Studio may use a successful response immediately or save it into the same
+Project Draft shape used by Backend:
 
-| Editor Graph binding | Runtime IR input |
-|---|---|
-| `{ "kind": "WORKFLOW_INPUT", "inputName": "name" }` | `{ "source": "WORKFLOW_INPUT", "inputName": "name" }` |
-| `{ "kind": "NODE_OUTPUT", "nodeId": "capture", "field": "artifactId" }` | `{ "source": "NODE_OUTPUT", "nodeId": "capture", "field": "artifactId" }` |
-| `{ "kind": "FLOW_VARIABLE", "name": "score" }` | `{ "source": "FLOW_VARIABLE", "name": "score" }` |
-| `{ "kind": "GLOBAL_VARIABLE", "name": "bestScore" }` | `{ "source": "GLOBAL_VARIABLE", "name": "bestScore" }` |
+```json
+{
+  "editorGraph": {},
+  "inputSchema": {},
+  "runtimeIr": {},
+  "validationSummary": {}
+}
+```
 
-`flow.set_variable` maps `bindings.value` to `inputs.value` and keeps its
-validated `name` and optional `scope` config. `flow.wait_variable` keeps only
-`config.name`; its effective node `timeoutMs` is the wait deadline.
-`flow.switch` preserves ordered rules, maps the left and rule operands into
-`inputs`, and preserves each rule ID, `default`, and conditional `error` as edge
-`sourcePort` values.
+SQLite stores compile-cache provenance in local coordination state rather than
+adding a field to the shared Project Draft content. Studio may execute cached IR
+only when `runtime_ir_source_revision` matches the current `source_revision`.
+Cloud Sync
+can extract the four content fields directly; Backend may store the cache but
+does not trust it for Submission.
 
 ## 6. Validation boundary
 
-Studio validation improves feedback but is not authoritative. Backend validates
-and compiles the frozen Submission snapshot, and Runtime validates the compiled
-IR again before execution. Studio must block a local test when it cannot compile
-the current snapshot or the Runtime cannot execute a selected handler. It may
-still save or submit unfinished content; the Submission scan keeps detailed
-findings private for Admin review and prevents approval when compilation fails.
+Studio validation improves authoring feedback but is not authoritative and does
+not produce Runtime IR. Runtime compiles the local snapshot and validates the
+compiled IR again before execution. Backend independently validates and compiles
+the frozen Submission snapshot. Studio blocks a local test when Runtime returns
+diagnostics or cannot execute a selected handler, but may still save or submit
+unfinished content. Submission findings remain private for Admin review.
 
 The complete Backend contracts are documented in
 [Node Catalog](../a2matex-backend/studio_project_workflow/node_catalog.md),

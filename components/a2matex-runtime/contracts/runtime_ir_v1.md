@@ -8,7 +8,7 @@
 
 Runtime IR is the canonical executable document consumed by Runtime. The Backend
 compiler produces the authoritative Runtime IR for a submitted Workflow Revision.
-Studio may use the same contract for local preview and execution, but
+The Runtime local compiler produces the same contract for Studio Test Run, but
 `ProjectDraft.runtimeIr` is only a nullable authoring cache and is never trusted by
 Submission or Product Release.
 

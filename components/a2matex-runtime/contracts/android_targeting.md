@@ -6,14 +6,15 @@ Phases E–G and Studio integration.
 ## Overview
 
 The Backend compiler copies one explicit targeting mode and its literal fields
-into authoritative Runtime IR; Studio may apply the same mapping for local
-preview. The Runtime targeting component resolves those inputs against the
+into authoritative Runtime IR; the Runtime local compiler applies the same
+mapping for Studio Test Run. Studio supplies source data but does not implement
+the mapping. The Runtime targeting component resolves those inputs against the
 selected Android device and dispatches a fixed command. Verify the component
 independently before integrating workflow admission and Studio Test Run.
 
 ```mermaid
 flowchart LR
-  S[Backend or Studio compiler] --> I[IR mode and literal inputs]
+  S[Backend or Runtime compiler] --> I[IR mode and literal inputs]
   I --> R[Runtime targeting resolver]
   R -->|Percent or selector| A[Read selected device state]
   A --> R

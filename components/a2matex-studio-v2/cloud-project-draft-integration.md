@@ -33,18 +33,26 @@ A2MaTeX Studio sử dụng mô hình local-first.
 
 ## 2. Phân biệt Local Draft và Cloud Draft
 
+Local SQLite Draft và Backend Cloud Draft dùng cùng Project Draft content contract:
+
+```text
+editorGraph
+inputSchema
+runtimeIr
+validationSummary
+```
+
+Vì cùng shape, Sync đọc immutable SQLite snapshot và trích payload trực tiếp, không
+compile, remap hoặc tái tạo workflow document. `expectedVersion` và các local/remote sync
+revision là transport/sync metadata, không thuộc Project Draft content contract.
+
 ### 2.1. Local Draft — SQLite
 
 Local Draft là working snapshot được lưu trong SQLite.
 
-Bao gồm:
-
-- Project metadata.
-- Workflow documents.
-- Input schema.
-- Runtime IR.
-- Validation summary.
-- Local revision và trạng thái sync.
+Project Draft content bao gồm đúng bốn field giống Cloud Draft. Project metadata, local
+revision, compile-cache provenance và trạng thái sync được lưu trong các SQLite state
+record liên quan, không là field riêng của Project Draft payload.
 
 Local Draft được tạo ngay khi project được tạo.
 
@@ -66,8 +74,9 @@ Cloud Draft chứa:
 - `contentHash`
 - `savedAt`
 
-`runtimeIr` trong Cloud Draft chỉ là authoring cache, có thể null hoặc stale. Submission không dùng
-field này; Backend compile lại exact frozen snapshot để tạo authoritative Workflow Revision.
+`runtimeIr` trong Local hoặc Cloud Draft chỉ là authoring cache do Runtime Agent compile và
+trả về. Field có thể null hoặc stale. Submission không dùng field này; Backend compile
+lại exact frozen snapshot để tạo authoritative Workflow Revision.
 
 Mỗi Project có tối đa một current ProjectDraft trên backend.
 
@@ -84,6 +93,10 @@ Mỗi lần sync thành công, backend quyết định version mới theo optimi
 | Hoạt động offline | Có                 | Không                   |
 | Conflict handling | Local transaction  | Optimistic locking      |
 | Source of truth   | Local working copy | Remote current snapshot |
+
+Project Draft content shape giữ nguyên giữa hai storage. Các field như `local_revision`,
+`source_revision`, `base_remote_version` và `runtime_ir_source_revision` chỉ là SQLite
+coordination state và không được gửi trong Draft API body.
 
 **Invariant:** Autosave không đồng nghĩa với Sync. Một project có thể có hàng trăm lần autosave local nhưng vẫn chưa có Cloud ProjectDraft.
 
@@ -192,9 +205,16 @@ Nếu metadata thay đổi, tăng `metadata_revision`.
 
 Nếu không có semantic changes so với snapshot đã lưu, bỏ qua transaction tăng revision không cần thiết.
 
-Nếu graph/input thay đổi, cached Runtime IR và validation summary cũ không còn đại diện cho snapshot
-mới. Studio có thể đánh dấu chúng stale trong metadata local mà không cần compile hoặc clear
-`runtimeIr` sau mỗi autosave. Trước local test, Studio compile lại immutable local snapshot hiện tại.
+Nếu graph/input thay đổi, cached Runtime IR và validation summary cũ không còn đại diện cho
+snapshot mới. Studio không compile hoặc phải clear `runtimeIr` sau mỗi autosave. SQLite
+`source_revision` chỉ tăng khi `editorGraph` hoặc `inputSchema` thay đổi; cache chỉ current
+khi `runtime_ir_source_revision` bằng `source_revision`. Trước local test, cache null hoặc
+stale buộc Studio gửi immutable source snapshot cho Runtime local compile API.
+
+Khi compile response trả về, Studio chỉ commit `runtimeIr`, `validationSummary` và
+`runtime_ir_source_revision` nếu `source_revision` đã capture vẫn là current. Cache write có
+thể tăng `local_revision` nhưng không tăng `source_revision`. Nếu user đã edit trong lúc
+compile, không ghi response cũ đè lên draft mới.
 
 Nếu transaction thất bại:
 
@@ -291,8 +311,9 @@ Thực hiện theo thứ tự:
 7. Detect version/name conflict.
 8. Nếu trùng tên hoặc có xung đột version, dừng Sync, hiển thị lỗi và giữ bản local.
 9. Nếu không conflict, đồng bộ metadata.
-10. Build ProjectDraft payload từ SQLite snapshot, kể cả khi workflow chưa hoàn chỉnh hoặc không hợp
-    lệ. `runtimeIr` có thể null hoặc là local preview cache; Submission không tin field này.
+10. Extract ProjectDraft payload trực tiếp từ cùng SQLite Draft shape, kể cả khi workflow
+    chưa hoàn chỉnh hoặc không hợp lệ. `runtimeIr` có thể null, current hoặc stale;
+    Submission không tin field này.
 11. PUT Cloud Draft.
 12. Persist remote acknowledgement về SQLite.
 13. Cập nhật sync status.
@@ -354,6 +375,8 @@ Nếu metadata update thành công nhưng Draft PUT thất bại, giữ metadata
 | `workingRevision`            | Editor working state               |
 | `savedRevision`              | Revision đã autosave local         |
 | `local_revision`             | SQLite durable revision            |
+| `source_revision`            | Revision của Editor Graph + Input Schema |
+| `runtime_ir_source_revision` | Source revision đã tạo cached IR |
 | `metadata_revision`          | Metadata local revision            |
 | `metadata_synced_revision`   | Metadata đã sync                   |
 | `base_remote_version`        | Cloud baseline                     |
@@ -463,7 +486,11 @@ Không hiển thị `Synced` khi chỉ autosave SQLite thành công.
 - Studio tải cloud project index của Publisher khi khởi động và dùng cache khi offline nếu có.
 - First Sync gặp tên trùng khi chưa xác nhận binding thì giữ bản local và yêu cầu đổi tên.
 - Sync gặp version conflict thì hiển thị lỗi và giữ bản local.
-- Workflow chưa hoàn chỉnh hoặc không hợp lệ vẫn được autosave và Sync. IR và summary hết hiệu lực được xử lý trước khi upload. Submission thực hiện kiểm tra và scan riêng.
+- Local và Cloud Draft dùng cùng bốn content field; Sync trích payload trực tiếp từ
+  immutable SQLite snapshot.
+- Workflow chưa hoàn chỉnh hoặc không hợp lệ vẫn được autosave và Sync. Cached
+  IR/summary có thể stale trong payload; Studio không được execute cache stale và Submission
+  thực hiện validation/compilation riêng.
 - Network failure không làm mất Local Draft.
 - Cloud sync chỉ diễn ra khi user chủ động nhấn Sync.
 - Một project có thể autosave local nhiều lần mà Cloud Draft version không đổi.

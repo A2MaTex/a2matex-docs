@@ -13,7 +13,7 @@
 - Data binding bằng expression picker.
 - Node Registry có version.
 - Static validation.
-- Graph → Runtime IR compiler.
+- Tích hợp local Runtime compile API và cache Runtime IR trả về trong SQLite Project Draft.
 - Runtime Agent integration.
 - Single-node và full-workflow test.
 - Device selection qua ADB.
@@ -48,7 +48,8 @@ Theo phân tích trên, mình đề xuất chốt các điểm sau:
 8. Conditional branch dùng output port có tên.
 9. Vòng lặp chỉ đi qua Loop Controller.
 10. Data binding dùng expression picker, không bắt buộc data wire.
-11. Editor Graph được compile thành Runtime IR có version.
+11. Runtime Agent compile Editor Graph thành Runtime IR; Studio chỉ gửi source snapshot,
+    lưu kết quả và chuyển IR còn current sang execution flow.
 12. Code node chưa phải trọng tâm MVP và chỉ dùng để biến đổi dữ liệu.
 13. Publisher không được cài arbitrary npm/custom runtime handler.
 14. Studio hỗ trợ single-node testing, pinned data và screenshot inspection để UAT nhanh.

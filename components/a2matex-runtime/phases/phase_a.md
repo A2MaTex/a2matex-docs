@@ -70,9 +70,12 @@ and an impact review across Runtime, Studio, Launcher, and Backend.
 
 **Status:** Accepted
 
-Runtime IR is the self-contained executable document compiled by Studio and
-stored in `ProjectDraft.runtimeIr`. It excludes editor-only state and does not
-use the full JSON Schema standard or a generic schema interpreter.
+Runtime IR is the self-contained executable document compiled authoritatively by
+Backend from a frozen Submission snapshot. Runtime Agent may compile the same
+contract from Studio-supplied source data for local Test Run; cached
+`ProjectDraft.runtimeIr` is not a release source. The
+IR excludes editor-only state and does not use the full JSON Schema standard or
+a generic schema interpreter.
 
 References:
 
@@ -83,8 +86,8 @@ References:
 |---|---|
 | Envelope | `formatVersion`, minimum Runtime version, source graph metadata, entry node, input schema, nodes, edges, and derived capabilities |
 | Reduced schemas | Flat object properties using `string`, `integer`, and `boolean` with only approved constraints |
-| Input sources | `LITERAL`, `WORKFLOW_INPUT`, and `NODE_OUTPUT`; no expressions, interpolation, or implicit conversion |
-| Graph | One Start, reachable End, acyclic, sequential per device, and only `success`/`error` transitions |
+| Input sources | `LITERAL`, `WORKFLOW_INPUT`, `NODE_OUTPUT`, `FLOW_VARIABLE`, and `GLOBAL_VARIABLE`; no expressions, interpolation, or implicit conversion |
+| Graph | One Start, reachable End, acyclic, sequential per device, ordinary success/error transitions, and resolved Switch rule/default ports |
 | Policies | Explicit timeout, retry, and error policy on every compiled node |
 | Outputs | One Backend-owned payload schema per node; A5 later wraps it in a unified execution-result envelope |
 | Limits | 1 MiB, 2–500 nodes, 1–1,000 edges, bounded fields, identifiers, retries, and timeouts |

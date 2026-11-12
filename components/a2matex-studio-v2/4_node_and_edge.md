@@ -30,7 +30,8 @@ interface RetryPolicy {
 ```
 
 `timeoutMs` is the publisher-selected deadline for one attempt. When omitted,
-the compiler uses `NodeDefinition.defaultTimeoutMs`. `maxAttempts` includes the
+the Runtime or Backend compiler uses `NodeDefinition.defaultTimeoutMs`. Studio
+stores the authored values but does not resolve the effective policy. `maxAttempts` includes the
 first attempt and defaults to `1`; `delayMs` is the wait between retryable
 attempts and defaults to `0`. Runtime IR always contains the resolved values.
 

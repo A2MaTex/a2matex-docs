@@ -7,7 +7,7 @@ flowchart TB
     GM["Graph Model"]
     NR["Node Registry"]
     FR["Schema Form Renderer"]
-    VC["Validator & Compiler"]
+    AV["Authoring Validator"]
     PS["Project Service"]
     DB["Local Project Storage"]
     RB["Runtime Bridge"]
@@ -18,13 +18,15 @@ flowchart TB
     UI --> GM
     UI --> NR
     UI --> FR
-    GM --> VC
-    NR --> VC
+    GM --> AV
+    NR --> AV
     PS --> DB
     UI --> PS
     UI --> RB
     RB --> RT
-    VC --> RT
+    GM --> RB
+    RT -->|Validation + Runtime IR| RB
+    RB --> PS
     PC --> BE
     UI --> PC
 ```
@@ -129,7 +131,6 @@ Một definition có thể được dùng để tự động sinh:
 - validation rule;
 - input/output documentation;
 - permission summary;
-- Runtime handler mapping;
 - tài liệu cho Marketplace review.
 
 Đây là cơ chế quan trọng nhất nếu mục tiêu là mở rộng nhanh số lượng node.
@@ -155,9 +156,10 @@ Một node mới sử dụng các field tiêu chuẩn sẽ không cần lập tr
 
 Chỉ các node đặc biệt như coordinate picker hoặc image-region selector mới cần custom editor component.
 
-## 4.6. Validator và Compiler
+## 4.6. Authoring Validator và Runtime compiler boundary
 
-Validator hoạt động theo nhiều tầng:
+Studio có thể validate sớm để hỗ trợ authoring, nhưng không compile Runtime IR.
+Validator trong Studio hoạt động theo các tầng sau:
 
 ### Schema validation
 
@@ -181,18 +183,7 @@ Validator hoạt động theo nhiều tầng:
 - expression tham chiếu field có tồn tại;
 - biến có đúng kiểu.
 
-### Capability validation
-
-- workflow có dùng ADB;
-- có dùng screenshot;
-- có dùng Google Sheets;
-- có gọi HTTP;
-- có dùng credential.
-
-### Runtime compatibility
-
-- handler version có tồn tại;
-- Runtime tối thiểu có hỗ trợ node;
-- node cũ có cần migrate không.
-
-Compiler sau đó chuyển Editor Graph thành Runtime IR.
+Khi Test Run, Studio capture immutable snapshot gồm `editorGraph` và `inputSchema`, rồi
+gửi snapshot này cho local Runtime compile API. Runtime Agent resolve node contract từ registry
+của nó, validate runtime compatibility, derive capability và compile Runtime IR. Studio chỉ
+hiển thị diagnostics và lưu kết quả trả về.

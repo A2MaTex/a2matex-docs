@@ -39,9 +39,10 @@ Do đó hướng chính vẫn là **system node first**. Code node chỉ là cô
 - Kết nối Runtime Agent để chạy thử.
 - Hiển thị trạng thái, input, output và lỗi từng node.
 - Quản lý asset phát triển như ảnh mẫu.
-- Tính toán danh sách capability mà workflow yêu cầu.
-- Chuẩn hóa editor graph thành Runtime IR.
-- Gửi workflow revision lên backend.
+- Gửi `editorGraph` và `inputSchema` cho Runtime Agent compile khi chạy thử.
+- Lưu Runtime IR do Runtime Agent trả về trong Project Draft SQLite để tái sử dụng
+  cho execution khi draft chưa thay đổi.
+- Sync cùng Project Draft shape lên backend và yêu cầu tạo Submission.
 - Hiển thị kết quả automated validation và review.
 
 ## Studio không chịu trách nhiệm
@@ -50,6 +51,9 @@ Do đó hướng chính vẫn là **system node first**. Code node chỉ là cô
 - Mã hóa workflow để phân phối.
 - Quyết định customer có quyền chạy hay không.
 - Tự thực thi ADB trực tiếp từ giao diện.
+- Compile Editor Graph thành Runtime IR, resolve runtime handler, default execution policy hoặc
+  authoritative capability manifest.
+- Tạo immutable Workflow Revision; Backend thực hiện việc này trong Submission flow.
 - Quản lý số lượng thiết bị customer được phép sử dụng.
 - Chạy workflow production dài hạn.
 - Cho publisher nạp npm package hoặc native executable tùy ý.

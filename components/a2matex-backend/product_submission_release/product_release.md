@@ -37,9 +37,12 @@ flowchart TD
     end
 
     subgraph Product_Release_Consumer[Product Release queue consumer]
-        K --> CL[Load APPROVED Submission<br/>and claim one Release idempotently]
+        K --> CL[Load APPROVED and PASSED Submission<br/>with finalized Workflow Revision]
+        CL --> VG{Runtime IR and final hash present?}
+        VG -->|No| BF
+        VG -->|Yes| CR[Claim one Release idempotently]
         CL -->|invalid or permanent failure| BF[ProductRelease BUILD_FAILED]
-        CL -->|valid| B[Build standard ZIP package<br/>encrypt Runtime IR + hash package]
+        CR --> B[Package stored Runtime IR without recompiling<br/>encrypt workflow + hash package]
         B --> U[Reserve Static metadata<br/>and upload one private object]
         U --> FT{Finalize publication transaction}
         FT -->|failure before commit| CO[Best-effort delete uploaded object]
@@ -278,6 +281,10 @@ DISABLED  -X-> any state
 
 ## 5. Kafka consumer and reduced validation
 
+The Product Release consumer accepts only the
+finalized output of the Submission pipeline. It must not import, inject, or call
+`WorkflowCompilerService`, and it must not use `ProjectDraft.runtimeIr` as a fallback.
+
 ### 5.1 Subscription
 
 ```text
@@ -303,26 +310,36 @@ in the handler.
 The consumer performs one short transaction:
 
 1. Validate `submissionId` as UUID.
-2. Load the non-deleted Submission with Product, Publisher, and WorkflowRevision.
-3. Require `Submission.status = APPROVED`; Review already guarantees a passed scan and finalized
-   Workflow Revision.
-4. Require Product is non-deleted and `DRAFT` or `ACTIVE`.
-5. Require Publisher remains release-eligible.
-6. Load ProductRelease by `submissionId`.
-7. If absent, reserve `(productId, version)` and insert `BUILDING` using the reviewer as
+2. Load the non-deleted Submission with its scan status, Product, Publisher, and WorkflowRevision.
+3. Independently enforce the release-source gate:
+   - `Submission.status = APPROVED`;
+   - `Submission.scanStatus = PASSED`;
+   - `WorkflowRevision.runtimeIr` is non-null; and
+   - `WorkflowRevision.contentHash` is non-null.
+4. Treat a missing compiled field as a permanent broken-invariant failure. Stop before creating key
+   material, reserving Static metadata, generating an object key, or contacting R2.
+5. Require Product is non-deleted and `DRAFT` or `ACTIVE`.
+6. Require Publisher remains release-eligible.
+7. Load ProductRelease by `submissionId`.
+8. If absent, reserve `(productId, version)` and insert `BUILDING` using the reviewer as
    `createdById`.
-8. If `BUILD_FAILED`, clear `buildFailureCode` and transition to `BUILDING`.
-9. If `PUBLISHED` or `DISABLED`, return success without rebuilding.
-10. Commit before encryption, ZIP creation, or R2 I/O.
+9. If `BUILD_FAILED`, clear `buildFailureCode` and transition to `BUILDING`.
+10. If `PUBLISHED` or `DISABLED`, return success without rebuilding.
+11. Commit before encryption, ZIP creation, or R2 I/O.
 
 Product Release does not repeat:
 
-- scan-status validation beyond requiring `APPROVED`;
+- workflow validation or scan execution; checking `scanStatus = PASSED` is only an invariant gate;
 - Project/Revision identity comparisons already frozen by Submission;
 - release-request syntax validation;
 - WorkflowRevision hash recomputation; or
 - workflow topology/node-policy scanning; or
 - Editor Graph to Runtime IR compilation.
+
+The consumer must package the exact stored `WorkflowRevision.runtimeIr`. It must never read the
+Editor Graph for compilation, call the shared compiler, or substitute the nullable Project Draft
+cache. `WorkflowRevision.contentHash` is required as finalized-source evidence but is not recomputed
+by this module.
 
 The package service still parses Runtime IR, input schema, and capabilities through their strict
 schemas before serialization. Parsing protects the builder; it is not another business scan.
@@ -331,6 +348,8 @@ schemas before serialization. Parsing protects the builder; it is not another bu
 
 - Permanently invalid message/business input persists `BUILD_FAILED` when a Release exists and
   returns `FAILED`.
+- Missing passed-scan/finalized-revision prerequisites return `FAILED` without starting package or
+  storage work. If a Release already exists, retain a stable broken-invariant failure code.
 - Database, Key Service, or R2 transient failure persists a stable code and returns `RETRY`.
 - Successful publication or an already terminal Release returns `SUCCESS`.
 - Existing queue configuration controls bounded attempts and DLQ forwarding. No outbox or generic
@@ -447,8 +466,10 @@ parse:
 This protects the builder from malformed storage. It does not repeat Submission scanning or compile
 Runtime IR.
 
-Missing `WorkflowRevision.runtimeIr` or `contentHash` is a permanent broken-invariant build failure;
-the builder must not fall back to Project Draft content or attempt compilation.
+Missing `WorkflowRevision.runtimeIr` or `contentHash` is a permanent broken-invariant build failure.
+The builder must not fall back to Project Draft content, read the Editor Graph for compilation, or
+call `WorkflowCompilerService`. This gate runs before Key Service, Static reservation, object-key
+generation, ZIP allocation, or R2 work.
 
 #### Step 2: create `input-schema.json`
 
@@ -481,21 +502,21 @@ standard Base64.
 
 Construct the manifest from these exact sources:
 
-| Manifest field                               | Authoritative source                                                                            |
-| -------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `productId`                                  | `ProductRelease.productId`                                                                      |
-| `releaseId`                                  | `ProductRelease.id`                                                                             |
-| `version`                                    | `ProductRelease.version`, originally copied from `Submission.releaseRequest.version`            |
-| `minimumLauncherVersion`                     | `Submission.releaseRequest.minimumLauncherVersion`                                              |
-| `minimumRuntimeVersion`                      | `Submission.releaseRequest.minimumRuntimeVersion`                                               |
-| `entryNodeId`                                | parsed `WorkflowRevision.runtimeIr.entryNodeId`                                                 |
-| `workflow.path`                              | constant `workflow.enc`                                                                         |
-| `workflow.sha256`                            | `workflowHash`, calculated over final encrypted `workflowBytes`                                 |
-| `workflow.encryption.algorithm`              | constant `AES-256-GCM`                                                                          |
-| `workflow.encryption.nonce`                  | Base64 of the exact 12-byte nonce                                                               |
-| `workflow.encryption.authenticationTagBytes` | constant `16`                                                                                   |
-| `inputSchema.path`                           | constant `input-schema.json`                                                                    |
-| `inputSchema.sha256`                         | `inputSchemaHash`, calculated over final `inputSchemaBytes`                                     |
+| Manifest field                               | Authoritative source                                                                                  |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `productId`                                  | `ProductRelease.productId`                                                                            |
+| `releaseId`                                  | `ProductRelease.id`                                                                                   |
+| `version`                                    | `ProductRelease.version`, originally copied from `Submission.releaseRequest.version`                  |
+| `minimumLauncherVersion`                     | `Submission.releaseRequest.minimumLauncherVersion`                                                    |
+| `minimumRuntimeVersion`                      | `Submission.releaseRequest.minimumRuntimeVersion`                                                     |
+| `entryNodeId`                                | parsed `WorkflowRevision.runtimeIr.entryNodeId`                                                       |
+| `workflow.path`                              | constant `workflow.enc`                                                                               |
+| `workflow.sha256`                            | `workflowHash`, calculated over final encrypted `workflowBytes`                                       |
+| `workflow.encryption.algorithm`              | constant `AES-256-GCM`                                                                                |
+| `workflow.encryption.nonce`                  | Base64 of the exact 12-byte nonce                                                                     |
+| `workflow.encryption.authenticationTagBytes` | constant `16`                                                                                         |
+| `inputSchema.path`                           | constant `input-schema.json`                                                                          |
+| `inputSchema.sha256`                         | `inputSchemaHash`, calculated over final `inputSchemaBytes`                                           |
 | `requiredCapabilities`                       | parsed `WorkflowRevision.runtimeIr.requiredCapabilities`, preserving its validated deduplicated order |
 
 Canonically serialize that object as `manifestBytes`. `manifest.json` is exactly `manifestBytes`.
@@ -777,6 +798,8 @@ PUT /api/v1/products/:productId/releases/:releaseId/lifecycle, null -> ADMIN
 | ----------------------------------------- | ----------------------------------------------------------------- | ------------------------ |
 | Invalid payload                           | no mutation                                                       | FAILED                   |
 | Submission missing/not approved           | no Release or BUILD_FAILED                                        | FAILED                   |
+| Submission scan is not `PASSED`           | no Release or BUILD_FAILED                                        | FAILED                   |
+| Final Runtime IR or content hash missing  | no Release or BUILD_FAILED; no key/Static/R2 work                 | FAILED                   |
 | Product version conflict                  | no new Release                                                    | FAILED                   |
 | Product/Publisher not eligible            | BUILD_FAILED when row exists                                      | FAILED                   |
 | Package input schema parse fails          | BUILD_FAILED                                                      | FAILED                   |
@@ -846,10 +869,20 @@ The package service owns serialization/encryption/ZIP/hash/upload orchestration 
 for keys and Static/storage services for persistence. Backend currently has no ZIP writer dependency;
 adding one requires explanation and approval.
 
+The Product Release module must not import `WorkflowCompilerModule` or inject
+`WorkflowCompilerService`. Its repository projection reads finalized `WorkflowRevision.runtimeIr`
+and `contentHash`; its package service accepts those stored values as immutable inputs.
+
 ## 14. Acceptance criteria
 
 - Only approved Submission creates one Release.
-- Approved build input requires finalized Workflow Revision Runtime IR and content hash.
+- Approved build input independently requires `scanStatus = PASSED`, finalized Workflow Revision
+  Runtime IR, and final content hash.
+- Invalid scan state or missing compiled fields stops before Key Service, Static reservation,
+  object-key generation, ZIP construction, or R2 calls.
+- Product Release does not import or call `WorkflowCompilerService`, read `ProjectDraft.runtimeIr`,
+  or compile Editor Graph data.
+- Package construction uses the exact stored `WorkflowRevision.runtimeIr`.
 - Consumer does not repeat scan or immutable snapshot validation.
 - One Submission/one Product-version concurrency rules hold.
 - Package contains exactly the documented three entries.
