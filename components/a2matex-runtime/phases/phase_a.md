@@ -14,8 +14,8 @@ node handlers.
 | A4 | Typed device command contract | **Accepted** |
 | A5 | Execution schemas | **Accepted** |
 | A6 | Event and error schemas | **Accepted** |
-| A7 | Local API schema | **Accepted** |
-| A8 | Contract fixtures | **Accepted** |
+| A7 | Local API schema | **Accepted; compilation extension specified** |
+| A8 | Contract fixtures | **Accepted; compiler fixtures published in v3** |
 
 ## A1 — Contract Decision Register
 
@@ -24,7 +24,7 @@ node handlers.
 | Area | Accepted MVP decision |
 |---|---|
 | Versioning | Runtime IR uses integer `formatVersion: 1`. Runtime application version and `minimumRuntimeVersion` use SemVer. Node-handler versioning is deferred. |
-| Local API | HTTP/1.1 with JSON on configurable loopback address `127.0.0.1:8765`, versioned under `/api/v1`. |
+| Local API | HTTP/1.1 with JSON on configurable loopback address `127.0.0.1:8765`, versioned under `/api/v1`. Validation and compilation are separate authenticated content-only operations. |
 | Events | Server-Sent Events with replay. Each persisted event has a Runtime-wide increasing cursor, exposed as an opaque decimal string. |
 | Time | JSON timestamps use UTC RFC 3339 with fixed millisecond precision. Durations use numeric milliseconds measured by Runtime. |
 | ADB | Resolution order is configured path, Runtime-bundled ADB, then development `PATH`. Runtime selects and validates one executable per process. |
@@ -58,8 +58,8 @@ node handlers.
 - A3 defines session discovery and selection rules only.
 - A5 stores the accepted ADB serial on each `DeviceExecution`.
 - A6 defines event envelopes, cursor expiry, retention, and error contracts.
-- A7 defines Editor Graph validation, device discovery/start payloads, endpoint
-  paths, authentication, SSE framing, and reconnection.
+- A7 defines Editor Graph validation and compilation, device discovery/start
+  payloads, endpoint paths, authentication, SSE framing, and reconnection.
 - A8 provides shared Editor Graph, Runtime IR, event/error, Local API, and SSE
   fixtures so consumers can verify parity without sharing implementation code.
 
@@ -72,10 +72,11 @@ and an impact review across Runtime, Studio, Launcher, and Backend.
 
 Runtime IR is the self-contained executable document compiled authoritatively by
 Backend from a frozen Submission snapshot. Runtime Agent may compile the same
-contract from Studio-supplied source data for local Test Run; cached
-`ProjectDraft.runtimeIr` is not a release source. The
-IR excludes editor-only state and does not use the full JSON Schema standard or
-a generic schema interpreter.
+contract from Studio-supplied `editorGraph` and `inputSchema` for local Test
+Run. Studio does not implement compilation. It may cache the returned IR in its
+local Project Draft, but cached `ProjectDraft.runtimeIr` is not a release
+source. The IR excludes editor-only state and does not use the full JSON Schema
+standard or a generic schema interpreter.
 
 References:
 
@@ -93,7 +94,7 @@ References:
 | Limits | 1 MiB, 2–500 nodes, 1–1,000 edges, bounded fields, identifiers, retries, and timeouts |
 | Validation | Strict structural checks followed by catalog, binding, graph, capability, and compatibility checks |
 
-The contract was checked against all 11 current Backend node definitions.
+The contract represents all 15 accepted MVP node contracts.
 Shared valid and invalid cross-language fixtures remain A8 scope.
 
 Runtime validation has two separate reliability boundaries:
@@ -146,7 +147,7 @@ Reference:
 
 | Area | Accepted MVP decision |
 |---|---|
-| Variants | `LAUNCH_APP`, `TAP`, `SWIPE`, `INPUT_TEXT`, `PRESS_BACK`, `PRESS_HOME`, and `SCREENSHOT` |
+| Variants | `LAUNCH_APP`, `TAP`, `SWIPE`, `LONG_PRESS`, `INPUT_TEXT`, `PRESS_BACK`, `PRESS_HOME`, and `SCREENSHOT` |
 | Key events | Back and Home are separate zero-field commands; A4 exposes no generic key-code field |
 | Targeting | The command contains no serial; the dispatcher uses A5 `DeviceExecution.adbSerial` |
 | Execution control | Timeout, cancellation, retry, and error policy remain outside the command |
@@ -215,8 +216,9 @@ persistence requires a separate sensitive-data decision before F8.
 **Status:** Accepted
 
 A7 exposes the smallest authenticated Development API that lets Studio validate
-a graph, discover devices, run a complete draft, observe and control it, and
-retrieve screenshots. It projects A2–A6 rather than redefining their models.
+a graph, compile draft content into Runtime IR, discover devices, run a complete
+draft, observe and control it, and retrieve screenshots. It projects A2–A6
+rather than redefining their models.
 
 Reference:
 
@@ -224,6 +226,10 @@ Reference:
 
 - All non-health routes require a bearer token delivered outside HTTP through
   a protected per-user connection file.
+- Compilation accepts only `editorGraph` and `inputSchema`. It uses the
+  installed Runtime compilation registry, returns complete Runtime IR only
+  when validation and compilation succeed, and performs no persistence, ADB,
+  or run operation.
 - Start is idempotent through a client UUID persisted on A5 RunGroup.
 - State recovery uses a watermarked snapshot, paged attempt history, and one
   Runtime-wide SSE stream with `Last-Event-ID`.
@@ -237,21 +243,21 @@ log streaming, API device metadata, and generic execution CRUD are deferred.
 
 **Status:** Accepted
 
-A8 contains 19 versioned, hashed test vectors for the shared Editor Graph,
-Runtime IR, A6, and A7 boundaries. It is representative rather than an
-exhaustive replacement for phase-owned unit and integration tests.
+A8 contains 24 versioned, hashed test vectors for the shared Editor
+Graph, Runtime IR, A6, and A7 boundaries. Version 3 adds five Editor Graph and Input Schema pairs, each with exact
+Backend results and a pinned Node Definition snapshot.
 
 References:
 
 - [Runtime Contract Fixtures](../contracts/contract_fixtures_v1.md)
-- [Current fixture manifest](../contracts/fixtures/v2/manifest.json)
+- [Current fixture manifest](../contracts/fixtures/v3/manifest.json)
 
 The canonical files remain in the plan repository and are vendored unchanged
-into consumer test suites. Cross-language agreement is not yet proven; C6, G1,
-I1, and J must execute the fixtures in TypeScript and Go.
+into consumer test suites. Runtime has verified the five compilation results against the checked-out
+Backend compiler. Consumer adoption of the v3 manifest and verification of
+the remaining contracts follow their phase gates.
 
 ## Phase A gate
 
-Phase A is complete. Before implementation continues, the existing Runtime
-scaffold should be reconciled against the accepted A1–A8 contracts and the next
-small Phase B checkout selected.
+A2 and A7 define the local compilation contract. Runtime implements and has
+tested C7–C9, and the A8 v3 manifest publishes the compiler cases.

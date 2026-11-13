@@ -20,11 +20,12 @@ The MVP is designed around a simple promise:
 ### The user journey
 
 1. The user builds a workflow from the supported nodes in Studio.
-2. Studio asks the local Runtime to validate the graph and shows deterministic
-   errors before the user starts a run.
-3. The client sends the exact executable Runtime IR—the machine-readable
-   workflow package—together with per-device inputs and selected current ADB
-   serials through the authenticated loopback API.
+2. Studio sends the current `editorGraph` and `inputSchema` to the local Runtime
+   for validation and compilation. It shows deterministic errors and may cache
+   the returned Runtime IR in the local Project Draft.
+3. Studio sends that exact executable Runtime IR—the machine-readable workflow
+   package—together with per-device inputs and selected current ADB serials
+   through the authenticated loopback run API.
 4. The Runtime independently validates the executable document and rechecks
    every selected device. Invalid input creates no run and sends no device
    command.
@@ -105,14 +106,18 @@ The first usable Runtime release includes:
 
 - Generic Android device discovery through ADB.
 - Real execution—never simulated execution.
-- The 11 node handlers already defined by Backend:
+- The 15 accepted MVP node contracts:
   - `flow.start`
   - `flow.end`
   - `flow.delay`
+  - `flow.set_variable`
+  - `flow.wait_variable`
+  - `flow.switch`
   - `utility.log`
   - `android.launch_app`
   - `android.tap`
   - `android.swipe`
+  - `android.long_press`
   - `android.input_text`
   - `android.press_back`
   - `android.press_home`
@@ -128,7 +133,7 @@ The first usable Runtime release includes:
 Explicitly deferred until after release:
 
 - Node-handler versioning.
-- Conditional nodes, switch, loops, parallel/join graph logic.
+- Loops and parallel/join graph logic.
 - Selector-based interaction.
 - Wait-for-element.
 - OCR and image matching.
@@ -206,13 +211,13 @@ Each numbered item is one independently reviewable checkout. We stop for review 
 | ID  | Module                        | Deliverable                                                                                                                                           | Checkout condition                                                                                       |
 | --- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | A1  | Contract decision register    | Decide Runtime IR version representation, local transport, event transport, ADB resolution policy, artifact location, and identifier formats          | No unresolved decision blocks schema authoring                                                           |
-| A2  | Runtime IR v1 contract        | Strict workflow, node, edge, binding, timeout, retry, error-policy, capability, and metadata rules                                                    | All 11 current nodes can be represented; unknown fields and invalid graphs are rejected                  |
+| A2  | Runtime IR v1 contract        | Strict workflow, node, edge, binding, timeout, retry, error-policy, capability, and metadata rules                                                    | All 15 accepted MVP nodes can be represented; unknown fields and invalid graphs are rejected             |
 | A3  | Session device selection      | Freeze ephemeral ADB discovery, selection by current serial, start-time revalidation, and no-Device-entity rule                                       | Device ownership does not overlap A5, A6, or A7                                                          |
-| A4  | Typed device command contract | Seven closed Android commands; non-screenshot success has no payload and Screenshot returns only `artifactId`                                         | Workflow data cannot control an executable, raw arguments, target serial, shell syntax, or artifact path |
+| A4  | Typed device command contract | Eight closed Android commands; non-screenshot success has no payload and Screenshot returns only `artifactId`                                         | Workflow data cannot control an executable, raw arguments, target serial, shell syntax, or artifact path |
 | A5  | Execution schemas             | Three persisted records, reduced lifecycle states, atomic checkpoint operation, single-active-run invariant, and derived summary                      | Every transition, selected serial, node output, and interruption has one owner                           |
 | A6  | Event and error schemas       | Four typed state events, Runtime-wide replay cursor, reduced stable errors, retryability, expiry recovery, and sanitization                           | Client can replay changes or recover from a watermarked snapshot without parsing logs                    |
-| A7  | Local API schema              | Protected token handoff, compatibility info, validation, devices, idempotent start, status/control, watermarked snapshot, SSE replay, and screenshots | Every endpoint has strict request, response, error, authentication, and cursor semantics                 |
-| A8  | Contract fixtures             | Versioned manifest plus 19 hashed Editor Graph, Runtime IR, event/error, Local API, and SSE cases                                                     | Canonical bytes and expectations are reviewable; later Go and TypeScript suites consume them             |
+| A7  | Local API schema              | Protected token handoff, compatibility info, separate validation and compilation, devices, idempotent start, status/control, snapshot, SSE, and screenshots | Every endpoint has strict request, response, error, authentication, and cursor semantics                 |
+| A8  | Contract fixtures             | Accepted 19-case set plus a new immutable set of paired compiler inputs, exact IR outputs, and diagnostics                                            | Canonical bytes and expectations are reviewable; later Go and TypeScript suites consume them             |
 
 A1 through A8 are accepted. Their authoritative decisions are recorded in
 [`phase_a.md`](./phase_a.md).
@@ -245,12 +250,12 @@ Important contract rules:
 
 Gate: the agent starts, reports readiness, rejects unauthenticated requests, and exits cleanly without goroutine leaks.
 
-### Phase C — Local workflow validation
+### Phase C — Local workflow validation and compilation
 
 This phase is an early Runtime reliability boundary. It gives Studio local,
-deterministic authoring feedback before compilation and before any persistence,
-ADB discovery, run creation, or device command. It follows the approved Backend
-Editor Graph behavior but is implemented independently in Go.
+deterministic authoring feedback and compiles source content before any
+persistence, ADB discovery, run creation, or device command. Studio supplies
+content and consumes the result; it does not own compiler logic.
 
 | ID  | Module                  | Deliverable and checkout condition                                                                                                      |
 | --- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
@@ -260,18 +265,23 @@ Editor Graph behavior but is implemented independently in Go.
 | C4  | Node-contract validator | Validate node types, source ports, and static configuration against the Runtime's immutable supported-node registry                     |
 | C5  | Local validation API    | Expose authenticated content-only validation for Studio without saving, compiling, enqueuing, or executing the workflow                 |
 | C6  | Cross-language parity   | Vendor and run A8 Editor Graph fixtures against Backend/TypeScript and Runtime/Go; compare classifications and ordered diagnostic codes |
+| C7  | Compilation registry    | Provide immutable installed node semantics needed to compile A2 without accepting definitions from Studio                              |
+| C8  | Runtime IR compiler     | Validate and compile graph plus input schema into a complete A2 document or return diagnostics with no partial IR                       |
+| C9  | Local compilation API   | Expose authenticated content-only compilation without project IDs, expected versions, persistence, run creation, ADB, or queue work    |
 
 The local validator answers whether an Editor Graph is valid for authoring. It does not authorize execution and does not validate device availability. A saved `validationSummary` is evidence of an earlier check, not a trusted Runtime decision.
 
-Gate: Studio can submit valid and invalid Editor Graph fixtures and receive the
-same bounded, deterministic result from repeated calls. Validation performs no
-database write, creates no run, and invokes no ADB command.
+Gate: Studio can submit valid and invalid source fixtures and receive the same
+bounded diagnostics and exact compiled IR from repeated calls. Validation and
+compilation perform no database write, create no run, and invoke no ADB command.
 
 ### Phase D — Persistence and observability foundation
 
 See the [Phase D specifications and integration review](phase_d.md).
 
 Persistence comes before workflow execution so the first real execution is observable.
+It does not persist Project Drafts or compiler results; Studio owns that local
+cache and Phase D begins only after an exact Runtime IR is admitted for a run.
 
 | ID  | Module                       | Deliverable and checkout condition                                                                                       |
 | --- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
@@ -292,6 +302,7 @@ variable state to the checkpoint. Specify store ownership and commit behavior
 before implementing variable writes.
 
 ### Phase E — Generic Android device subsystem
+See the [Phase E specification index](phase_e.md).
 
 | ID  | Module                 | Deliverable and checkout condition                                                                                                  |
 | --- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
@@ -326,11 +337,13 @@ Gate:
 | F9  | Handler registry   | Registers exactly one handler for every supported `runtimeHandler`; rejects duplicates and unknown handlers     |
 | F10 | Long Press         | Holds a pixel, percentage, or selector-ID target for the requested bounded duration                             |
 
-The [Android targeting component](../contracts/android_targeting.md) is
-planned for Phase F. Phase E provides the shared process runner, ADB toolchain,
-and device selection. Phase F owns target resolution, dispatcher and handler
-registration, execution error mapping, and real-device acceptance. Percentage
-and selector lookups run on demand against the selected device.
+The [Android targeting contract](../contracts/android_targeting.md) is split by
+responsibility. C7–C9 compile the selected mode and its bindings into Runtime
+IR without device access. Phase E provides the shared process runner, ADB
+toolchain, and selected-device state. Phase F owns target resolution,
+dispatcher and handler registration, execution error mapping, and real-device
+acceptance. Percentage and selector lookups run on demand against the selected
+device.
 
 A fake device executor may exist only as a test double. Passing a fake test does not satisfy the product checkout. Each Android handler needs a real-device acceptance test.
 
@@ -357,11 +370,15 @@ For example, a successful tap means ADB accepted the tap command; it does not pr
 `G1` is mandatory even when Phase C, Studio, or Backend previously reported the
 workflow as valid. It validates the exact Runtime IR and execution inputs at the
 trust boundary. Failure creates no active run and dispatches no device command.
+In Development, that IR is the exact successful C9 result supplied by Studio;
+in Production, it is the exact decrypted IR loaded through I2. G1 never
+recompiles Editor Graph source and never trusts a cached validation result.
 
 For Android targeting, G1 checks the explicit mode and allowed literal inputs.
 G2 resolves the inputs, and G4–G5 invoke the registered handler and record the
-result through Phase D checkpoints. Studio compiles the targeting inputs and
-enables Test Run after Runtime integration and real-device acceptance.
+result through Phase D checkpoints. Backend compiles authoritative Submission
+targeting inputs; the Runtime local compiler applies the same mapping to source
+data supplied by Studio for Test Run after integration and real-device acceptance.
 
 The [Stage 3 binding contract](../contracts/workflow_bindings.md) is available
 for authoring. G1 owns executable validation, G2 resolves direct outputs and
@@ -373,6 +390,9 @@ RunGroup visibility and last-committed-write-wins across device workers.
 device. Verify a successful run, a failed Tap that ends the run, replay after
 reconnect, and `INTERRUPTED` after a restart during Tap with no redispatch.
 Use the D4 checkpoints and D6 recovery for these cases.
+Verify the B3/B5 managed lifecycle with a test parent process first. Bring
+forward H6 finalization for **Stop and exit** before integrating the first
+real run with a desktop app.
 
 **Full Phase G gate.** One real device can run a complete workflow using all
 applicable current nodes, including an error branch and retry/timeout behavior.
@@ -392,7 +412,7 @@ against the [Wait for Variable contract](../contracts/workflow_bindings.md#wait-
 | H3  | Per-device worker        | One supervised goroutine per active device execution; nodes remain sequential within it                                                                                    |
 | H4  | Failure isolation        | One device failure does not stop unaffected devices under the fixed MVP rule                                                                                               |
 | H5  | Pause/resume             | Stops before the next node, persists a safe checkpoint, and resumes only from a valid state                                                                                |
-| H6  | Cancellation             | Propagates context cancellation into delays and ADB processes before releasing run resources                                                                               |
+| H6  | Cancellation             | Blocks new dispatch, settles active attempts, and commits cancellation state and events before closing execution storage on an intentional shutdown. |
 | H7  | Device disconnect policy | Fails only the affected device execution with the approved A6 device error                                                                                                 |
 | H8  | Group result aggregation | Derives group counters and terminal state from persisted device-execution states                                                                                           |
 
@@ -411,8 +431,31 @@ Gate: two or more real devices can execute independently, concurrency is bounded
 
 #### I1. Studio Development mode
 
-- Validate the current Editor Graph locally and render deterministic diagnostics.
-- Studio sends strict draft Runtime IR directly.
+Studio owns the Runtime it starts for validation, compilation, or a Test Run.
+Studio and Launcher both
+show Runtime status and offer **Shut down Runtime**. On app exit during a
+run, the owner offers **Stop and exit** or **Stay open**. The other app
+reports **Runtime already in use** on a conflicting launch. Pause and Resume
+follow under H5. The [managed lifecycle guide](../integration/managed_runtime.md)
+documents the Linux-verified launch and shutdown protocol. The
+[Studio authoring example](../integration/studio.md) and
+[Launcher ownership example](../integration/launcher.md) describe client
+integration. Native Windows verification and execution examples remain pending.
+
+Use one shared native Runtime client for every local API operation. On first
+use, start the installed executable as a child and wait for the private ready
+message. Reuse the owned process and run the bounded authenticated
+`/runtime-info` probe before each operation. Concurrent requests share one
+startup or replacement and wait for it. A failed readiness signal triggers
+replacement for pending work under the B3 policy. If the replacement fails
+or the other app owns the store, display the error and leave requests unsent.
+After **Shut down Runtime**, suspend automatic editor validation until an
+explicit action requests Runtime again.
+
+- Send the current Editor Graph and Input Schema to the authenticated local
+  Runtime compiler and render deterministic diagnostics.
+- Cache a successful Runtime IR only while it corresponds to the current local
+  draft source, then send that exact IR to the run API. Studio does not compile.
 - List and select ready ADB endpoints.
 - Run the complete draft workflow.
 - Stream typed execution events.
@@ -433,6 +476,9 @@ Runtime logs remain B4 scope and are not A6 execution events.
 #### I2. Launcher Production mode
 
 This waits for the Product–Submission–Release backend group.
+Launcher starts and owns Runtime when a product operation first needs it.
+Use the same per-request readiness probe, shared replacement, and shutdown
+controls defined in I1 for every Runtime API operation.
 
 It includes:
 
@@ -460,6 +506,14 @@ Before considering the MVP releasable:
 - Unit tests for parsers, validators, transitions, state machines, and result calculation.
 - Hash-verified A8 Editor Graph, Runtime IR, event/error, Local API, and SSE
   contract tests in every applicable Go and TypeScript consumer.
+- Paired compiler fixtures covering explicit timeout/retry values, fallback
+  defaults, uppercase binding mapping, capability deduplication, and exact IR.
+- Authenticated `POST /api/v1/workflow-compilation` strict request/response
+  tests, including invalid source returning `runtimeIr: null` with no partial
+  document.
+- Tests proving local compilation performs no Project Draft or Runtime SQLite
+  write, run creation, device discovery, ADB process, queue publication, or
+  command dispatch.
 - Tests proving validation failure creates no run, database execution record,
   ADB process, or partial multi-device execution.
 - Integration tests using controlled ADB/process test doubles.
@@ -489,8 +543,8 @@ Tests remain part of each proposed checkout, but I will confirm the test scope w
 | M1 — Contract ready         | Contracts and cross-language fixtures approved                   |
 | M2 — Validation ready       | Studio receives bounded local diagnostics without execution      |
 | M3 — Device ready           | Runtime lists, selects, and revalidates generic ADB endpoints    |
-| M4 — Command ready          | All seven Android operations execute on real devices             |
-| M5 — Engine ready           | All 11 current handlers run on one device with persisted events  |
+| M4 — Command ready          | All eight Android operations execute on real devices             |
+| M5 — Engine ready           | All 15 accepted handlers run on one device with persisted events |
 | M6 — Multi-device ready     | Bounded, isolated concurrent execution works                     |
 | M7 — Studio MVP             | Draft workflows can be tested end-to-end from Studio             |
 | M8 — Production MVP         | Launcher executes authorized installed releases                  |

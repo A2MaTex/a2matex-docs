@@ -1,0 +1,164 @@
+{
+  "editorGraph": {
+    "schemaVersion": 1,
+    "entryNodeId": "start",
+    "nodes": [
+      {
+        "id": "start",
+        "type": "flow.start",
+        "config": {},
+        "bindings": {},
+        "errorPolicy": "STOP",
+        "editor": {
+          "x": 50,
+          "y": -15,
+          "label": "Studio only"
+        }
+      },
+      {
+        "id": "tap",
+        "type": "android.tap",
+        "config": {
+          "targetMode": "ABSOLUTE_PIXELS"
+        },
+        "bindings": {
+          "x": {
+            "kind": "LITERAL",
+            "value": 20
+          },
+          "y": {
+            "kind": "LITERAL",
+            "value": 30
+          }
+        },
+        "errorPolicy": "STOP",
+        "editor": {
+          "x": 50,
+          "y": -15,
+          "label": "Studio only"
+        }
+      },
+      {
+        "id": "end",
+        "type": "flow.end",
+        "config": {},
+        "bindings": {},
+        "errorPolicy": "STOP",
+        "editor": {
+          "x": 50,
+          "y": -15,
+          "label": "Studio only"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "e1",
+        "sourceNodeId": "start",
+        "sourcePort": "success",
+        "targetNodeId": "tap"
+      },
+      {
+        "id": "e2",
+        "sourceNodeId": "tap",
+        "sourcePort": "success",
+        "targetNodeId": "end"
+      }
+    ]
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {},
+    "required": [],
+    "additionalProperties": false
+  },
+  "validation": {
+    "status": "VALID",
+    "errors": [],
+    "warnings": [],
+    "truncated": false
+  },
+  "runtimeIr": {
+    "formatVersion": 1,
+    "minimumRuntimeVersion": "0.1.0",
+    "metadata": {
+      "sourceGraphSchemaVersion": 1
+    },
+    "entryNodeId": "start",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    },
+    "nodes": [
+      {
+        "id": "start",
+        "type": "flow.start",
+        "runtimeHandler": "flow.start",
+        "config": {},
+        "inputs": {},
+        "timeoutMs": 1000,
+        "retryPolicy": {
+          "maxAttempts": 1,
+          "delayMs": 0
+        },
+        "errorPolicy": "STOP"
+      },
+      {
+        "id": "tap",
+        "type": "android.tap",
+        "runtimeHandler": "android.tap",
+        "config": {
+          "targetMode": "ABSOLUTE_PIXELS"
+        },
+        "inputs": {
+          "x": {
+            "source": "LITERAL",
+            "value": 20
+          },
+          "y": {
+            "source": "LITERAL",
+            "value": 30
+          }
+        },
+        "timeoutMs": 30000,
+        "retryPolicy": {
+          "maxAttempts": 1,
+          "delayMs": 0
+        },
+        "errorPolicy": "STOP"
+      },
+      {
+        "id": "end",
+        "type": "flow.end",
+        "runtimeHandler": "flow.end",
+        "config": {},
+        "inputs": {},
+        "timeoutMs": 1000,
+        "retryPolicy": {
+          "maxAttempts": 1,
+          "delayMs": 0
+        },
+        "errorPolicy": "STOP"
+      }
+    ],
+    "edges": [
+      {
+        "id": "e1",
+        "sourceNodeId": "start",
+        "sourcePort": "success",
+        "targetNodeId": "tap"
+      },
+      {
+        "id": "e2",
+        "sourceNodeId": "tap",
+        "sourcePort": "success",
+        "targetNodeId": "end"
+      }
+    ],
+    "requiredCapabilities": [
+      "android.device.control"
+    ]
+  }
+}

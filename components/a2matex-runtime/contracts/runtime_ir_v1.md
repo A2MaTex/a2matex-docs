@@ -326,9 +326,12 @@ follows the first matching rule port, and otherwise follows `default`.
 
 ## 10. Compilation contract
 
-The compiler receives one Editor Graph, its Input Schema, and the exact Node
-Definitions selected for that source snapshot. It does not read mutable catalog
-rows during compilation and does not mutate its inputs.
+A compiler receives one Editor Graph, its Input Schema, and an immutable set of
+Node Definition semantics. The Backend compiler uses the exact definitions
+frozen for the Workflow Revision. The Runtime local compiler uses the
+definitions installed in its C7 compilation registry. Studio supplies neither
+trusted Node Definitions nor compiler defaults. Neither compiler reads mutable
+catalog rows during compilation or mutates its inputs.
 
 It constructs the envelope as follows:
 
@@ -351,7 +354,8 @@ For every node, the compiler:
 
 Set Variable, Wait Variable, Switch, variable sources, targeting modes, and
 dynamic Switch ports follow Sections 6, 7, and 9. Any validation or compilation
-diagnostic produces no Runtime IR result; the compiler never emits partial IR.
+error produces no Runtime IR result; warnings may accompany a complete IR. The
+compiler never emits partial IR.
 
 ## 11. Validation pipeline
 

@@ -1,0 +1,268 @@
+{
+  "fixtureSetVersion": 3,
+  "contractSet": "runtime-phase-a-v1",
+  "cases": [
+    {
+      "id": "editor_graph.valid_minimal",
+      "contract": "EDITOR_GRAPH_V1",
+      "path": "fixtures/v2/editor_graph/valid_minimal.json",
+      "sha256": "cff20729370295192d7506e7b1cc333c744b8525607ffc4f6c409c9d9f5078cb",
+      "expect": {
+        "classification": "VALID",
+        "diagnosticCodes": []
+      }
+    },
+    {
+      "id": "editor_graph.invalid_unknown_field",
+      "contract": "EDITOR_GRAPH_V1",
+      "path": "fixtures/v2/editor_graph/invalid_unknown_field.json",
+      "sha256": "143bef13ab944319af6a4d8709af61c3e94144104dd7da8be8e1b37c57946420",
+      "expect": {
+        "classification": "INVALID",
+        "diagnosticCodes": [
+          "EDITOR_GRAPH_CONTRACT_INVALID"
+        ]
+      }
+    },
+    {
+      "id": "editor_graph.invalid_cycle",
+      "contract": "EDITOR_GRAPH_V1",
+      "path": "fixtures/v2/editor_graph/invalid_cycle.json",
+      "sha256": "f2f8a568f20d251b5b1ae9e32b72866c036b277d22e48ee9a5b9092b1d6ae0fd",
+      "expect": {
+        "classification": "INVALID",
+        "diagnosticCodes": [
+          "GRAPH_CYCLE_DETECTED"
+        ]
+      }
+    },
+    {
+      "id": "runtime_ir.valid_reference",
+      "contract": "RUNTIME_IR_V1",
+      "path": "fixtures/v3/runtime_ir/valid_reference.json",
+      "sha256": "c58c7ca4e70eb490112ef53aa7bdd7b0e2f2551277a168dc5858522e64234878",
+      "expect": {
+        "classification": "ACCEPTED"
+      }
+    },
+    {
+      "id": "runtime_ir.invalid_format_version",
+      "contract": "RUNTIME_IR_V1",
+      "path": "fixtures/v2/runtime_ir/invalid_format_version.json",
+      "sha256": "657cc6fd7dade785e9fbe891c6c9aef43d237e82a1c92ffd7205fad11e6fcb4f",
+      "expect": {
+        "classification": "REJECTED",
+        "violatedRule": "FORMAT_VERSION"
+      }
+    },
+    {
+      "id": "runtime_ir.invalid_unknown_field",
+      "contract": "RUNTIME_IR_V1",
+      "path": "fixtures/v2/runtime_ir/invalid_unknown_field.json",
+      "sha256": "977e32fb18062f037ed0b60b0b924d305fb2008a869ee8f88d1d0707c9c579ea",
+      "expect": {
+        "classification": "REJECTED",
+        "violatedRule": "UNKNOWN_FIELD"
+      }
+    },
+    {
+      "id": "runtime_ir.invalid_capability_mismatch",
+      "contract": "RUNTIME_IR_V1",
+      "path": "fixtures/v2/runtime_ir/invalid_capability_mismatch.json",
+      "sha256": "2c5d0c73cd4583f95daa78df2d7714ab42d0b4c364513890f1fb23f4caefb1d1",
+      "expect": {
+        "classification": "REJECTED",
+        "violatedRule": "CAPABILITY_SET"
+      }
+    },
+    {
+      "id": "event.valid_run_group_state",
+      "contract": "EXECUTION_EVENT_V1",
+      "path": "fixtures/v2/event_error/valid_run_group_event.json",
+      "sha256": "ae785a5bcf551c2efc8ebd6544bae0ad3be10556199763ec6e8a189ada414b1c",
+      "expect": {
+        "classification": "ACCEPTED",
+        "eventType": "RUN_GROUP_STATE_CHANGED"
+      }
+    },
+    {
+      "id": "event.valid_device_execution_state",
+      "contract": "EXECUTION_EVENT_V1",
+      "path": "fixtures/v2/event_error/valid_device_execution_event.json",
+      "sha256": "2815490ab00bff278d11ebe572ebf3487019e5eda0a5708ce2b1007ec246ccc5",
+      "expect": {
+        "classification": "ACCEPTED",
+        "eventType": "DEVICE_EXECUTION_STATE_CHANGED"
+      }
+    },
+    {
+      "id": "event.valid_node_attempt_state",
+      "contract": "EXECUTION_EVENT_V1",
+      "path": "fixtures/v2/event_error/valid_node_attempt_event.json",
+      "sha256": "53e890115ce4d78d8f3b37be274a782960f260186de3fe2e5483e4a61aed366c",
+      "expect": {
+        "classification": "ACCEPTED",
+        "eventType": "NODE_ATTEMPT_STATE_CHANGED"
+      }
+    },
+    {
+      "id": "event.valid_retry_scheduled",
+      "contract": "EXECUTION_EVENT_V1",
+      "path": "fixtures/v2/event_error/valid_retry_event.json",
+      "sha256": "3e2630aac1fffd76b0459c8fa5d6a7ad7c0c46eb06cf7c0d97e27090f867523c",
+      "expect": {
+        "classification": "ACCEPTED",
+        "eventType": "NODE_RETRY_SCHEDULED"
+      }
+    },
+    {
+      "id": "event.invalid_missing_device_execution",
+      "contract": "EXECUTION_EVENT_V1",
+      "path": "fixtures/v2/event_error/invalid_event_missing_device_execution.json",
+      "sha256": "75798e214b0d22b7e4deaea7dda3c3b67b66441c2cd646a86ba259c7c2fd98c1",
+      "expect": {
+        "classification": "REJECTED",
+        "violatedRule": "REQUIRED_CORRELATION"
+      }
+    },
+    {
+      "id": "error.valid_device_offline",
+      "contract": "RUNTIME_ERROR_V1",
+      "path": "fixtures/v2/event_error/valid_error.json",
+      "sha256": "9f5ec8c1c26b9e3cc8ba17e1d1401d9b9e7223b376869203cb02ea100a60889c",
+      "expect": {
+        "classification": "ACCEPTED"
+      }
+    },
+    {
+      "id": "error.invalid_extra_field",
+      "contract": "RUNTIME_ERROR_V1",
+      "path": "fixtures/v2/event_error/invalid_error_extra_field.json",
+      "sha256": "67ffacf0b8f220a0d74868d6de55881907d606b21add55d27882fa7534989028",
+      "expect": {
+        "classification": "REJECTED",
+        "violatedRule": "UNKNOWN_FIELD"
+      }
+    },
+    {
+      "id": "api.valid_runtime_info_response",
+      "contract": "LOCAL_API_V1",
+      "path": "fixtures/v2/local_api/valid_runtime_info_response.json",
+      "sha256": "b158e3cc83a0f1f2efcd6927ed3063bbfce9af2a62e4003924a01f48123f9d19",
+      "expect": {
+        "classification": "ACCEPTED",
+        "shape": "RUNTIME_INFO_RESPONSE"
+      }
+    },
+    {
+      "id": "api.valid_start_request",
+      "contract": "LOCAL_API_V1",
+      "path": "fixtures/v2/local_api/valid_start_request.json",
+      "sha256": "d0eb01c140c8f1f2610ce0d13efac539e6f7c11b1921433f6fcab8f18ca4c1bb",
+      "expect": {
+        "classification": "ACCEPTED",
+        "shape": "START_RUN_REQUEST"
+      }
+    },
+    {
+      "id": "api.invalid_start_request_unknown_field",
+      "contract": "LOCAL_API_V1",
+      "path": "fixtures/v2/local_api/invalid_start_request_unknown_field.json",
+      "sha256": "a03fed67ef621e0fad7644a611c559980e9c76e540f8f89d6d47c7527bd1178f",
+      "expect": {
+        "classification": "REJECTED",
+        "shape": "START_RUN_REQUEST",
+        "httpStatus": 400,
+        "errorCode": "INVALID_REQUEST"
+      }
+    },
+    {
+      "id": "api.valid_snapshot_response",
+      "contract": "LOCAL_API_V1",
+      "path": "fixtures/v2/local_api/valid_snapshot_response.json",
+      "sha256": "16fba7e1a9dadb520a38d19ada0bdff76efdd7738d237fdbdbe451320231014d",
+      "expect": {
+        "classification": "ACCEPTED",
+        "shape": "EXECUTION_SNAPSHOT"
+      }
+    },
+    {
+      "id": "api.valid_sse_node_attempt",
+      "contract": "LOCAL_API_V1",
+      "path": "fixtures/v2/local_api/valid_node_attempt_event.sse",
+      "sha256": "9915f16bd9f11d0ec8e2e4d547815a29c7ee9dd1c0c90964b70809a0b92cbe99",
+      "expect": {
+        "classification": "ACCEPTED",
+        "shape": "SSE_EXECUTION_EVENT",
+        "cursor": "3",
+        "eventType": "NODE_ATTEMPT_STATE_CHANGED",
+        "dataPath": "fixtures/v2/event_error/valid_node_attempt_event.json"
+      }
+    },
+    {
+      "id": "compilation.targeting_and_defaults",
+      "contract": "WORKFLOW_COMPILATION_V1",
+      "path": "fixtures/v3/compilation/targeting_and_defaults.json",
+      "sha256": "06e226b848c0c0fda4e92839b6c547bd8d812490ac33030e857519434a2d2b2b",
+      "expect": {
+        "classification": "VALID",
+        "definitions": {
+          "path": "fixtures/v3/compilation/node_definitions.json",
+          "sha256": "6a747b3d98a73d411a05c853594e6568117857a10140232e654920e07aed5e12"
+        }
+      }
+    },
+    {
+      "id": "compilation.explicit_timeout_and_partial_retry",
+      "contract": "WORKFLOW_COMPILATION_V1",
+      "path": "fixtures/v3/compilation/explicit_timeout_and_partial_retry.json",
+      "sha256": "2dc5dbc7a29c75e4115f1203ea9dfbdc5c0e743344dfc4021199bfecd475e0bc",
+      "expect": {
+        "classification": "VALID",
+        "definitions": {
+          "path": "fixtures/v3/compilation/node_definitions.json",
+          "sha256": "6a747b3d98a73d411a05c853594e6568117857a10140232e654920e07aed5e12"
+        }
+      }
+    },
+    {
+      "id": "compilation.invalid_workflow_input",
+      "contract": "WORKFLOW_COMPILATION_V1",
+      "path": "fixtures/v3/compilation/invalid_workflow_input.json",
+      "sha256": "f65c1a2bf63dd0f317f89635c354c9929a145cccd6d40463fe1fef633070208b",
+      "expect": {
+        "classification": "INVALID",
+        "definitions": {
+          "path": "fixtures/v3/compilation/node_definitions.json",
+          "sha256": "6a747b3d98a73d411a05c853594e6568117857a10140232e654920e07aed5e12"
+        }
+      }
+    },
+    {
+      "id": "compilation.invalid_input_schema",
+      "contract": "WORKFLOW_COMPILATION_V1",
+      "path": "fixtures/v3/compilation/invalid_input_schema.json",
+      "sha256": "aaa4fef2d66e95afb8122bf020d6eaa36a8a5560036a0044d3a8522fd6da8d85",
+      "expect": {
+        "classification": "INVALID",
+        "definitions": {
+          "path": "fixtures/v3/compilation/node_definitions.json",
+          "sha256": "6a747b3d98a73d411a05c853594e6568117857a10140232e654920e07aed5e12"
+        }
+      }
+    },
+    {
+      "id": "compilation.invalid_node_retry",
+      "contract": "WORKFLOW_COMPILATION_V1",
+      "path": "fixtures/v3/compilation/invalid_node_retry.json",
+      "sha256": "44bebea9945a0725bb05c84ede18c260ec7326e6c94f4a541e408555d1ec4528",
+      "expect": {
+        "classification": "INVALID",
+        "definitions": {
+          "path": "fixtures/v3/compilation/node_definitions.json",
+          "sha256": "6a747b3d98a73d411a05c853594e6568117857a10140232e654920e07aed5e12"
+        }
+      }
+    }
+  ]
+}

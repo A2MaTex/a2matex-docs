@@ -116,7 +116,14 @@ B3, once recovery and listener startup succeed. The owner keeps credentials
 in its native process. Use a dedicated channel separate from stdout/stderr
 logging and apply the same bearer authentication to loopback HTTP. Standalone
 development uses the connection-file handoff below. The managed handoff is
-pending implementation.
+implemented and verified with a Linux parent harness. Native Windows
+verification remains pending.
+
+The owner clears the API URL and bearer token when the child exits, the
+control channel closes, the authenticated readiness probe fails, or shutdown
+begins. Keep the replacement session tied to the new child. After its private
+ready message, the client probes the new authenticated session before sending
+waiting requests. Each replacement receives a fresh token.
 
 ## Connection file
 

@@ -7,6 +7,11 @@ client disconnects, a write fails, or the agent restarts. It starts after a
 request has been admitted and records what later device handlers and the
 workflow engine report.
 
+Phase D does not store Studio Project Drafts or compiler caches. C9 compilation
+is a stateless content operation and performs no SQLite write. Studio owns the
+local draft and may place a successful compiled IR in that draft; Phase D starts
+only when G1 admits an exact IR for execution.
+
 ```mermaid
 flowchart LR
   A[Studio or Launcher admits run — later] --> B[Persist run and device work]
@@ -43,6 +48,10 @@ checkpoints, and show the committed result after reconnecting. A failed
 Tap ends the run. Restart during an unfinished Tap reports `INTERRUPTED`
 without sending the Tap again.
 
+Before client integration, verify one UI owner per Runtime launch and the
+H6 **Stop and exit** path. A confirmed stop commits terminal state before
+SQLite closes. D6 handles any unfinished work left by an unexpected exit.
+
 | Keep in the first runnable slice | Reduce or deliver later |
 |---|---|
 | SQLite with run, device, and attempt identity. Admission is atomic and request retries cannot duplicate runs. | One local database and one serialized write path. Derive counts and summaries. Defer generalized storage adapters, archival, and historical search. |
@@ -62,7 +71,7 @@ Production integration.
 |---|---|---|
 | **A → B/C** | Runtime exposes loopback Health, Runtime Info, and authoring validation. Installed catalog rules and Backend parity are covered by the current test suites. | Keep authoring validation distinct from G1 executable admission and advertise only registered executable handlers. |
 | **B → D** | D1 opens and migrates SQLite under exclusive ownership. D6 commits recovery before D3 retention, HTTP startup, and connection publication. A composed-agent test verifies rollback, lock release, and a closed startup on failure. | Verify native Windows behavior and interruption after real device dispatch. |
-| **C → Studio → G** | Editor Graph validation exists. Executable compilation and run admission remain open. | Compile exact Runtime IR and revalidate bindings, handler support, and device selection before committing any run. |
+| **C → Studio → G** | Editor Graph validation exists. C7–C9 local compilation and executable run admission remain open. | Runtime compiles source content without persistence; Studio supplies that exact IR to G1, which revalidates bindings, handler support, inputs, and device selection before committing any run. |
 | **D → E/F/G** | SQLite, the execution repository, event replay, and retention are implemented. The current router has no run, device, event, or artifact endpoints. | Run a single real Android action through typed dispatch. Commit start and result, reconnect the client, and test interruption without a second dispatch. |
 | **D/G → H** | Authoring supports scoped variables and Wait. Execution and scheduling remain open. | Verify device isolation, atomic Global visibility and last-committed-write-wins, then a two-device wait with one worker slot. |
 | **D–H → I/J** | Studio and Launcher execution integration and device release evidence remain open. | Prove Studio Test Run and reconnect first. Separately verify authorized Production package execution and safe error disclosure. Complete release checks on supported hosts and real devices. |
@@ -79,6 +88,11 @@ Production integration.
 4. Verify the delivery sequence with a temporary SQLite database and a
    simulated handler first. Real-device acceptance follows at the G/I
    integration boundary.
+
+Compiler implementation requires no D1 migration or D2–D6 repository change.
+Flow and Global variable execution will require their separately approved
+execution-state extension later; local compilation alone does not create those
+tables or move that work into Phase D.
 
 ## Main business flow and acceptance evidence
 

@@ -40,6 +40,12 @@ logging, local discovery and authentication, and the minimal Local API. Workflow
 validation, persistence, Android/ADB control, node execution, artifacts, and
 event streaming remain owned by later phases.
 
+The C9 local compilation endpoint reuses this implemented foundation: B5
+authenticates the request, and B6's router invokes compilation through the
+existing workflow validation handler and service. Compilation adds no Phase B setting,
+supervised component, connection file field, background goroutine, or database.
+Its behavior and tests remain Phase C responsibilities.
+
 ### Maintainer map
 
 | Area | Current code owner | Maintenance responsibility |
@@ -179,6 +185,13 @@ without leaking owned goroutines or credentials.
 
 ## Completion against the original Phase B documents
 
+The approved MVP adds UI ownership as a follow-up to the implemented
+standalone foundation. B3 owns the child process lifetime and bounded
+shutdown. B5 delivers credentials to the owning native app over the private
+channel. The Runtime child and private handoff are implemented and verified
+with a Linux test parent. Native Windows and desktop client integration
+remain pending.
+
 **Implementation status: completed.** The current Runtime source implements the
 approved responsibilities and boundaries from the original B1–B6 documents:
 
@@ -195,6 +208,8 @@ approved responsibilities and boundaries from the original B1–B6 documents:
 No Phase B behavior has been intentionally moved to a future phase. Later
 phases extend this foundation with validation, devices, execution, artifacts,
 and events instead of redefining its lifecycle or authentication boundary.
+C9 is registered on the existing authenticated router and uses the same
+standalone readiness and connection-file handoff.
 
 This completion statement records implementation against the approved Phase B
 specifications. The progress table remains the verification record: the

@@ -58,6 +58,11 @@ establish whether the Android operation completed, failed, or never began.
    if the client intends to run again.
 
 Recovery must not overlap a live writer from a different Runtime process.
+An intentional UI shutdown settles and commits terminal execution state through
+H6 before closing SQLite. The next D6 startup check has no recovery writes for
+that run. Owner loss, a forced exit, or an expired shutdown deadline can leave
+unfinished rows. D6 handles those rows using the same interruption rules.
+
 Exclusive store ownership is a prerequisite, not a retry strategy.
 If recovery fails, close the storage component under the supervisor's
 shutdown policy and release ownership. Preserve the database for diagnosis.

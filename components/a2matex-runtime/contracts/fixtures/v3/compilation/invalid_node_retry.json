@@ -1,0 +1,96 @@
+{
+  "editorGraph": {
+    "schemaVersion": 1,
+    "entryNodeId": "start",
+    "nodes": [
+      {
+        "id": "start",
+        "type": "flow.start",
+        "config": {},
+        "bindings": {},
+        "errorPolicy": "STOP",
+        "editor": {
+          "x": 50,
+          "y": -15,
+          "label": "Studio only"
+        }
+      },
+      {
+        "id": "tap",
+        "type": "android.tap",
+        "config": {
+          "targetMode": "ABSOLUTE_PIXELS"
+        },
+        "bindings": {
+          "x": {
+            "kind": "LITERAL",
+            "value": 20
+          },
+          "y": {
+            "kind": "LITERAL",
+            "value": 30
+          }
+        },
+        "errorPolicy": "STOP",
+        "editor": {
+          "x": 50,
+          "y": -15,
+          "label": "Studio only"
+        },
+        "retryPolicy": {
+          "delayMs": -1
+        }
+      },
+      {
+        "id": "end",
+        "type": "flow.end",
+        "config": {},
+        "bindings": {},
+        "errorPolicy": "STOP",
+        "editor": {
+          "x": 50,
+          "y": -15,
+          "label": "Studio only"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "e1",
+        "sourceNodeId": "start",
+        "sourcePort": "success",
+        "targetNodeId": "tap"
+      },
+      {
+        "id": "e2",
+        "sourceNodeId": "tap",
+        "sourcePort": "success",
+        "targetNodeId": "end"
+      }
+    ]
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {},
+    "required": [],
+    "additionalProperties": false
+  },
+  "validation": {
+    "status": "INVALID",
+    "errors": [
+      {
+        "code": "EDITOR_GRAPH_CONTRACT_INVALID",
+        "message": "Editor Graph does not match the required contract",
+        "path": [
+          "nodes",
+          1,
+          "retryPolicy",
+          "delayMs"
+        ]
+      }
+    ],
+    "warnings": [],
+    "truncated": false
+  },
+  "runtimeIr": null
+}

@@ -1,7 +1,8 @@
 # Android targeting contract
 
-**Status:** Planned execution contract. Implementation belongs to Runtime
-Phases E–G and Studio integration.
+**Status:** Planned compilation and execution contract. Compilation belongs to
+Runtime C7–C9, target resolution and execution belong to F/G, and Studio client
+integration belongs to I1.
 
 ## Overview
 
@@ -26,11 +27,12 @@ flowchart LR
 
 Studio discovers available modes and their authoring fields from the Backend
 Node Definition `editorHints.targeting.modes`; it does not maintain a separate
-`TARGET_FIELDS` map. Backend authoritative compilation and Studio local
-compilation use that definition. The Runtime keeps an independent local
-validation contract because execution cannot depend on a live catalog request.
-Cross-language parity fixtures must keep the Runtime rules aligned with the
-published catalog.
+`TARGET_FIELDS` map. Backend authoritative compilation uses the frozen Node
+Definition selected for the Workflow Revision. Runtime local compilation uses
+the equivalent immutable C7 installed contract and never accepts definitions
+or defaults from Studio. Runtime validation and execution cannot depend on a
+live catalog request. Cross-language compiler and validation fixtures keep the
+installed Runtime rules aligned with the published catalog contract.
 
 Keep the node ID and handler identity. Copy the required
 `config.targetMode`. Map each Editor Graph binding
@@ -68,8 +70,10 @@ the attempt timeout to finish. Selector IDs use the full Android resource ID.
 ## Integration gates
 
 Runtime must wire this component to the device inventory, executable IR
-admission, handler registry, workflow runner, and checkpoints. Studio owns
-the compiler integration. Backend and Launcher keep capability gating tied
-to the Runtime build verified on real devices. Catalog presence alone is
-authoring availability. Real-device checks must cover current display and
-hierarchy output on the supported Android versions before enabling Test Run.
+admission, handler registry, workflow runner, and checkpoints. Runtime owns the
+C7–C9 local compiler and F/G target resolution. Studio owns authoring, source
+snapshot capture, API invocation, and cache freshness; it does not implement
+the mapping. Backend and Launcher keep capability gating tied to the Runtime
+build verified on real devices. Catalog presence alone is authoring
+availability. Real-device checks must cover current display and hierarchy
+output on the supported Android versions before enabling Test Run.

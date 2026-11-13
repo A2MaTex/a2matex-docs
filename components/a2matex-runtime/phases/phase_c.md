@@ -1,27 +1,34 @@
-# Phase C — Local Workflow Validation
+# Phase C — Local Workflow Validation and Compilation
 
-Phase C adds deterministic Editor Graph validation to the local Runtime Agent.
-It lets Studio identify authoring problems before compilation, persistence, run
-creation, ADB discovery, or device commands. The Runtime implements the
-approved validation behavior independently in Go and validates against the
-contracts supported by that installed Runtime.
+Phase C adds deterministic Editor Graph validation and content-only Runtime IR
+compilation to the local Runtime Agent. Studio supplies `editorGraph` and
+`inputSchema`; it does not reproduce compiler rules. The Runtime validates
+against its installed contracts, then either returns one complete Runtime IR or
+no IR. Both operations happen before persistence, run creation, ADB discovery,
+or device commands.
 
 ```mermaid
 flowchart LR
-    Studio[Publisher authoring in Studio] -->|C5 authenticated request| API[Local validation API]
+    Studio[Publisher authoring in Studio] -->|C5 validate| API[Local validation API]
+    Studio -->|C9 compile graph + input schema| CompileAPI[Local compilation API]
     API --> C2[C2 strict graph decoder]
+    CompileAPI --> C2
     C2 -->|contract invalid| C1[C1 bounded result]
     C2 -->|typed graph| C3[C3 topology validator]
     C3 --> C4[C4 node-contract validator]
     C3 --> C1
     C4 --> C1
     C1 -->|VALID or INVALID| Studio
+    C4 -->|valid for compilation| C7[C7 installed compilation registry]
+    C7 --> C8[C8 pure Runtime IR compiler]
+    C8 -->|complete IR or diagnostics; never partial IR| Studio
     C6[C6 Backend test parity] -. verifies .-> C1
     C6 -. verifies .-> C2
     C6 -. verifies .-> C3
     C6 -. verifies .-> C4
 
-    C4 -->|stop after validation| Stop[No save, compile, run, ADB, or command]
+    C4 -->|validation route stops here| Stop[No save, compile, run, ADB, or command]
+    C8 -->|compilation also stops here| NoEffects[No save, run, ADB, or command]
 
     Launcher[Customer through Launcher] --> ProdAPI[Production package API family]
     ProdAPI --> G1[G1 Runtime IR admission]
@@ -32,12 +39,11 @@ flowchart LR
     G1 -. no Phase C diagnostic disclosure .-> Launcher
 ```
 
-The smallest end-to-end flow is: Studio submits one graph through the protected
-loopback API, C2 establishes a strict typed document, C3 and C4 produce findings,
-and C1 returns a stable bounded result. C5 exposes that pipeline and C6 verifies
-its Backend-reference behavior. A successful validation is authoring feedback only; it does
-not authorize execution, and G1 must still admit the exact Runtime IR supplied
-for a run.
+The validation flow remains C1–C5. C7–C9 add a separate compilation flow that
+reuses C1–C4, resolves installed node semantics and defaults, and emits the A2
+contract. C5 is not converted into a compiler. A successful validation or
+compilation does not authorize execution; G1 must still admit the exact Runtime
+IR supplied for a run.
 
 ## Operating contexts and disclosure boundary
 
@@ -60,7 +66,8 @@ creation and device commands, but does not normally terminate the Runtime Agent.
 
 | Context | Input and validator | External result | Stop boundary |
 |---|---|---|---|
-| Studio authoring | Plaintext Editor Graph through C1-C5 | Bounded detailed diagnostics | No save, compile, run, ADB, or command |
+| Studio validation | Plaintext Editor Graph through C1–C5 | Bounded detailed diagnostics | No save, compile, run, ADB, or command |
+| Studio compilation | Plaintext Editor Graph and Input Schema through C1–C4 and C7–C9 | Bounded diagnostics plus complete Runtime IR on success | No save, run, ADB, or command |
 | Launcher Product run | Protected package through I2 and exact decrypted Runtime IR through G1 | Generic `VALIDATION_FAILED` | No run creation or device command |
 
 Both API families may be registered concurrently. Runtime does not need a
@@ -75,11 +82,14 @@ the decrypted workflow or Phase C diagnostics.
 | ID | Module | Status |
 |---|---|---|
 | C1 | Validation contracts | Implemented and verified in Runtime |
-| C2 | Editor Graph decoder | Implemented and verified in Runtime |
+| C2 | Editor Graph decoder | Implemented with node-level timeout and retry overrides |
 | C3 | Topology validator | Implemented and verified in Runtime |
-| C4 | Node-contract validator | Implemented and verified in Runtime |
+| C4 | Node-contract validator | Implemented with updated Wait Variable and binding checks |
 | C5 | Local validation API | Implemented and verified in Runtime |
-| C6 | Backend validation test parity | 28 shared exact-result cases passing in Backend and Runtime working trees; delivery commits pending |
+| C6 | Backend validation test parity | Binding and targeting parity fixtures updated and passing in Runtime |
+| C7 | Installed compilation registry | Implemented and verified in Runtime |
+| C8 | Pure Runtime IR compiler | Implemented and verified in Runtime |
+| C9 | Local compilation API | Implemented and verified in Runtime |
 
 Each sub-phase is specified, approved, implemented, and verified separately.
 The status below reflects the current Runtime code and verification evidence,
@@ -106,7 +116,9 @@ C2 strictly converts size-bounded Editor Graph JSON into a typed Go value. It
 rejects unknown, missing, null, and wrongly typed fields; preserves opaque valid
 JSON in `config` and `bindings`; and separates malformed v1 content from a
 structurally meaningful but unsupported schema version. Duplicate JSON property
-names follow the Backend's last-write-wins transport behavior. C2 returns no
+names follow the Backend's last-write-wins transport behavior. Nodes also
+accept optional `timeoutMs` and optional `retryPolicy.maxAttempts` and
+`retryPolicy.delayMs`. C2 returns no
 partial graph after a structural contract failure. A structurally valid
 v1-shaped document with an unsupported positive version continues to C3 and C4
 for Studio so the Publisher receives that version finding beside every
@@ -132,13 +144,15 @@ Reference:
 
 ## C4 — Node-Contract Validator
 
-**Status:** Implemented and verified in Runtime
+**Status:** Implemented with updated Wait Variable and binding checks
 
 C4 defines an immutable installed node-contract registry and validates node
 types, source ports, and static `config` in bounded linear work. The Runtime
 registry, not the Backend database, is authoritative for local authoring
-validation. It remains separate from the later executable handler registry, so
-C4 does not populate `runtime-info.supportedNodes` or claim execution support.
+validation. It remains separate from the executable handler registry and the C7
+compilation registry. `flow.wait_variable.config` contains only `name`; its
+deadline comes from the effective node-level timeout. The validator also
+checks ordinary-node success and error edge counts against Backend rules.
 
 Reference:
 
@@ -159,7 +173,7 @@ Reference:
 
 ## C6 — Cross-Language Parity
 
-**Status:** Backend and Runtime parity suites implemented and verified in the current working trees; delivery commits pending
+**Status:** Updated and verified in Runtime against the checked-out Backend fixtures
 
 C6 gives every functional validation-result case from the implemented Backend
 workflow-validation model, validator, and service tests the same stable ID and
@@ -169,25 +183,67 @@ status, ordered diagnostic codes, references, paths, warnings, and truncation.
 Only presentation message text and implementation-specific transport behavior
 are excluded. The exact suite also aligned the Backend result sorter with C1's
 portable path-segment ordering after it exposed a real empty-path ordering
-difference.
+difference. The updated shared binding and targeting fixtures cover uppercase
+binding kinds and the revised Wait Variable config. The compilation fixture set
+records complete Backend IR and diagnostics and compares the same JSON values
+in Runtime. Shared port-count cases verify both authoring routes on valid and
+invalid ordinary transitions.
 
 Reference:
 
 - [C6 — Cross-Language Validation Parity](../local_workflow_validation/c6_cross_language_parity.md)
 
+## C7 — Installed Compilation Registry
+
+**Status:** Implemented and verified in Runtime
+
+C7 is an immutable Runtime-owned registry used only to compile source content.
+For every supported node type it provides the `runtimeHandler`, default timeout,
+minimum Runtime version, capabilities, input/output contracts, ports, and other
+semantics required by A2. Studio cannot submit or override these definitions.
+The Backend compiler instead uses the exact frozen Node Definitions selected for
+the Workflow Revision. C7 may reuse immutable values with C4, but it must remain
+distinguishable from authoring validation and from the registry of handlers that
+are actually executable.
+
+## C8 — Pure Runtime IR Compiler
+
+**Status:** Implemented and verified in Runtime
+
+C8 accepts a successfully decoded Editor Graph, an Input Schema, and C7. It
+performs the complete validation required for compilation, maps uppercase
+Editor Graph binding `kind` values to uppercase Runtime IR input `source`
+values, resolves node-level timeout and retry defaults, derives minimum Runtime
+version and deduplicated capabilities, removes editor-only fields, and strictly
+validates the produced A2 document. It preserves source node and edge order;
+sorting is not required. Any error diagnostic returns no Runtime IR; warnings
+may accompany a complete IR. Input values are never mutated.
+
+## C9 — Local Compilation API
+
+**Status:** Implemented and verified in Runtime
+
+C9 exposes authenticated `POST /api/v1/workflow-compilation`. The request
+contains exactly `editorGraph` and `inputSchema`; it contains no Project Draft
+ID, expected version, Node Definitions, or execution data. A completed request
+returns the bounded validation result and either a complete `runtimeIr` or
+`null`. It performs no Project Draft, SQLite, run, device, ADB, or queue write.
+Studio may cache a successful result in the same local Project Draft shape used
+for cloud sync, but that cache ownership is outside Runtime.
+
 ## Phase boundary
 
 The Stage 1 targeting extension adds mode-specific literal checks and Long
-Press authoring support to C4. Studio can use the same validation endpoint
-for these drafts and should gate Test Run on executable Runtime support.
-Runtime IR compilation and Android execution belong to Stage 2.
+Press authoring support to C4. C7–C9 compile those validated targeting fields;
+Android execution remains a later phase.
 
-Phase C answers whether an Editor Graph is valid for local authoring against the
-installed Runtime's supported contracts. The same Runtime may also expose the
-separate later Production API family, but Phase C does not:
+Phase C answers whether an Editor Graph is valid for local authoring and can
+produce a local Test Run IR against the installed Runtime's supported
+contracts. The same Runtime may also expose the separate later Production API
+family, but Phase C does not:
 
 - save a Project or Draft;
-- compile or admit Runtime IR;
+- persist or admit Runtime IR;
 - create a RunGroup or execution record;
 - inspect device availability;
 - invoke ADB or any device command;
@@ -201,21 +257,14 @@ registry, or executable package require their owning validation again.
 
 ## Phase C gate
 
-Phase C is complete when Studio can submit plaintext Editor Graphs through the
-authenticated local endpoint and every required C6 Backend reference case
-returns the same normalized functional response from Backend and Runtime.
-Validation must perform no database write, create no run, and invoke no ADB
-command.
+Phase C is complete when Studio can validate and compile plaintext source
+through separate authenticated endpoints; the same accepted source produces
+the exact expected Runtime IR; invalid source produces deterministic bounded
+diagnostics and no partial IR; and C6 plus the new compiler fixtures pass in all
+consumers. Neither endpoint may write a database, create a run, or invoke ADB.
 
-The functional gate is implemented and verified in the current Backend and
-Runtime working trees. Both exact suites pass all 28 shared stable IDs; focused
-C1-C5 tests cover result assembly, strict decoding, topology, node contracts,
-and the Runtime-specific transport boundary. Full Runtime normal and race tests,
-the full Backend test suite, and both builds pass. An authenticated loopback
-black-box check verified `VALID`, detailed `INVALID`, session-token rotation,
-old-token rejection after restart, and new-token acceptance.
-
-The two immutable fixtures remain pinned to Backend commit
-`f7e6ef8b89c8d1b5a70e1d921fdae022b8aa75e8`. Delivery commit IDs are still
-pending because the implementation agent did not create Git commits; this is a
-release-handoff item rather than a functional Phase C gap.
+Runtime implements and tests both routes and the checked-out Backend fixture
+baseline. The installed definition snapshot includes the Backend
+`feat/node-binding-kind` staged rules. Release the matching snapshot with the
+final Backend catalog. Studio integration and G1 run admission are separate
+milestones.

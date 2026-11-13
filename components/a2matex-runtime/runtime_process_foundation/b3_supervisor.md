@@ -1,6 +1,6 @@
 # B3 — Runtime Supervisor
 
-**Status:** Standalone supervisor implemented. UI-managed ownership is approved for MVP and pending implementation.
+**Status:** Standalone supervisor and managed child lifecycle implemented. Linux parent-harness verification passed. Native Windows and active-run shutdown verification are pending.
 
 **Phase:** B3 — Runtime process foundation
 
@@ -124,10 +124,27 @@ after D6 succeeds and the local listener is ready.
 | Owner channel closes unexpectedly | Block further work, perform bounded cleanup, and exit. D6 processes any unfinished rows at the next start. |
 | Shutdown deadline expires | Exit after bounded cleanup. Preserve durable results and let D6 handle unfinished rows. |
 
-The owner waits for actual process exit before displaying **Stopped**. A new
-launch requires an explicit user action. Verify ready startup, idle stop,
-owner loss, and competing launches with a test parent process before wiring
-the desktop apps. Verify cancellation during a real run before client release.
+The owner waits for actual process exit before displaying **Stopped**.
+After an unexpected child exit, lost control channel, or failed bounded A7
+readiness probe, the native client invalidates the session. For pending work
+it starts one replacement from the installed executable path. If the old
+child still runs, the client requests bounded shutdown, terminates it if
+necessary, and waits for confirmed exit before launching the replacement.
+If exit cannot be confirmed, startup fails. Concurrent requests share the
+same replacement. A failed replacement or store conflict is reported to all
+waiting callers and ends that attempt without a restart loop.
+
+An explicit **Shut down Runtime** or owner exit suppresses automatic launch
+immediately. Only a subsequent explicit Runtime action in the owning app
+clears that suppression. A child killed outside the app is an unexpected exit,
+so the next request can trigger a replacement.
+
+Before wiring the desktop apps, use a test parent to verify readiness, idle
+shutdown and relaunch suppression, owner loss, competing launches, an
+externally killed child, and a live child with an unresponsive API. Verify
+that concurrent requests share one replacement and that a failed replacement
+leaves requests unsent. Verify cancellation during a real run before client
+release.
 
 ## Current B3 scope
 

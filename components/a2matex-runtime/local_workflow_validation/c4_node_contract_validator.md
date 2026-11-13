@@ -38,6 +38,17 @@ all findings to C1. C4 validates authoring content only. It does not register a
 handler, claim that a node can execute, populate `runtime-info.supportedNodes`,
 or authorize a run.
 
+## Ordinary node transitions
+
+For each recognized node other than End and Switch, require exactly one
+outgoing `success` edge. Require exactly one outgoing `error` edge for
+`ERROR_BRANCH` and zero for `STOP`. Count edges by source node and port,
+including distinct edge IDs that point to the same target. An invalid count
+reports `NODE_PORT_EDGE_COUNT_INVALID` with the node ID and path
+`["nodes", index, "ports", port]`. Switch and End retain their own transition
+rules. Both Runtime authoring routes apply this check, and compilation emits
+`runtimeIr: null` when the graph is invalid.
+
 ## 1. Responsibility
 
 C4 owns:

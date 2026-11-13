@@ -1,3 +1,5 @@
+> Runtime integration entry point for this team: [Managed process and API guide](../a2matex-runtime/integration/launcher.md).
+
 A2MaTeX Launcher là ứng dụng Windows dành cho customer. Nó là lớp giao diện và điều phối bên ngoài Runtime Agent:
 
 ```text

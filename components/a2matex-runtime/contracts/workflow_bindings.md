@@ -4,15 +4,19 @@
 
 Publishers can reuse a declared node output directly or save a value under a
 name for later nodes. Backend and local Runtime validate the authoring contract;
-the Backend compiler maps the accepted forms into executable Runtime IR.
+the Backend authoritative compiler and Runtime local compiler map the accepted
+forms into the same executable Runtime IR. Studio only constructs source data
+and calls the Runtime compiler.
 
 ```mermaid
 flowchart LR
   C[Node Catalog fields] --> S[Studio binding picker]
   S --> V[Backend and Runtime authoring validators]
   V -->|Invalid reference| X[Diagnostic at consumer input]
-  V -->|Valid graph| G[Backend compiles executable Runtime IR]
-  G --> D[Runtime resolves reads and commits writes]
+  V -->|Submission| B[Backend compiles with frozen definitions]
+  V -->|Local Test Run| R[Runtime compiles with installed definitions]
+  B --> D[Runtime resolves reads and commits writes]
+  R --> D
 ```
 
 ## Editor Graph v1 binding extension
@@ -52,6 +56,9 @@ unavailable choices where a path skips the producer or can follow its error
 edge. Tap, Swipe, and Long Press expose no data fields. Screenshot exposes
 `artifactId`. The validators cache one success-edge bypass analysis per
 referenced producer, so multiple bindings to that producer reuse the result.
+Studio sends `editorGraph` and `inputSchema` to the authenticated Runtime local
+compilation API. It may cache the returned Runtime IR, but does not implement
+the mapping below or supply trusted Node Definitions.
 
 ## Runtime IR mapping
 

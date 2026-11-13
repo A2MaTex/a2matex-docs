@@ -1,0 +1,92 @@
+{
+  "editorGraph": {
+    "schemaVersion": 1,
+    "entryNodeId": "start",
+    "nodes": [
+      {
+        "id": "start",
+        "type": "flow.start",
+        "config": {},
+        "bindings": {},
+        "errorPolicy": "STOP",
+        "editor": {
+          "x": 50,
+          "y": -15,
+          "label": "Studio only"
+        }
+      },
+      {
+        "id": "delay",
+        "type": "flow.delay",
+        "config": {},
+        "bindings": {
+          "durationMs": {
+            "kind": "WORKFLOW_INPUT",
+            "inputName": "duration"
+          }
+        },
+        "errorPolicy": "STOP",
+        "editor": {
+          "x": 50,
+          "y": -15,
+          "label": "Studio only"
+        },
+        "timeoutMs": 2500,
+        "retryPolicy": {
+          "maxAttempts": 2
+        }
+      },
+      {
+        "id": "end",
+        "type": "flow.end",
+        "config": {},
+        "bindings": {},
+        "errorPolicy": "STOP",
+        "editor": {
+          "x": 50,
+          "y": -15,
+          "label": "Studio only"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "e1",
+        "sourceNodeId": "start",
+        "sourcePort": "success",
+        "targetNodeId": "delay"
+      },
+      {
+        "id": "e2",
+        "sourceNodeId": "delay",
+        "sourcePort": "success",
+        "targetNodeId": "end"
+      }
+    ]
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {},
+    "required": [],
+    "additionalProperties": false
+  },
+  "validation": {
+    "status": "INVALID",
+    "errors": [
+      {
+        "code": "NODE_VALUE_BINDING_INVALID",
+        "message": "Node input binding is invalid or its source is unavailable",
+        "nodeId": "delay",
+        "path": [
+          "nodes",
+          1,
+          "bindings",
+          "durationMs"
+        ]
+      }
+    ],
+    "warnings": [],
+    "truncated": false
+  },
+  "runtimeIr": null
+}

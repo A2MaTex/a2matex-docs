@@ -190,33 +190,13 @@ Khi tất cả device executions kết thúc
 Nếu MVP chưa có group-level workflow, Launcher có thể thực hiện bước tổng hợp qua một handler riêng sau khi Run Group Coordinator hoàn tất.
 
 
-# 19. Nếu Launcher đóng nhưng background job vẫn chạy thì sao?
+# 19. Vòng đời Runtime khi đóng Launcher hoặc Studio
 
-Runtime Agent nên là process độc lập với Launcher UI.
+Trong MVP, ứng dụng khởi chạy Runtime là ứng dụng sở hữu tiến trình đó.
+Khi đang chạy workflow, hộp thoại thoát cho phép **Dừng và thoát** hoặc
+**Tiếp tục mở ứng dụng**. Khi người dùng xác nhận dừng, Runtime chặn thao
+tác mới, ghi trạng thái cuối cùng và sự kiện vào SQLite rồi thoát. Nếu ứng
+dụng gặp sự cố, Runtime dọn dẹp trong thời hạn cho phép và thoát. D6 đánh
+dấu phần việc chưa hoàn tất là `INTERRUPTED` ở lần khởi động tiếp theo.
 
-## MVP đơn giản
-
-```text
-Launcher mở → Agent chạy
-Launcher đóng → hỏi:
-  "Stop running workflows?"
-  "Keep Agent running in background?"
-```
-
-Nếu chọn tiếp tục:
-
-- Launcher UI đóng;
-- Agent vẫn chạy ở system tray;
-- workflow tiếp tục;
-- khi mở lại Launcher, UI gọi `/v1/runs`;
-- Agent đọc trạng thái từ SQLite và hiển thị lại.
-
-Không nên triển khai Windows Service ngay vì LDPlayer và ADB thường chạy trong user session. Một **per-user background process/tray application** dễ quản lý hơn.
-
-## Studio development mode
-
-Khi Studio đóng:
-
-- nếu đang test, mặc định cancel;
-- hoặc cảnh báo trước khi đóng;
-- không cần giữ development run lâu dài.
+Xem [quy tắc sở hữu Runtime trong B3](runtime_process_foundation/b3_supervisor.md#ui-managed-runtime-for-mvp).

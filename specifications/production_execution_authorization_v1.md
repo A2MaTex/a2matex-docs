@@ -276,9 +276,12 @@ for idempotency and stops retrying at the current lease deadline. Authorization
 denial, revoked entitlement, disabled release, package mismatch, and invalid
 session binding are not blind-retry conditions.
 
-If Launcher exits completely, Runtime may continue only until the current
-lease expires. Launcher therefore keeps a background/system-tray process while
-a Product Run needs renewal.
+Launcher owns the Runtime it starts for a Product Run. During an active run,
+Launcher offers **Stop and exit** or **Stay open**. On confirmed exit, the
+Runtime blocks new work, settles the run within the shutdown deadline, saves
+terminal state, and exits. If Launcher disappears unexpectedly, the Runtime
+stops dispatch and exits after bounded cleanup. D6 handles unfinished state
+at the next start. Lease enforcement remains active throughout shutdown.
 
 ## 8. Hard expiry and resume
 

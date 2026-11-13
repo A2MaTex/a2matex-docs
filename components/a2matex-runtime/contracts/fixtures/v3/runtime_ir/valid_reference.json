@@ -1,0 +1,233 @@
+{
+  "formatVersion": 1,
+  "minimumRuntimeVersion": "0.1.0",
+  "metadata": {
+    "sourceGraphSchemaVersion": 1
+  },
+  "entryNodeId": "start_01",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "packageName": {
+        "type": "string",
+        "minLength": 3,
+        "maxLength": 255
+      },
+      "tapY": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 100000
+      }
+    },
+    "required": ["packageName", "tapY"],
+    "additionalProperties": false
+  },
+  "nodes": [
+    {
+      "id": "start_01",
+      "type": "flow.start",
+      "runtimeHandler": "flow.start",
+      "config": {},
+      "inputs": {},
+      "timeoutMs": 1000,
+      "retryPolicy": {
+        "maxAttempts": 1,
+        "delayMs": 0
+      },
+      "errorPolicy": "STOP"
+    },
+    {
+      "id": "launch_01",
+      "type": "android.launch_app",
+      "runtimeHandler": "android.launch_app",
+      "config": {},
+      "inputs": {
+        "packageName": {
+          "source": "WORKFLOW_INPUT",
+          "inputName": "packageName"
+        }
+      },
+      "timeoutMs": 30000,
+      "retryPolicy": {
+        "maxAttempts": 2,
+        "delayMs": 1000
+      },
+      "errorPolicy": "ERROR_BRANCH"
+    },
+    {
+      "id": "delay_01",
+      "type": "flow.delay",
+      "runtimeHandler": "flow.delay",
+      "config": {},
+      "inputs": {
+        "durationMs": {
+          "source": "LITERAL",
+          "value": 1000
+        }
+      },
+      "timeoutMs": 5000,
+      "retryPolicy": {
+        "maxAttempts": 1,
+        "delayMs": 0
+      },
+      "errorPolicy": "ERROR_BRANCH"
+    },
+    {
+      "id": "tap_01",
+      "type": "android.tap",
+      "runtimeHandler": "android.tap",
+      "config": {"targetMode": "ABSOLUTE_PIXELS"},
+      "inputs": {
+        "x": {
+          "source": "LITERAL",
+          "value": 100
+        },
+        "y": {
+          "source": "LITERAL",
+          "value": 100
+        }
+      },
+      "timeoutMs": 30000,
+      "retryPolicy": {
+        "maxAttempts": 2,
+        "delayMs": 1000
+      },
+      "errorPolicy": "ERROR_BRANCH"
+    },
+    {
+      "id": "screenshot_01",
+      "type": "android.screenshot",
+      "runtimeHandler": "android.screenshot",
+      "config": {},
+      "inputs": {},
+      "timeoutMs": 30000,
+      "retryPolicy": {
+        "maxAttempts": 2,
+        "delayMs": 1000
+      },
+      "errorPolicy": "ERROR_BRANCH"
+    },
+    {
+      "id": "success_log_01",
+      "type": "utility.log",
+      "runtimeHandler": "utility.log",
+      "config": {},
+      "inputs": {
+        "message": {
+          "source": "NODE_OUTPUT",
+          "nodeId": "screenshot_01",
+          "field": "artifactId"
+        }
+      },
+      "timeoutMs": 1000,
+      "retryPolicy": {
+        "maxAttempts": 1,
+        "delayMs": 0
+      },
+      "errorPolicy": "STOP"
+    },
+    {
+      "id": "failure_log_01",
+      "type": "utility.log",
+      "runtimeHandler": "utility.log",
+      "config": {},
+      "inputs": {
+        "message": {
+          "source": "LITERAL",
+          "value": "Workflow step failed"
+        }
+      },
+      "timeoutMs": 1000,
+      "retryPolicy": {
+        "maxAttempts": 1,
+        "delayMs": 0
+      },
+      "errorPolicy": "STOP"
+    },
+    {
+      "id": "end_01",
+      "type": "flow.end",
+      "runtimeHandler": "flow.end",
+      "config": {},
+      "inputs": {},
+      "timeoutMs": 1000,
+      "retryPolicy": {
+        "maxAttempts": 1,
+        "delayMs": 0
+      },
+      "errorPolicy": "STOP"
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge_start_launch",
+      "sourceNodeId": "start_01",
+      "sourcePort": "success",
+      "targetNodeId": "launch_01"
+    },
+    {
+      "id": "edge_launch_delay",
+      "sourceNodeId": "launch_01",
+      "sourcePort": "success",
+      "targetNodeId": "delay_01"
+    },
+    {
+      "id": "edge_launch_error",
+      "sourceNodeId": "launch_01",
+      "sourcePort": "error",
+      "targetNodeId": "failure_log_01"
+    },
+    {
+      "id": "edge_delay_tap",
+      "sourceNodeId": "delay_01",
+      "sourcePort": "success",
+      "targetNodeId": "tap_01"
+    },
+    {
+      "id": "edge_delay_error",
+      "sourceNodeId": "delay_01",
+      "sourcePort": "error",
+      "targetNodeId": "failure_log_01"
+    },
+    {
+      "id": "edge_tap_screenshot",
+      "sourceNodeId": "tap_01",
+      "sourcePort": "success",
+      "targetNodeId": "screenshot_01"
+    },
+    {
+      "id": "edge_tap_error",
+      "sourceNodeId": "tap_01",
+      "sourcePort": "error",
+      "targetNodeId": "failure_log_01"
+    },
+    {
+      "id": "edge_screenshot_log",
+      "sourceNodeId": "screenshot_01",
+      "sourcePort": "success",
+      "targetNodeId": "success_log_01"
+    },
+    {
+      "id": "edge_screenshot_error",
+      "sourceNodeId": "screenshot_01",
+      "sourcePort": "error",
+      "targetNodeId": "failure_log_01"
+    },
+    {
+      "id": "edge_success_log_end",
+      "sourceNodeId": "success_log_01",
+      "sourcePort": "success",
+      "targetNodeId": "end_01"
+    },
+    {
+      "id": "edge_failure_log_end",
+      "sourceNodeId": "failure_log_01",
+      "sourcePort": "success",
+      "targetNodeId": "end_01"
+    }
+  ],
+  "requiredCapabilities": [
+    "android.device.control",
+    "android.screen.capture"
+  ]
+}

@@ -7,9 +7,9 @@
 ## 1. Purpose and responsibility
 
 A7 defines the authenticated HTTP/JSON and Server-Sent Events boundary used by
-Studio to validate and execute a complete draft workflow. It projects the
-accepted A2–A6 contracts; it does not create another workflow, device, state,
-event, or error model.
+Studio to validate, compile, and execute a complete draft workflow. It projects
+the accepted A2–A6 contracts; it does not create another workflow, device,
+state, event, or error model.
 
 ```text
 Studio native process
@@ -51,11 +51,19 @@ Authorization: Bearer <local-session-token>
 
 The token is never accepted in a URL, query parameter, cookie, request body,
 event, or log. B5 generates a cryptographically random token at each Runtime
-startup and publishes the API base URL and token through a per-user Runtime
-connection file with operating-system access restricted to the current user.
+startup. In standalone development it publishes the API base URL and token
+through a per-user Runtime connection file restricted to the current user.
 The file is written atomically and removed on clean shutdown. This mechanism
 does not claim to protect a user from another process already running with the
 same fully compromised OS account.
+
+For an approved UI-managed launch, the child hands the API base URL and fresh
+session token to its owning native app on the private control channel after
+startup recovery and listener readiness. The owner requests process shutdown
+on that same channel. HTTP run actions apply to workflow state. The standalone
+development handoff uses the protected connection file described below.
+See [B3 ownership](../runtime_process_foundation/b3_supervisor.md#ui-managed-runtime-for-mvp)
+and [B5 managed credentials](../runtime_process_foundation/b5_local_authentication.md#managed-launch-credential-handoff).
 
 The connection file is a strict `runtime-connection.json` object:
 
@@ -79,6 +87,7 @@ The Development MVP exposes exactly:
 | `GET /api/v1/health` | Minimal unauthenticated process liveness |
 | `GET /api/v1/runtime-info` | Authenticated compatibility handshake |
 | `POST /api/v1/workflow-validation` | Content-only Editor Graph validation |
+| `POST /api/v1/workflow-compilation` | Content-only Editor Graph and Input Schema compilation |
 | `GET /api/v1/devices` | Read the current in-memory inventory |
 | `POST /api/v1/devices/refresh` | Refresh and return the inventory |
 | `POST /api/v1/runs` | Idempotently admit one complete draft run |
@@ -165,14 +174,30 @@ This authenticated response is the v1 compatibility handshake:
 ```
 
 The `/api/v1` path is the API-version contract, so the body does not repeat an
-`apiVersion` field. This API is Development-only, so the response does not
-repeat a fixed mode. `supportedNodes` contains unique A2 type/handler pairs
+`apiVersion` field. Development and Production managed clients use this
+endpoint. The response omits a fixed mode. `supportedNodes` contains unique A2 type/handler pairs
 sorted by `type`. It does not expose handler versions, mutable catalog records,
 Go version, commit, build time, operating system, architecture, local paths, or
 configuration. Studio may use this response for early feedback, but G1 still
 validates the exact Runtime IR on every start request.
 
-## 6. Local Editor Graph validation
+### Managed request readiness
+
+Before every Runtime API operation, including opening or reconnecting an SSE
+stream, the native client checks the owned child and control channel and sends
+a bounded authenticated `GET /api/v1/runtime-info` probe. The probe itself is
+sent directly using the credentials from the private ready message. A valid
+authenticated response confirms readiness for that operation. Compatibility
+checks use the response separately.
+
+If readiness fails before the operation is sent, follow the B3 replacement
+policy and verify the new session before sending it. If transport fails after
+sending, the outcome may be unknown. Validation and compilation may be
+retried after readiness is restored. A run-start retry must reuse the original
+request ID and payload. Workflow diagnostics and ordinary operation error
+responses leave the Runtime session in place.
+
+## 6. Local source validation and compilation
 
 ### `POST /workflow-validation`
 
@@ -217,6 +242,73 @@ The result deliberately matches the approved Backend validation shape:
 
 C1 owns the closed diagnostic-code set and ordering. This endpoint performs no
 save, compilation, run creation, ADB discovery, or command execution.
+
+### `POST /workflow-compilation`
+
+Development mode only. The strict request contains exactly:
+
+```json
+{
+  "editorGraph": {},
+  "inputSchema": {}
+}
+```
+
+`editorGraph` is the same authoring document accepted by the validation route.
+`inputSchema` uses the A2 reduced schema. The request contains no Project Draft
+ID, expected version, Node Definitions, Runtime IR, device, or execution input.
+The complete request is limited to 2 MiB, while the Editor Graph retains its
+1 MiB limit.
+
+Completed validation and compilation return HTTP `200`. A successful response
+contains the complete A2 document:
+
+```json
+{
+  "validation": {
+    "status": "VALID",
+    "errors": [],
+    "warnings": [],
+    "truncated": false
+  },
+  "runtimeIr": {}
+}
+```
+
+An invalid source response uses the same bounded diagnostic contract and emits
+no partial IR:
+
+```json
+{
+  "validation": {
+    "status": "INVALID",
+    "errors": [],
+    "warnings": [],
+    "truncated": false
+  },
+  "runtimeIr": null
+}
+```
+
+Rules:
+
+- `runtimeIr` is non-null only for `VALID` or `VALID_WITH_WARNINGS` after the
+  generated document also passes strict A2 validation.
+- Runtime resolves definitions and defaults from its immutable installed C7
+  compilation registry. The client cannot supply trusted definitions.
+- Binding kinds and Runtime IR input sources use the accepted uppercase enum
+  values.
+- Missing node timeout and retry fields resolve according to A2; no compiler
+  default is written back into the Editor Graph.
+- The call is deterministic for the same content and installed Runtime build.
+  It performs no Project Draft write, Runtime SQLite write, run creation, ADB
+  operation, queue publication, or device command.
+- Studio may cache the returned IR in its own local Project Draft. G1 still
+  validates that exact IR and execution inputs when a run is requested.
+
+Malformed transport input returns the normal A7 `400`/`413` failure rather
+than a compilation response. An unexpected compiler failure returns `500` and
+must not expose a partial IR or protected source content.
 
 ## 7. Session device inventory
 
@@ -486,20 +578,22 @@ current node set, the only exposed artifact type is a validated PNG screenshot.
 | One group action endpoint | Per-device pause/resume/cancel endpoints |
 | One Runtime-wide SSE stream | WebSocket, filters, log streaming, command events |
 | Screenshot download by artifact ID | Upload/list/delete/path APIs and future artifact types |
-| Development Runtime IR request | Production package, license, lease, and authorization APIs |
+| Development source compilation and Runtime IR run request | Production package, license, lease, and authorization APIs |
 
 A7 defines wire contracts only. B5/B6 implement authentication and the minimal
-server, C5 implements validation, E7 implements devices, D/G/H implement
-execution reads and commands, D3 implements replay, D5 implements artifacts,
-and I1 integrates Studio.
+server, C5 implements validation, C9 implements compilation, E7 implements
+devices, D/G/H implement execution reads and commands, D3 implements replay,
+D5 implements artifacts, and I1 integrates Studio.
 
 ## 13. Checkout condition
 
 A7 is complete when Studio can authenticate without putting credentials in a
-URL, verify Runtime compatibility, validate an Editor Graph, refresh and select
-ADB endpoints, safely retry one start request, read and control its run, replay
-typed events from a Runtime-wide cursor, recover from expiry using a consistent
-snapshot, and retrieve a screenshot without access to a local path.
+URL, verify Runtime compatibility, validate an Editor Graph, compile source
+content into complete Runtime IR without persistence or execution side effects,
+refresh and select ADB endpoints, safely retry one start request, read and
+control its run, replay typed events from a Runtime-wide cursor, recover from
+expiry using a consistent snapshot, and retrieve a screenshot without access
+to a local path.
 
 A8 provides the [portable Local API and SSE cases](./contract_fixtures_v1.md)
 used by later Runtime and client contract tests.

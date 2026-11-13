@@ -7,7 +7,9 @@
 ## 1. Responsibility
 
 A8 supplies identical, portable input bytes and expected classifications for
-contracts implemented independently in Go and TypeScript. Its purpose is to
+contracts implemented independently in Go and TypeScript. The compilation
+extension additionally pairs Editor Graph and Input Schema inputs with an exact
+Runtime IR result or exact diagnostics. Its purpose is to
 detect a concrete failure: Studio or Backend accepts a document that Runtime
 rejects, or a client decodes an event/API payload differently from Runtime.
 
@@ -33,8 +35,8 @@ no contract tests yet. The old fake-ADB examples test process/device adapters,
 not cross-language JSON contracts, and therefore do not belong to A8.
 
 The existing [`runtime_ir_v1.example.json`](./runtime_ir_v1.example.json) is a
-useful accepted Runtime IR case and remains part of the fixture set rather than
-being duplicated.
+Runtime IR example. Version 3 pins a copy of it inside the fixture directory
+so future edits to the example cannot invalidate the manifest.
 
 ## 3. Canonical package
 
@@ -44,18 +46,17 @@ The canonical package is:
 contracts/
 ├── runtime_ir_v1.example.json
 ├── fixtures/v1/              # historical accepted set
-└── fixtures/v2/              # current set
+├── fixtures/v2/              # existing contract cases
+└── fixtures/v3/              # current set
     ├── manifest.json
-    ├── editor_graph/
-    ├── runtime_ir/
-    ├── event_error/
-    └── local_api/
+    ├── compilation/
+    └── runtime_ir/
 ```
 
-[`fixtures/v2/manifest.json`](./fixtures/v2/manifest.json) is the current
-machine-readable index. Fixture set v2 removes the redundant fixed `mode` from
-the A7 runtime-information response; v1 remains unchanged for historical
-consumers.
+[`fixtures/v3/manifest.json`](./fixtures/v3/manifest.json) carries forward
+18 prior payloads, pins the current Runtime IR example, and adds five compiler
+cases. Version 2 removes
+the redundant fixed `mode` from the A7 runtime-information response.
 
 All paths in it are relative to the `contracts` directory. Every payload has a
 SHA-256 digest so a vendored copy cannot be reformatted or changed silently.
@@ -85,7 +86,7 @@ Every case contains:
 | Field | Rule |
 |---|---|
 | `id` | Stable dotted identifier; tests report this value |
-| `contract` | `EDITOR_GRAPH_V1`, `RUNTIME_IR_V1`, `EXECUTION_EVENT_V1`, `RUNTIME_ERROR_V1`, or `LOCAL_API_V1` |
+| `contract` | `EDITOR_GRAPH_V1`, `RUNTIME_IR_V1`, `EXECUTION_EVENT_V1`, `RUNTIME_ERROR_V1`, `LOCAL_API_V1`, or `WORKFLOW_COMPILATION_V1` |
 | `path` | Safe relative path under `contracts`; no absolute path or `..` segment |
 | `sha256` | Lowercase digest of the exact payload bytes |
 | `expect` | Contract-specific classification and only the comparison fields required below |
@@ -124,9 +125,17 @@ JSON object property order is not compared after parsing. Array order, types,
 values, omitted fields, explicit nulls, and unknown-field rejection remain
 significant.
 
+### Workflow compilation
+
+Use the frozen definitions identified by `expect.definitions.path` and
+`expect.definitions.sha256`. Compile the payload's `editorGraph` and
+`inputSchema`. Compare the full `validation` result and the `runtimeIr` JSON
+value, including array order and explicit nulls. Invalid source must produce
+`runtimeIr: null`.
+
 ## 6. Fixture inventory
 
-The 19 cases are deliberately representative rather than exhaustive.
+Version 3 contains 24 cases.
 
 | Family | Cases | Boundary protected |
 |---|---:|---|
@@ -134,6 +143,7 @@ The 19 cases are deliberately representative rather than exhaustive.
 | Runtime IR | 4 | Rich valid reference, unsupported format, unknown field, recomputed capability mismatch |
 | Events and errors | 7 | All four A6 event variants, required correlation, valid error, unknown error field |
 | Local API and SSE | 5 | Compatibility response, strict start request, unknown start field, snapshot, SSE framing |
+| Workflow compilation | 5 | Targeting and defaults, explicit timeout and partial retry, undeclared input, invalid schema, invalid retry |
 
 This suite includes one meaningful valid case and high-risk rejection cases at
 each shared boundary. Adding dozens of nearly identical bound checks would make
@@ -164,6 +174,7 @@ or adapter behavior but cannot satisfy a real-device acceptance gate.
 | Consumer | Required use |
 |---|---|
 | C1–C6 | Run Editor Graph cases against Backend and Runtime; compare classification and ordered diagnostic codes |
+| C7–C9 | Run paired compiler cases and compare exact Runtime IR or exact diagnostics with no partial result |
 | G1 | Run Runtime IR cases before admission implementation is approved |
 | D3/G/H | Decode A6 event/error cases and preserve exact closed variants |
 | B6/C5/E7/I1 | Decode or emit applicable A7 API cases |

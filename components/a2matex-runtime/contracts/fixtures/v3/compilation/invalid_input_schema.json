@@ -1,0 +1,94 @@
+{
+  "editorGraph": {
+    "schemaVersion": 1,
+    "entryNodeId": "start",
+    "nodes": [
+      {
+        "id": "start",
+        "type": "flow.start",
+        "config": {},
+        "bindings": {},
+        "errorPolicy": "STOP",
+        "editor": {
+          "x": 50,
+          "y": -15,
+          "label": "Studio only"
+        }
+      },
+      {
+        "id": "tap",
+        "type": "android.tap",
+        "config": {
+          "targetMode": "ABSOLUTE_PIXELS"
+        },
+        "bindings": {
+          "x": {
+            "kind": "LITERAL",
+            "value": 20
+          },
+          "y": {
+            "kind": "LITERAL",
+            "value": 30
+          }
+        },
+        "errorPolicy": "STOP",
+        "editor": {
+          "x": 50,
+          "y": -15,
+          "label": "Studio only"
+        }
+      },
+      {
+        "id": "end",
+        "type": "flow.end",
+        "config": {},
+        "bindings": {},
+        "errorPolicy": "STOP",
+        "editor": {
+          "x": 50,
+          "y": -15,
+          "label": "Studio only"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "e1",
+        "sourceNodeId": "start",
+        "sourcePort": "success",
+        "targetNodeId": "tap"
+      },
+      {
+        "id": "e2",
+        "sourceNodeId": "tap",
+        "sourcePort": "success",
+        "targetNodeId": "end"
+      }
+    ]
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {},
+    "required": [
+      "unknown"
+    ],
+    "additionalProperties": false
+  },
+  "validation": {
+    "status": "INVALID",
+    "errors": [
+      {
+        "code": "WORKFLOW_INPUT_SCHEMA_INVALID",
+        "message": "Workflow input schema does not match the required contract",
+        "path": [
+          "inputSchema",
+          "required",
+          0
+        ]
+      }
+    ],
+    "warnings": [],
+    "truncated": false
+  },
+  "runtimeIr": null
+}

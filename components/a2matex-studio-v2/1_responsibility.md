@@ -1,3 +1,5 @@
+> Runtime integration entry point for this team: [Managed process and API guide](../a2matex-runtime/integration/studio.md).
+
 # 1. Mục tiêu của A2MaTeX Studio
 
 A2MaTeX Studio giúp người dùng xây dựng sản phẩm automation Android mà không cần trực tiếp viết ADB command hoặc code.
