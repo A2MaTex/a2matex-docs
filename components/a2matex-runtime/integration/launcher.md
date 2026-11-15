@@ -46,6 +46,8 @@ authoring endpoints remain scoped to authoring.
 |---|---|
 | `GET /api/v1/runtime-info` | Authenticate to the owned Runtime, verify readiness for each operation, and read compatibility information. |
 | `GET /api/v1/health` | Optional troubleshooting check for HTTP liveness. A successful health response cannot release waiting operations. |
+| `GET /api/v1/devices` | Read the last successful device inventory in the current session. |
+| `POST /api/v1/devices/refresh` | Scan ADB and return the updated device inventory. |
 
 Use the [shared API reference](managed_runtime.md#shared-api-reference) for
 request headers, response examples, and error codes. A Launcher smoke test
@@ -59,3 +61,18 @@ build. Document those calls here as they become available, including package
 input, authorization and compatibility, run identity, status and event
 consumption, retry behavior, and the active-run shutdown flow. Plaintext
 workflow validation and compilation belong to the [Studio guide](studio.md).
+
+## Android device picker
+
+When the customer opens device selection for a product, refresh the list
+through Launcher's owned Runtime session. The cached read is available for
+redisplaying the last successful result in that session. Provide a
+**Refresh devices** action and keep Launcher ownership handling in the
+native client. See the [shared E7 requests and responses](managed_runtime.md#device-inventory-api).
+
+Use `adbSerial` as the selection key. Enable selection for `READY` entries,
+show reasons for unavailable entries, and flag any selection lost after a
+successful refresh. If refresh fails, show the failure even when the previous
+result is still visible. Inventory calls require the local session token.
+Product package authorization and the final live readiness recheck belong
+to the future production run request.

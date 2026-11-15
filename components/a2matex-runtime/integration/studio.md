@@ -47,7 +47,7 @@ Studio will offer **Stop and exit** or **Stay open** once H6 is available.
 Use [shared health and Runtime Info](managed_runtime.md#shared-api-reference)
 for process diagnostics and readiness. The two routes below belong to Studio
 authoring. Studio should send them from its native client using the current
-child's URL and token.
+child's URL and token. Studio also uses the [shared device routes](#android-device-picker).
 
 ### POST /api/v1/workflow-validation
 
@@ -141,3 +141,18 @@ curl --noproxy '*' -sS -H "Authorization: Bearer ${SESSION_TOKEN}" \
 ```
 
 Keep the token local and avoid shell tracing.
+
+## Android device picker
+
+When the publisher opens the picker to prepare a draft test run, use the
+native client's per-request readiness check and refresh the device list.
+Use the cached read to render a snapshot already obtained in the same
+session. Provide a **Refresh devices** action for after the publisher
+connects or authorizes a device. See the [shared E7 requests and responses](managed_runtime.md#device-inventory-api).
+
+Use `adbSerial` as the selection key. Enable selection for `READY` entries and
+show the reason for unavailable ones. After a successful refresh, retain
+selections that are still ready and flag any that disappeared or became
+unavailable. If refresh fails, an already displayed list can remain visible
+with its refresh failure. The future draft run API invokes E6 to recheck live
+readiness at admission.

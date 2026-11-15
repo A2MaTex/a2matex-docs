@@ -312,15 +312,15 @@ must not expose a partial IR or protected source content.
 
 ## 7. Session device inventory
 
+These routes are shared by Studio and Launcher when each owns its Runtime
+session. See [E7](../e_device_subsystem/e7_device_api.md) for the lifecycle,
+error mapping, acceptance cases, and verification status.
+
 Both device endpoints return:
 
 ```json
 {
   "devices": [
-    {
-      "adbSerial": "emulator-5554",
-      "status": "READY"
-    },
     {
       "adbSerial": "192.0.2.10:5555",
       "status": "UNAVAILABLE",
@@ -329,17 +329,24 @@ Both device endpoints return:
         "message": "device is offline",
         "retryable": true
       }
+    },
+    {
+      "adbSerial": "emulator-5554",
+      "status": "READY"
     }
   ]
 }
 ```
 
-- `GET /devices` reads the last in-memory result and performs no ADB command.
-- `POST /devices/refresh` runs A3 discovery and readiness checks before
-  replacing and returning the inventory.
-- A successful discovery with no endpoints returns an empty array.
-- An ADB discovery failure returns `ADB_UNAVAILABLE`; it is not represented as
-  an empty successful inventory.
+- Both routes require the session bearer token and accept no query parameters
+  or body content.
+- `GET /devices` reads the last successful in-memory result and performs no
+  ADB command. Before the first successful refresh it returns an empty array.
+- `POST /devices/refresh` starts or joins a refresh. A successful refresh
+  replaces and returns the inventory, including an empty array when no
+  devices are found.
+- An ADB discovery or operation failure returns `503 ADB_UNAVAILABLE` with
+  `retryable: true` and leaves the previous snapshot available to `GET`.
 - `status` is exactly `READY` or `UNAVAILABLE`. `error` is absent for `READY`
   and required for `UNAVAILABLE`.
 - Items are sorted lexically by `adbSerial`.

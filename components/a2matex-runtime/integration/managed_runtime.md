@@ -170,11 +170,51 @@ version is a compatibility result to display, independent of child readiness.
 | 404 | `RESOURCE_NOT_FOUND` | Authenticated request to an unknown route or unsupported method |
 | 413 | `PAYLOAD_TOO_LARGE` | A documented request size limit was exceeded |
 | 500 | `INTERNAL_ERROR` | Unexpected Runtime failure with a generic response |
+| 503 | `ADB_UNAVAILABLE` | Device refresh could not complete |
 
-The current error envelope sets `retryable` to `false`. Apply the lifecycle
+Device refresh failures with `ADB_UNAVAILABLE` set `retryable` to `true`.
+The other errors in this table set it to `false`. Apply the lifecycle
 and operation-specific retry rules when a request fails at the transport
 level. The private shutdown command and managed launch exit codes are process
 signals outside this HTTP error envelope.
+
+### Device inventory API
+
+Both [E7 routes](../e_device_subsystem/e7_device_api.md) are available on the
+Runtime build. Each request uses the owning app's current `apiBaseUrl` and
+bearer token. Send no query parameters
+or body, including on refresh. For example, run these calls from an authorized
+development shell with `API_BASE_URL` and `SESSION_TOKEN` set from the current
+Runtime handoff. Keep the token out of shell tracing and logs.
+
+```sh
+curl --noproxy '*' -fsS -H "Authorization: Bearer ${SESSION_TOKEN}" \
+  "${API_BASE_URL}/runtime-info" >/dev/null &&
+curl --noproxy '*' -sS -i -H "Authorization: Bearer ${SESSION_TOKEN}" \
+  "${API_BASE_URL}/devices"
+```
+
+```sh
+curl --noproxy '*' -fsS -H "Authorization: Bearer ${SESSION_TOKEN}" \
+  "${API_BASE_URL}/runtime-info" >/dev/null &&
+curl --noproxy '*' -sS -i -X POST -H "Authorization: Bearer ${SESSION_TOKEN}" \
+  "${API_BASE_URL}/devices/refresh"
+```
+
+Both operations return `200` with the same JSON shape, for example
+`{"devices":[{"adbSerial":"emulator-5554","status":"READY"}]}`. A cached
+read can return `{"devices":[]}` before the first scan. Refresh queries ADB
+and can return the same empty response when no devices are found. Entries
+marked `UNAVAILABLE` carry an `error` with the device reason.
+
+Handle `400 INVALID_REQUEST` by fixing the request, and `401 UNAUTHORIZED`
+by rechecking the current owned session. A `503 ADB_UNAVAILABLE` after a
+successful readiness probe is a refresh failure. It leaves the cached list
+available and does not trigger child replacement. Show the refresh error
+and let the user retry after addressing ADB availability. Allow enough time
+for the 20-second refresh budget and process cleanup. If the child exits
+during the operation, apply the managed readiness and replacement flow
+before the next request. A replacement child starts with an empty list.
 
 ## Adding an API in later phases
 
