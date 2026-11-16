@@ -34,7 +34,7 @@ CREATE TYPE "ProductOfferType" AS ENUM (
 );
 
 ALTER TABLE "Product"
-ADD COLUMN "lastOfferChangedAt" TIMESTAMPTZ;
+ADD COLUMN "offerChangeTimestamps" TIMESTAMPTZ[] NOT NULL DEFAULT '{}';
 
 CREATE TABLE "ProductOffer" (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -59,18 +59,39 @@ WHERE "deletedAt" IS NULL;
 `priceAmount` là BIGINT cùng unit với `Profile.balance` và được serialize thành decimal string trên
 API. `ONE_TIME` cho phép price bằng 0, duration hữu hạn hoặc permanent (`null`). `SUBSCRIPTION` yêu
 cầu price dương và duration hữu hạn. Backend validate các rule này, duplicate natural key,
-soft-delete pairing và cooldown; database chỉ giữ identity/foreign key/index quan trọng.
+soft-delete pairing và sliding window; database chỉ giữ identity/foreign key/index quan trọng.
 
-`Product.lastOfferChangedAt` chỉ được Product Offer service update khi collection public của Product
-`ACTIVE` thay đổi thật sự. Draft edit và no-op request không consume cooldown.
-Offer count, maximum duration, maximum price và cooldown hours đều lấy từ validated environment
-configuration; các giá trị này không nằm trong API response.
+`Product.offerChangeTimestamps` là bounded internal array. Product Offer service chỉ prune và append
+khi collection của Product `ACTIVE` thay đổi thật sự. Cutoff dùng database transaction time trừ
+`PRODUCT_OFFER_CHANGE_WINDOW_HOURS`; request bị reject với
+`Error.ProductOfferChangeRateLimitExceeded` khi số timestamp còn lại đã đạt
+`PRODUCT_OFFER_CHANGE_MAX_COUNT`. Draft edit, no-op, request invalid/unauthorized và transaction fail
+không consume slot. Không expose timestamps, remaining slots hoặc next allowed time qua API.
+
+Product `DRAFT` có thể lưu collection rỗng. Current-Release selection chỉ set pointer và không đọc
+Offer. Publisher lifecycle `ACTIVATE` inject existing `ProductOfferService`, yêu cầu ít nhất một
+current `SUBSCRIPTION` Offer và ghi timestamp đầu tiên trong cùng transaction chuyển Product sang
+`ACTIVE`. Publisher/Admin reactivation và đổi current Release không consume slot. Khi Product đã
+`ACTIVE`, replacement payload phải giữ ít nhất một `SUBSCRIPTION`; request làm mất Offer subscription
+cuối cùng bị reject toàn bộ. `SUSPENDED`, `ARCHIVED` và deleted Product không cho phép replace Offer.
+
+Mọi giới hạn lấy từ validated environment configuration:
+
+```text
+PRODUCT_OFFER_MAX_COUNT
+PRODUCT_OFFER_MAX_DURATION_DAYS
+PRODUCT_OFFER_CHANGE_MAX_COUNT
+PRODUCT_OFFER_CHANGE_WINDOW_HOURS
+PRODUCT_OFFER_MAX_PRICE_AMOUNT
+```
+
 Offer đã soft-delete là historical data immutable: không restore, không update và không reuse ID.
 Nếu cùng type/duration xuất hiện lại, Backend insert row mới.
 
 Không có Offer GET API riêng. Management và public Product detail preload toàn bộ current
 non-deleted Offer; public Product list chỉ preload minimum-priced `SUBSCRIPTION` Offer gồm price và
-duration, hoàn toàn bỏ qua `ONE_TIME`. `PUT /products/:productId/offers` chỉ trả
+duration, hoàn toàn bỏ qua `ONE_TIME`. Public eligibility yêu cầu projection này tồn tại nên list
+item không trả minimum price nullable. `PUT /products/:productId/offers` chỉ trả
 `SUCCESS_RESPONSE`; frontend reload Product detail để lấy state và generated IDs mới nhất.
 
 ## 3. Order
@@ -78,8 +99,9 @@ duration, hoàn toàn bỏ qua `ONE_TIME`. `PUT /products/:productId/offers` ch�
 ### Trách nhiệm
 
 `Order` lưu transaction dùng system balance. `OrderItem` snapshot Offer để lịch sử không thay đổi
-khi Publisher sửa price hoặc collection. Đây là compatibility shape tạm thời; Order feature spec sẽ
-chốt concurrency/idempotency và API trước implementation.
+khi Publisher sửa price hoặc collection. Order locks Product trước selected ProductOffer, rồi lock
+customer balance/Entitlement state theo một thứ tự nhất quán. Purchase transaction re-read current
+Offer và không tin price/duration do client gửi.
 
 ```sql
 CREATE TYPE "OrderStatus" AS ENUM (
@@ -191,8 +213,15 @@ Một customer có đúng một durable Entitlement row cho mỗi Product. Order
 `expiresAt IS NULL` hoặc `expiresAt > transactionNow`; status stale không thay thế time check. Khi
 access đã expire, customer có thể mua `SUBSCRIPTION` mới và period bắt đầu từ transaction time, không
 stack/extend period cũ. `oneTimePurchasedAt` được set ở lần `ONE_TIME` thành công đầu tiên và không
-bao giờ clear, kể cả khi access expire. Order feature spec sẽ chốt transaction lock và balance
-deduction; Entitlement Module sẽ chốt reactivation/revocation chi tiết.
+bao giờ clear, kể cả khi access expire. Mỗi customer chỉ được mua `ONE_TIME` một lần cho mỗi Product,
+không phụ thuộc Offer ID. Không có stacking, early renewal, upgrade, downgrade, proration hoặc
+remaining-value conversion. Order owns balance deduction, zero-value Order/OrderItem và atomic
+Entitlement create/reactivation.
+
+Order mới chỉ được tạo khi Product `ACTIVE`. `ARCHIVED` là Publisher unlisting nên block Marketplace
+discovery và Order mới nhưng không revoke existing unexpired Entitlement; download/execution vẫn
+được phép nếu current Release còn eligible. `SUSPENDED` là Admin moderation control và block cả
+download/execution cho đến khi Admin reactivation thành công.
 
 ## 5. Execution Lease
 

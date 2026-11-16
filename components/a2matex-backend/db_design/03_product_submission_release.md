@@ -54,7 +54,7 @@ CREATE TABLE "Product" (
     "suspendedAt" TIMESTAMPTZ,
     "suspendedById" UUID REFERENCES "User" (id),
     "currentReleaseId" UUID,
-    "lastOfferChangedAt" TIMESTAMPTZ,
+    "offerChangeTimestamps" TIMESTAMPTZ[] NOT NULL DEFAULT '{}',
     "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
     "updatedAt" TIMESTAMPTZ,
     "deletedAt" TIMESTAMPTZ,
@@ -114,9 +114,28 @@ Static là storage metadata dùng chung và không có Product/Publisher ownersh
 tham chiếu bất kỳ Static image nào chưa bị xóa và đã hoàn tất image pipeline; request chỉ nhận
 `staticId`, không nhận object key, private URL hoặc R2 key.
 
-`lastOfferChangedAt` là field internal do Product Offer module quản lý để enforce cooldown cho thay
-đổi commercial collection của Product `ACTIVE`. Product create/update, Submission, Review và Product
-Release không được ghi field này. Product Offer không nằm trong Submission/ProductRelease snapshot.
+`offerChangeTimestamps` là bounded internal array do Product Offer module quản lý để enforce sliding
+window cho thay đổi commercial collection của Product `ACTIVE`. Product create/update, Submission và
+Review và current-Release selection không được ghi hoặc expose field này. Publisher lifecycle
+`ACTIVATE` ghi entry đầu tiên thông qua `ProductOfferService`; Publisher/Admin reactivation và các
+lần đổi Release không ghi thêm. Product Offer không nằm trong Submission/ProductRelease snapshot.
+
+Product lifecycle được tách theo role:
+
+```text
+Publisher OWN /products/:productId/lifecycle
+  ACTIVATE:   DRAFT -> ACTIVE
+  ARCHIVE:    ACTIVE -> ARCHIVED
+  REACTIVATE: ARCHIVED -> ACTIVE
+
+Admin /products/:productId/moderation
+  SUSPEND:    ACTIVE -> SUSPENDED
+  REACTIVATE: SUSPENDED -> ACTIVE
+```
+
+`ARCHIVED` là Publisher unlisting có thể reverse: Product không xuất hiện trên Marketplace và không
+nhận Order mới, nhưng giữ `currentReleaseId`, Offer, Release và existing Entitlement access. Publisher
+không được thay đổi `SUSPENDED`; Admin moderation không được thay đổi `ARCHIVED`.
 
 ## 3. Submission
 
@@ -200,7 +219,9 @@ Một transaction submit nên:
 3. Revalidate graph/IR/assets và create WorkflowRevision immutable.
 4. Snapshot Product fields + ordered media, release request và review context; không update mutable Product.
 5. Create Submission.
-6. Create outbox event cho scan job.
+6. Commit transaction, sau đó publish scan message trực tiếp qua Kafka provider. Không tạo outbox
+   record. Nếu publish fail, retry cùng request và cùng Idempotency-Key sẽ republish chính
+   `(submissionId, scanAttempt)` đã commit thay vì tạo Submission khác.
 
 ## 4. Automated Scan
 
@@ -411,10 +432,18 @@ ADD CONSTRAINT "Product_currentReleaseId_fkey"
 FOREIGN KEY ("currentReleaseId") REFERENCES "ProductRelease" (id);
 ```
 
-Application transaction đặt current release phải xác nhận release thuộc đúng Product và đang `PUBLISHED`; FK một mình không enforce được điều kiện đó.
-Transaction này đồng thời chuyển Product `DRAFT -> ACTIVE` cho first release; Product đang `ACTIVE`
-giữ nguyên status khi publish update. Admin approval chỉ cho phép build, không tự activate Product.
-Nếu build/publish thất bại, `currentReleaseId` và snapshot đang public không đổi.
+Build publication chỉ chuyển ProductRelease sang `PUBLISHED`; nó không đổi Product status hoặc
+`currentReleaseId`. Transaction chọn current Release phải xác nhận Release thuộc đúng Product, đang
+`PUBLISHED`, package hoàn chỉnh và chưa disable; FK một mình không enforce được các điều kiện đó.
+Selection chỉ đổi `currentReleaseId` và Product audit fields, không đọc Offer, không đổi status và
+không consume sliding-window slot.
+
+Publisher lifecycle `ACTIVATE` lock Product, current ProductRelease, rồi ProductOffer; recheck
+Release/Offer readiness, ghi initial Offer timestamp và chuyển `DRAFT -> ACTIVE`. Publisher
+`ARCHIVED -> ACTIVE` và Admin `SUSPENDED -> ACTIVE` dùng cùng readiness checks nhưng không ghi Offer
+timestamp. Admin approval chỉ cho phép build; Release selection chuẩn bị pointer và lifecycle action
+mới quyết định Marketplace visibility. Nếu build/publish thất bại, Product và snapshot đang public
+không đổi.
 
 ## 7. Quan hệ chính
 

@@ -13,8 +13,8 @@ Release build only after approval commits.
 
 The module does not create another review record. The current MVP permits exactly one terminal
 decision per Submission, so the reserved review fields on `Submission` are sufficient. Admin queue
-and detail reads remain owned by the Submission module; package construction and Marketplace
-activation remain owned by Product Release.
+and detail reads remain owned by the Submission module; package construction and current-Release
+selection remain owned by Product Release, while Product lifecycle owns Marketplace activation.
 
 ```mermaid
 flowchart LR
@@ -26,8 +26,10 @@ flowchart LR
     C --> P[Publisher reads safe feedback<br/>and creates a new Submission]
     X --> P
     A -->|commit first| K[Kafka<br/>product-release.build.requested]
-    K -.->|deferred Product Release module| B[Build and publish ProductRelease]
-    B -.-> M[Set Product.currentReleaseId<br/>and activate Marketplace version]
+    K -.-> B[Build and publish ProductRelease]
+    B -.-> H[Release history: PUBLISHED<br/>Product remains unchanged]
+    H -.-> S[Publisher selects current Release<br/>pointer only]
+    S -.->|Release + Offer ready| M[Publisher lifecycle ACTIVATE<br/>DRAFT to ACTIVE]
 ```
 
 An Admin decision never edits the frozen Product, media, WorkflowRevision, release request, review
@@ -73,7 +75,8 @@ This module does not own:
 - A completed `PASSED` scan with finalized Workflow Revision `runtimeIr` and `contentHash` may
   receive any decision.
 - A completed `FAILED` scan may receive `REQUEST_CHANGES` or `REJECT`, but not `APPROVE` in the MVP.
-  A future manual override requires a separate audited contract and is not implied by Admin access.
+  Manual override is unsupported and would require a separate audited contract; Admin access does
+  not imply it.
 - A technical scan `ERROR`, queued scan, or running scan cannot be reviewed because the Submission
   has not reached `READY_FOR_REVIEW`.
 - Approval does not change Product status or `currentReleaseId`.
@@ -82,7 +85,8 @@ This module does not own:
 - If publication fails after commit, the Submission remains `APPROVED`. Repeating the exact approval
   request republishes the same deterministic message safely.
 - Product Release remains authoritative for build idempotency, version uniqueness, package state,
-  and final Product activation.
+  and pointer-only current-Release selection. Product lifecycle owns activation after Release and
+  Offer readiness checks.
 
 ## 3. Lifecycle
 
@@ -106,8 +110,8 @@ the current Submission is refused. Both decisions are terminal only for that Sub
 prevent a later eligible Submission for the same Product.
 
 For an already active Product, every non-approved outcome leaves the existing `currentReleaseId`
-and public Marketplace snapshot unchanged. An approved update also leaves them unchanged until the
-Product Release module successfully publishes the replacement.
+and public Marketplace snapshot unchanged. An approved update and its successful Release build also
+leave them unchanged until an authorized caller explicitly selects the new Release.
 
 ## 4. Persistence contract
 
@@ -298,7 +302,8 @@ Submission row locking serializes decisions for one Submission:
   original transaction is observed as already complete.
 
 The module does not permit editing feedback after the terminal decision. A correction requires an
-explicit future audit contract, not another call that silently overwrites reviewer history.
+explicit audit contract outside this module, not another call that silently overwrites reviewer
+history.
 
 ## 7. Product Release build message
 
@@ -306,7 +311,7 @@ Publication occurs only for `APPROVED`:
 
 ```text
 topic: product-release.build.requested
-dead letter: product-release.build.requested.dlq   # owned by the future consumer
+dead letter: product-release.build.requested.dlq   # owned by Product Release consumer
 type: product-release.build.requested
 Kafka key: productId
 message ID: product-release-build:<submissionId>
@@ -345,9 +350,8 @@ Repeated behavior:
 
 There is an accepted direct-publication gap: the approval transaction can commit and the process
 can stop before Kafka publication succeeds. Recovery is provided by repeating the identical
-approval request, which observes `APPROVED` and republishes the same deterministic message. A future
-automatic repair dispatcher or outbox may be added if operational requirements demand it, but it is
-not part of this MVP.
+approval request, which observes `APPROVED` and republishes the same deterministic message. Automatic
+repair and an outbox are not part of this contract.
 
 ## 9. Failure contract
 
@@ -487,13 +491,14 @@ When implementation is approved, verification should cover:
 - migration review confirming that Review adds no schema when Submission already owns the fields.
 
 Live Kafka and PostgreSQL behavior must be reported as unverified unless exercised against those
-services. Product Release build success cannot be claimed until that separate module exists.
+services. Product Release build success must be verified independently in that separate module.
 
 ## 15. Deferred work
 
 - ProductRelease persistence and the build consumer;
 - package generation, encryption, signing, R2 storage, and publication;
-- Product activation and `currentReleaseId` switching;
+- pointer-only `currentReleaseId` selection and explicit Product lifecycle activation after
+  Release/Offer readiness;
 - release history and rollback to an older published release;
 - multi-round review, reviewer assignment, internal comments, appeal, and append-only audit history;
 - explicit Admin override of failed automated scans;

@@ -81,7 +81,7 @@ This module does not own:
 - category, tag, connector, pricing, offer, order, or entitlement behavior.
 
 No Admin review decision is created when a Submission is created or when its scan completes. The
-future Review module records the one terminal Admin decision directly on the reserved Submission
+Review module records the one terminal Admin decision directly on the reserved Submission
 review fields.
 
 ## 2. Approved business decisions
@@ -98,10 +98,13 @@ review fields.
 - One Project Draft version can produce at most one WorkflowRevision and one Submission.
 - Product and ProductMedia remain editable after submission. Their frozen snapshot is authoritative
   for that Submission and any Product Release built from it.
-- Submission approval alone does not activate Product. Product becomes `ACTIVE` only after the
-  Product Release module successfully publishes the first release and sets `currentReleaseId`.
+- Submission approval and Product Release publication do not activate Product. Current-Release
+  selection sets only `currentReleaseId`. After a Release is selected and an eligible subscription
+  Offer exists, the owner Publisher explicitly calls Product lifecycle `ACTIVATE` to transition
+  `DRAFT -> ACTIVE`.
 - An update Submission for an already active Product does not replace its current public release.
-  The previous release remains official until a new release is published.
+  The previous release remains official after the new Release is published and until an authorized
+  caller explicitly selects it.
 - Asset references are unsupported for this MVP. They are rejected before revision creation and
   checked again by the background scanner as defense in depth.
 - Product Category and Tag are not part of the Submission snapshot.
@@ -111,7 +114,7 @@ review fields.
 - Submission has no update, delete, cancel, archive, or restore API.
 - Publisher-facing APIs never expose internal scan status, summary, findings, rule codes, or
   technical errors. Admin reads own those fields and Admin provides any actionable Publisher
-  feedback through the future Review module.
+  feedback through the Review module.
 - Direct Kafka publication is used after commit. No outbox table, relay, or generic job framework is
   added by this module.
 
@@ -135,7 +138,7 @@ Owned by this module:
 PENDING_SCAN   -> READY_FOR_REVIEW   # automated scan completed, whether PASSED or FAILED
 ```
 
-Owned by the future Review module:
+Owned by the Review module:
 
 ```text
 READY_FOR_REVIEW -> CHANGES_REQUESTED
@@ -398,17 +401,14 @@ type SubmissionScanResultV1 = {
 };
 ```
 
-Array order is the deterministic finding order; no `sortOrder` field is needed. The Backend enforces
-named maximum finding count, serialized result size, message length, and details size. The existing
-diagnostic limit of 100 is the initial finding-count limit. Findings must never contain credentials,
-complete node configuration, full Editor Graph, Runtime IR, tokens, or private URLs.
+Array order is the deterministic finding order; no `sortOrder` field is needed. The Backend enforces named maximum finding count, serialized result size, message length, and details size. The existing diagnostic limit of 100 is the initial finding-count limit. Findings must never contain complete node configuration, full Editor Graph, Runtime IR, tokens, or private URLs.
 
 `scanResult` is null for `QUEUED`, `RUNNING`, and technical `ERROR`. It is present for `PASSED` and
 business `FAILED`. Technical exception details stay in structured logs correlated by Submission ID,
 trace ID, and `scanAttempt`.
 
 There is no `SubmissionScan`, `SubmissionScanFinding`, or `SubmissionReview` table in this module.
-The future Review module writes the one terminal Admin decision into `Submission.status`,
+The Review module writes the one terminal Admin decision into `Submission.status`,
 `reviewedAt`, `reviewFeedback`, `updatedAt`, and `updatedById`. A separate append-only review table is
 deferred until multiple review rounds or compliance-grade decision history is required.
 
@@ -716,8 +716,7 @@ owning Publisher and Admin reviewer. Response selection depends on the resolved 
 - unrestricted Admin returns `SubmissionAdminDetailOutput`, including the current attempt, summary,
   and bounded findings needed for review.
 
-Neither projection includes Static object keys, credentials, tokens, queue headers, idempotency
-keys, request hashes, soft-delete fields, or internal Kafka offsets.
+Neither projection includes queue headers, idempotency keys, request hashes, soft-delete fields, or internal Kafka offsets.
 
 ### 6.4 Retry/requeue a technical scan
 
@@ -829,9 +828,8 @@ before publication. Recovery is provided by:
 - the explicit scan-retry API; and
 - Admin operational visibility of `PENDING_SCAN` with `scanStatus = QUEUED | ERROR`.
 
-This design intentionally does not claim atomic database-and-Kafka delivery. A future reliability
-requirement may introduce an outbox without changing immutable Submission semantics, but it is not
-required for this MVP.
+This design intentionally does not claim atomic database-and-Kafka delivery. Direct-publication
+recovery is authoritative for this MVP; no outbox is part of this contract.
 
 ### 8.3 Consumer idempotency
 
@@ -876,8 +874,7 @@ Publication rules:
 - Kafka key is `submissionId` so attempts for one Submission remain ordered;
 - `occurredAt` is Submission creation time for attempt 1 and retry update time for later attempts;
 - `traceId` is copied from the initiating request when available;
-- payload contains identifiers only, never graph, Runtime IR, Product snapshots, credentials, or
-  media metadata; and
+- payload contains identifiers only, never graph, Runtime IR, Product snapshots; and
 - no message is published before the database transaction commits.
 
 Subscription rules:
@@ -937,9 +934,7 @@ Required rule groups:
    - confirm handler/type and required capability references are internally consistent.
 5. **MVP policy restrictions**
    - reject asset references;
-   - reject embedded raw credentials, tokens, secrets, or private storage URLs in supported credential-bearing locations;
-   - reject unsupported connector/capability usage when a configured Marketplace policy disallows
-     it.
+   - reject unsupported connector/capability usage when a configured Marketplace policy disallows it.
 6. **Product/release snapshot integrity**
    - validate stored snapshot schema versions and required Product presentation fields;
    - validate release/minimum version strings and review-context bounds;
@@ -953,49 +948,49 @@ is preferred over inventing a second wire format.
 
 Rule messages must be safe for Admin display. They are never returned through Publisher-scoped
 responses. `details` may contain bounded paths, expected/actual scalar metadata, or identifiers, but
-never credentials, full node config, full graph, Runtime IR, tokens, or private URLs.
+never full node config, full graph, Runtime IR, tokens, or private URLs.
 
 ## 11. Stable failure semantics
 
 ### 11.1 HTTP failures
 
-| Condition                                                                            | Result                                                                     |
-| ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
-| Missing/invalid authentication                                                       | `401` existing authentication error                                        |
-| Missing route permission or insufficient scope                                       | `403` existing authorization error                                         |
-| Inactive/ineligible Publisher for create                                             | Existing Publisher policy error                                            |
-| Missing, deleted, or cross-owner Product                                             | `404 Error.ProductNotFound`                                                |
-| Product is `SUSPENDED`                                                               | `409 Error.ProductSuspended`                                               |
-| Product is `ARCHIVED`                                                                | `409 Error.ProductArchived`                                                |
-| Product publishing fields/media are incomplete or invalid                            | `422 Error.SubmissionProductIncomplete`                                    |
-| Related Project is archived or unavailable                                           | `409 Error.ProjectArchived` or safe existing not-found error               |
-| Requested Project Draft version is stale                                             | `409 Error.WorkflowRevisionDraftVersionConflict` with safe current version |
-| Draft hash, source snapshot size, or asset rule fails                               | Existing WorkflowRevision stable error                                     |
-| Another open Submission already exists                                               | `409 Error.SubmissionAlreadyOpen`                                          |
-| Draft version was already submitted                                                  | `409 Error.WorkflowRevisionAlreadyExists`                                  |
-| `Idempotency-Key` missing/invalid                                                    | `422 Error.SubmissionIdempotencyKeyRequired`                               |
-| Same idempotency key with different request hash                                     | `409 Error.SubmissionIdempotencyKeyReused`                                 |
-| Post-commit Kafka publication fails                                                  | `503 Error.SubmissionScanPublishFailed`                                    |
-| Missing/cross-owner Submission detail, or missing Admin retry target                 | `404 Error.SubmissionNotFound`                                             |
-| Retry requested while scan is running or business-complete                           | `409 Error.SubmissionScanNotRetryable`                                     |
-| Invalid params/query/body/unknown fields                                             | `422` global Zod validation error                                          |
+| Condition                                                            | Result                                                                     |
+| -------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Missing/invalid authentication                                       | `401` existing authentication error                                        |
+| Missing route permission or insufficient scope                       | `403` existing authorization error                                         |
+| Inactive/ineligible Publisher for create                             | Existing Publisher policy error                                            |
+| Missing, deleted, or cross-owner Product                             | `404 Error.ProductNotFound`                                                |
+| Product is `SUSPENDED`                                               | `409 Error.ProductSuspended`                                               |
+| Product is `ARCHIVED`                                                | `409 Error.ProductArchived`                                                |
+| Product publishing fields/media are incomplete or invalid            | `422 Error.SubmissionProductIncomplete`                                    |
+| Related Project is archived or unavailable                           | `409 Error.ProjectArchived` or safe existing not-found error               |
+| Requested Project Draft version is stale                             | `409 Error.WorkflowRevisionDraftVersionConflict` with safe current version |
+| Draft hash, source snapshot size, or asset rule fails                | Existing WorkflowRevision stable error                                     |
+| Another open Submission already exists                               | `409 Error.SubmissionAlreadyOpen`                                          |
+| Draft version was already submitted                                  | `409 Error.WorkflowRevisionAlreadyExists`                                  |
+| `Idempotency-Key` missing/invalid                                    | `422 Error.SubmissionIdempotencyKeyRequired`                               |
+| Same idempotency key with different request hash                     | `409 Error.SubmissionIdempotencyKeyReused`                                 |
+| Post-commit Kafka publication fails                                  | `503 Error.SubmissionScanPublishFailed`                                    |
+| Missing/cross-owner Submission detail, or missing Admin retry target | `404 Error.SubmissionNotFound`                                             |
+| Retry requested while scan is running or business-complete           | `409 Error.SubmissionScanNotRetryable`                                     |
+| Invalid params/query/body/unknown fields                             | `422` global Zod validation error                                          |
 
 ### 11.2 Background outcomes
 
-| Condition                                         | Scan/Submission result                        | Queue result                              |
-| ------------------------------------------------- | --------------------------------------------- | ----------------------------------------- |
-| Required rule produces one or more error findings | `FAILED` / `READY_FOR_REVIEW`                 | `SUCCESS`                                 |
-| Validation or compilation produces deterministic findings | `FAILED`, Runtime IR remains null / `READY_FOR_REVIEW` | `SUCCESS`                     |
-| Rules pass with no error findings                 | `PASSED` / `READY_FOR_REVIEW`                 | `SUCCESS`                                 |
-| Scan already `PASSED` or `FAILED`                 | unchanged                                     | `SUCCESS`                                 |
-| Temporary database/scanner failure                | scan `ERROR`, Submission stays `PENDING_SCAN` | `RETRY`                                   |
-| Permanently invalid/mismatched message            | no unrelated mutation                         | `FAILED` to DLQ                           |
-| Delivery retries exhausted                        | latest scan remains `ERROR` or `QUEUED`       | provider publishes DLQ and commits offset |
+| Condition                                                 | Scan/Submission result                                 | Queue result                              |
+| --------------------------------------------------------- | ------------------------------------------------------ | ----------------------------------------- |
+| Required rule produces one or more error findings         | `FAILED` / `READY_FOR_REVIEW`                          | `SUCCESS`                                 |
+| Validation or compilation produces deterministic findings | `FAILED`, Runtime IR remains null / `READY_FOR_REVIEW` | `SUCCESS`                                 |
+| Rules pass with no error findings                         | `PASSED` / `READY_FOR_REVIEW`                          | `SUCCESS`                                 |
+| Scan already `PASSED` or `FAILED`                         | unchanged                                              | `SUCCESS`                                 |
+| Temporary database/scanner failure                        | scan `ERROR`, Submission stays `PENDING_SCAN`          | `RETRY`                                   |
+| Permanently invalid/mismatched message                    | no unrelated mutation                                  | `FAILED` to DLQ                           |
+| Delivery retries exhausted                                | latest scan remains `ERROR` or `QUEUED`                | provider publishes DLQ and commits offset |
 
 ## 12. Security, privacy, and logging
 
 - Never log Product snapshot JSON, Editor Graph, Runtime IR, bindings, input schema, node config,
-  review-context content, credentials, tokens, Static keys, or Kafka message values.
+  review-context content, or Kafka message values.
 - Error logs may include trace ID, Submission ID, WorkflowRevision ID, message ID, scan attempt,
   status, safe rule code, and chained error message.
 - Do not add routine success logs for create/list/detail. The consumer may log scan start/completion
@@ -1048,15 +1043,15 @@ their hashing/eligibility logic into the controller.
 
 ### 14.2 Background scan slice
 
-| File                                     | Responsibility                                                       |
-| ---------------------------------------- | -------------------------------------------------------------------- |
-| `submission-scan.consumer.ts`            | Subscribe, validate envelope identity, map outcome to handler result |
-| `submission-scan.service.ts`             | Claim, load, scan, and atomically persist Submission scan fields     |
-| `submission-scanner.service.ts`          | Deterministic validation/compiler pipeline and result assembly       |
+| File                                     | Responsibility                                                          |
+| ---------------------------------------- | ----------------------------------------------------------------------- |
+| `submission-scan.consumer.ts`            | Subscribe, validate envelope identity, map outcome to handler result    |
+| `submission-scan.service.ts`             | Claim, load, scan, and atomically persist Submission scan fields        |
+| `submission-scanner.service.ts`          | Deterministic validation/compiler pipeline and result assembly          |
 | shared workflow compiler service         | Compile frozen Editor Graph and Node Definitions into strict Runtime IR |
-| `scanner/runtime-ir.validator.ts`        | Strict Runtime IR v1 validation for submission admission             |
-| `scanner/submission-policy.validator.ts` | Asset, credential, capability, and snapshot policy rules             |
-| `scanner/submission-scan.model.ts`       | Internal rule/finding/summary contracts                              |
+| `scanner/runtime-ir.validator.ts`        | Strict Runtime IR v1 validation for submission admission                |
+| `scanner/submission-policy.validator.ts` | Asset, credential, capability, and snapshot policy rules                |
+| `scanner/submission-scan.model.ts`       | Internal rule/finding/summary contracts                                 |
 
 The consumer may be registered by `SubmissionModule`, but it must not call controller methods or
 reuse HTTP response DTOs as queue contracts.
@@ -1121,7 +1116,8 @@ PostgreSQL behavior must be reported as unverified unless actually exercised aga
 - Admin Review decision API and permissions, which will write the reserved `reviewedAt`,
   `reviewFeedback`, `status`, `updatedAt`, and `updatedById` fields on Submission.
 - Approval-triggered `product-release.build.requested` publication.
-- ProductRelease build, package encryption, R2 storage, publication, and current-release selection.
+- ProductRelease build, package encryption, R2 storage, publication, pointer-only current-release
+  selection, and separate Publisher lifecycle activation.
 - Asset snapshots, asset scanning, and large-file delivery.
 - Catalog, Offer, pricing, Order, Entitlement, and Marketplace APIs.
 - A transactional outbox or periodic automatic repair dispatcher if direct-publication recovery is

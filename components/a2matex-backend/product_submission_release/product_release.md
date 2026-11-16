@@ -1,11 +1,11 @@
 # Product Release Module Feature Spec
 
-**Status:** Proposed for review
+**Status:** Approved for implementation; implementation in progress
 
 **Module group:** 03 — Product, Submission, Review, and Product Release
 
 **Owner:** Backend; consumed by the queue consumer, Publisher Portal, Admin Portal, Marketplace,
-Launcher, and later download/execution authorization modules
+Launcher, Download Authorization, and Execution Authorization modules
 
 ## Overview
 
@@ -15,10 +15,11 @@ Release consumer claims one Release idempotently, creates an encrypted standard 
 approved WorkflowRevision, uploads it through Static to private Cloudflare R2, and publishes the
 Release.
 
-Only successful publication may change `Product.currentReleaseId`. A first publication activates a
-draft Product; an update replaces the current Marketplace version atomically. A failed build leaves
-the existing Product and current Release unchanged. Published Releases remain immutable and may be
-selected later as an intentional rollback without another Submission, review, or build.
+Successful publication creates an eligible immutable Release but never changes Product status or
+`Product.currentReleaseId`. The Publisher explicitly selects a published Release; that operation
+changes only the pointer and may be done before or after configuring Offers. The separate Publisher
+Product lifecycle endpoint validates the selected Release and Offers before activating a draft or
+reactivating an archived Product. A failed build leaves Product state and current Release unchanged.
 
 ```mermaid
 flowchart TD
@@ -52,21 +53,16 @@ flowchart TD
         FT -->|success| PUB[ProductRelease PUBLISHED]
     end
 
-    subgraph Product_and_Marketplace[Product and Marketplace]
-        PUB --> CUR[Set Product.currentReleaseId]
-        CUR --> FIRST[First release: Product DRAFT to ACTIVE]
-        CUR --> UPDATE[Update: keep Product ACTIVE<br/>and replace current Release]
-        FIRST --> MARKET[Marketplace reads approved snapshot]
-        UPDATE --> MARKET
-    end
-
     subgraph Release_Management[Publisher and Admin release management]
         PUB --> HIST[Immutable release history]
         HIST --> SEL[Publisher or Admin selects<br/>an eligible published Release]
-        SEL --> CUR
+        SEL --> PTR[Set Product.currentReleaseId only<br/>status and Offers unchanged]
+        PTR --> ACT[Publisher lifecycle ACTIVATE<br/>validates current Release + Offers]
+        ACT -->|ready| MARKET[Product ACTIVE<br/>Marketplace reads approved snapshot]
+        ACT -->|not ready| BLOCK[Reject activation<br/>keep Product private]
         HIST --> DIS[Admin disables a broken Release]
         DIS -->|current active Release| REP[Atomically select replacement]
-        DIS -->|suspended or archived Product| CLR[Clear currentReleaseId]
+        DIS -->|draft, suspended, or archived Product| CLR[Clear currentReleaseId]
         DIS -->|non-current Release| DTERM[ProductRelease DISABLED]
         REP --> DTERM
         CLR --> DTERM
@@ -88,7 +84,7 @@ This module owns:
 - current Product and Publisher eligibility checks before work and before publication;
 - canonical Runtime package construction, encryption, hashing, and ZIP creation;
 - private ZIP upload through the existing Static/R2 storage abstraction;
-- atomic Product activation and current-Release selection;
+- atomic current-Release selection without Product lifecycle mutation;
 - authenticated Release history/detail reads;
 - Publisher/Admin rollback to an eligible published Release; and
 - Admin disable behavior for a broken or unsafe Release.
@@ -114,6 +110,27 @@ system-wide inventory remains in
 Product Offers are independent commercial records. Build, publication, rollback, and disable paths
 must never create, edit, delete, or snapshot Product Offers.
 
+[Product](./product.md) is authoritative for Publisher lifecycle, Admin moderation, and Marketplace
+visibility. [Product Offer](../commerce_entitlement_execution/product_offer.md) is authoritative for
+Offer readiness and sliding-window behavior. This specification owns Release state, package
+publication, pointer-only current selection, and Admin disable behavior.
+
+`ProductReleaseService` exposes current-Release eligibility for `ProductService` activation and
+reactivation checks. It does not inject `ProductOfferService`; Release selection never reads Offers.
+Both modules resolve the ambient transaction through `PrismaService.getClient()` so lifecycle
+readiness and the Product status transition commit or roll back together.
+
+```ts
+assertCurrentReleaseEligible(input: {
+  productId: string;
+  releaseId: string;
+}): Promise<void>;
+```
+
+The method locks and requires a Release belonging to the Product with `PUBLISHED`, non-disabled, and
+package-complete state. It performs no Product or Release mutation and joins the caller's ambient
+transaction.
+
 When approved, this specification supersedes the draft ProductRelease section in
 `db_design/03_product_submission_release.md`.
 
@@ -121,6 +138,8 @@ When approved, this specification supersedes the draft ProductRelease section in
 
 - Only an `APPROVED` Submission may create a ProductRelease.
 - There is no ProductRelease create/update/rebuild API.
+- There is no additional Product readiness status; the Publisher lifecycle transaction derives
+  readiness from Product, current Release, Offer, and Publisher state.
 - One Submission creates at most one ProductRelease.
 - One Product cannot reuse the same normalized version.
 - Kafka carries only `submissionId`; PostgreSQL snapshots are authoritative.
@@ -142,7 +161,9 @@ When approved, this specification supersedes the draft ProductRelease section in
 - A Release becomes `PUBLISHED` only after its complete package exists and Static/package metadata
   can commit.
 - Published package identity, hash, version, Submission, and timestamps are immutable.
-- First publication changes Product `DRAFT -> ACTIVE`; update publication keeps Product `ACTIVE`.
+- Release publication never changes Product status or `currentReleaseId`.
+- Current-Release selection changes only `currentReleaseId` and Product audit fields. It never
+  changes Product status, reads Offers, or consumes an Offer-change slot.
 - Build failure never changes Product status or current Release.
 - Publisher/Admin may select an older eligible published Release without rebuilding.
 - Only Admin may disable; `DISABLED` is terminal and cannot be restored.
@@ -270,14 +291,16 @@ DISABLED  -X-> any state
 ```
 
 - Product may point only to a `PUBLISHED`, non-disabled Release belonging to that Product.
-- First publication requires a non-deleted `DRAFT` Product and changes it to `ACTIVE`.
-- Update publication requires `ACTIVE` and keeps it active.
-- `SUSPENDED`, `ARCHIVED`, or deleted Product prevents automatic publication/current selection.
-- Publishing never automatically reactivates a suspended Product.
+- Publication creates selectable Release history and never changes Product status or its pointer.
+- Current-Release selection sets or replaces only the pointer and Product audit fields.
+- Owner Publisher selection is allowed for non-deleted `DRAFT`, `ACTIVE`, and `ARCHIVED` Products.
+  Admin selection is also allowed for `SUSPENDED` Products so a safe replacement can be prepared.
+- Selection does not require an Offer. Publisher/Admin lifecycle operations revalidate the selected
+  Release and Offers before changing Product status to `ACTIVE`.
+- Publishing or selecting a Release never automatically reactivates a suspended Product.
 - Failure preserves the existing Marketplace snapshot.
-- A delayed older build must not replace a newer current Release. Submission `number` is the
-  immutable same-Product ordering source; a stale Release may become published history but not current.
-- Intentional rollback uses the current-Release selection API.
+- Delayed builds cannot replace a newer current Release because builds never select Releases.
+- Intentional first launch, update, or rollback uses the current-Release selection API.
 
 ## 5. Kafka consumer and reduced validation
 
@@ -318,7 +341,8 @@ The consumer performs one short transaction:
    - `WorkflowRevision.contentHash` is non-null.
 4. Treat a missing compiled field as a permanent broken-invariant failure. Stop before creating key
    material, reserving Static metadata, generating an object key, or contacting R2.
-5. Require Product is non-deleted and `DRAFT` or `ACTIVE`.
+5. Require Product is non-deleted and `DRAFT`, `ACTIVE`, or `ARCHIVED`. Publisher archival is an
+   unlisting operation and does not invalidate an already approved build.
 6. Require Publisher remains release-eligible.
 7. Load ProductRelease by `submissionId`.
 8. If absent, reserve `(productId, version)` and insert `BUILDING` using the reviewer as
@@ -525,10 +549,10 @@ material, R2 identity, or a permanent download URL.
 
 For the MVP, `minimumRuntimeVersion` remains the Publisher-supplied, Admin-reviewed value frozen in
 `Submission.releaseRequest`. Product Release does not compare it with
-`WorkflowRevision.runtimeIr.minimumRuntimeVersion`. Runtime still validates its embedded Runtime IR
-requirement after decryption, so an understated release value may allow Launcher to download before
-Runtime rejects execution. A later Submission scan rule will enforce the relationship between these
-two values.
+`WorkflowRevision.runtimeIr.minimumRuntimeVersion`. Runtime validates its embedded Runtime IR
+requirement after decryption. The MVP therefore accepts that an understated release value may let
+Launcher download a package that Runtime then rejects; this is an explicit version-contract
+limitation, not Product Release build logic.
 
 ### 6.8 Assemble `product.a2m`
 
@@ -608,12 +632,11 @@ Publication uses only this prepared data:
 
 ```text
 ProductRelease: id, productId, submissionId, status, wrappedKey, keyNonce, packageStaticId
-Submission: status, number
+Submission: status
 Static: id, objectKey, originalFileName, contentType, size
 Built artifact: packageHash and verified uploaded size/content type
-Product: status, deletedAt, currentReleaseId, publisherAccountId, audit fields
-Current Release when present: productId, status, Submission.number
-Publisher/User: current release eligibility
+Product: status, deletedAt, publisherAccountId
+Publisher/User: release-publication eligibility
 ```
 
 Before opening the transaction, verify the uploaded object size/content type. No R2 work runs while
@@ -626,23 +649,18 @@ After those checks, one short transaction follows the shared Product-first lock 
 2. Lock ProductRelease and require `BUILDING` (or return success if already terminal).
 3. Recheck the ProductRelease still belongs to the locked Product and still references the reserved
    Static ID that was uploaded.
-4. Recheck only mutable Product status/deletion and Publisher eligibility.
+4. Recheck only mutable Product status/deletion and Publisher eligibility. Product must remain
+   `DRAFT`, `ACTIVE`, or `ARCHIVED`; Release publication does not activate or reactivate it.
 5. Load the reserved Static metadata and require the expected object key, content type, and size.
 6. Require a complete `wrappedKey`/`keyNonce` pair with the documented byte lengths.
-7. Read the current Release and its Submission number while the Product lock keeps
-   `currentReleaseId` stable.
-8. Set ProductRelease `PUBLISHED`, `packageHash`, clear the failure code, and set `publishedAt`.
-9. If the new Submission is not stale, set `Product.currentReleaseId`.
-10. For the first current Release, change Product `DRAFT -> ACTIVE`; otherwise keep `ACTIVE`.
-11. When Product status/current pointer changes, set Product audit fields using the approving Admin
-    stored in `ProductRelease.createdById`.
-12. Commit Release publication and Product pointer/status atomically.
+7. Set ProductRelease `PUBLISHED`, `packageHash`, clear the failure code, and set `publishedAt`.
+8. Leave Product status, `currentReleaseId`, and Product audit fields unchanged.
+9. Commit Release publication.
 
-The Product lock is required because automatic publication, manual current-Release selection,
-release disable/replacement, and Product lifecycle operations all depend on or mutate Product status
-and `currentReleaseId`. It prevents a slower older build from overwriting a newer selection and
-prevents publication from racing a suspension or replacement. The lock is held only for this short
-database transaction, never during package construction, encryption, Key Service access, or R2 I/O.
+The Product lock prevents publication eligibility from racing Product suspension, archival, or
+deletion. Publication never reads or writes `currentReleaseId`, so a delayed build cannot overwrite a
+Publisher's current selection. The lock is held only for this short database transaction, never
+during package construction, encryption, Key Service access, or R2 I/O.
 
 If Product became suspended, archived, deleted, or Publisher-ineligible during build, do not change
 Product or current Release. Mark the attempt failed and clean the uncommitted package.
@@ -725,13 +743,17 @@ PUT /api/v1/products/:productId/releases/current, null -> ADMIN
 ```
 
 - Release must belong to Product and be `PUBLISHED`, non-disabled, and package-complete.
-- Publisher may select for an owned eligible `ACTIVE` Product.
-- Admin may select for `ACTIVE` or `SUSPENDED`; selection does not reactivate Product.
-- Archived/deleted Product rejects selection.
+- Publisher may select for an owned `DRAFT`, `ACTIVE`, or `ARCHIVED` Product. Publisher selection is
+  rejected for `SUSPENDED` so Publisher cannot alter Admin-controlled moderation state.
+- Admin may select for `DRAFT`, `ACTIVE`, `ARCHIVED`, or `SUSPENDED` Product when preparing or
+  replacing an eligible package.
+- Deleted Product rejects selection.
 - Selecting current again is no-op success.
 - Lock Product before the selected ProductRelease and any currently selected Release.
-- Only Product pointer/audit fields change; set `updatedById` to the authenticated caller. Release and
-  package remain immutable.
+- Only Product pointer/audit fields change; set `updatedById` to the authenticated caller. Product
+  status, Release, package, Offers, and Offer sliding-window state remain unchanged.
+- Product activation/reactivation uses the separate role-specific Product endpoints and rechecks
+  current Release and Offer readiness there.
 - Return only `SUCCESS_RESPONSE`.
 
 ### 9.4 Disable Release
@@ -745,25 +767,51 @@ Content-Type: application/json
 ```ts
 type ProductReleaseLifecycleInput = {
   action: "DISABLE";
-  reason: string;
-  replacementReleaseId?: string;
+  reason: string; // trimmed, 1..2,000 characters
+  replacementReleaseId?: string; // strict UUID when present
 };
 ```
+
+The body is strict. Unknown fields, an unsupported action, blank/oversized reason, or malformed UUID
+returns `422`. Define the reason bound once as
+`PRODUCT_RELEASE_DISABLE_REASON_MAX_LENGTH = 2_000`; controllers and services must not repeat the
+literal.
 
 ```text
 PUT /api/v1/products/:productId/releases/:releaseId/lifecycle, null -> ADMIN
 ```
 
 - Only `PUBLISHED` may become `DISABLED`.
-- Repeated equal disable is no-op success; different reason conflicts.
-- Non-current Release disables directly.
-- Active current Release requires an eligible replacement selected atomically.
-- Suspended/archived current Release may disable without replacement and atomically clears
-  `currentReleaseId`.
+- An already `DISABLED` Release with the same normalized reason is idempotent success. A different
+  reason conflicts. This terminal retry check happens before replacement applicability and never
+  changes the Product pointer.
+- A non-current `PUBLISHED` Release disables directly and must omit `replacementReleaseId`. Supplying
+  it returns `409 Error.ProductReleaseReplacementNotAllowed`; disabling historical Release A must
+  not unexpectedly select unrelated Release B.
+- The current Release of an `ACTIVE` Product requires `replacementReleaseId`.
+- The current Release of a `DRAFT`, `ARCHIVED`, or `SUSPENDED` Product accepts an optional
+  replacement. When present, select it atomically; when omitted, clear `currentReleaseId`.
+- Every replacement must differ from the disabled Release, belong to the same Product, and be
+  `PUBLISHED`, non-disabled, and package-complete.
 - Lock Product before the target and replacement ProductRelease rows. When the Product pointer
   changes, set Product audit fields to the authenticated Admin.
 - Disable retains Static/R2 package and historical metadata.
 - Return only `SUCCESS_RESPONSE`.
+
+The complete state matrix is:
+
+| Target relation | Product status                      | Replacement input | Result                                              |
+| --------------- | ----------------------------------- | ----------------- | --------------------------------------------------- |
+| non-current     | any allowed status                  | omitted           | Disable target; keep `currentReleaseId` unchanged.  |
+| non-current     | any allowed status                  | provided          | Reject; pointer change is not applicable.           |
+| current         | `ACTIVE`                            | omitted           | Reject; an active Product requires a replacement.   |
+| current         | `ACTIVE`                            | provided          | Validate/select replacement and disable atomically. |
+| current         | `DRAFT`, `ARCHIVED`, or `SUSPENDED` | omitted           | Clear pointer and disable atomically.               |
+| current         | `DRAFT`, `ARCHIVED`, or `SUSPENDED` | provided          | Validate/select replacement and disable atomically. |
+
+Admin clients determine the form state from Product `status` plus Release `status` and `isCurrent`.
+After success they reload Product detail and Release list; the mutation response never embeds the
+updated rows.
 
 ### 9.5 Permission records
 
@@ -782,13 +830,15 @@ PUT /api/v1/products/:productId/releases/:releaseId/lifecycle, null -> ADMIN
 - Unique `submissionId` converges concurrent/redelivered messages on one Release.
 - Unique Product/version rejects concurrent duplicate version reservation.
 - Build work holds no database transaction or Product lock.
-- Publication, manual selection, and disable serialize on the Product row and use the common lock
-  order: Product, target ProductRelease, then current/replacement ProductRelease and Static rows.
+- Publication, manual selection, and disable serialize on the Product row. Selection uses the lock
+  order Product, target ProductRelease, then current ProductRelease when present. Product lifecycle
+  activation separately uses Product, current ProductRelease, then ProductOffer.
 - Different Products build and mutate independently.
 - Duplicate delivery after `PUBLISHED`/`DISABLED` returns success.
 - Failed retry reuses Release ID and R2 key; unpublished package bytes/hash may change because a fresh
   nonce is allowed.
-- Existing current Release remains usable during update build.
+- Existing current Release remains usable during update build and after the new Release publishes,
+  until an authorized caller explicitly selects the new Release.
 
 ## 11. Failure contract
 
@@ -810,17 +860,18 @@ PUT /api/v1/products/:productId/releases/:releaseId/lifecycle, null -> ADMIN
 
 ### HTTP
 
-| Condition                                    | Result                                 |
-| -------------------------------------------- | -------------------------------------- |
-| Invalid UUID/query/body                      | 422 validation error                   |
-| Product missing/deleted/cross-owner          | 404 ProductNotFound                    |
-| Release missing/cross-Product/cross-owner    | 404 ProductReleaseNotFound             |
-| Release not selectable                       | 409 ProductReleaseNotSelectable        |
-| Publisher selection while Product not active | 409 ProductReleaseSelectionUnavailable |
-| Disable non-published Release                | 409 ProductReleaseNotDisableable       |
-| Disable active current without replacement   | 409 ProductReleaseReplacementRequired  |
-| Invalid replacement                          | 409 ProductReleaseReplacementInvalid   |
-| Equal retry/no-op                            | 200 SUCCESS_RESPONSE                   |
+| Condition                                   | Result                                  |
+| ------------------------------------------- | --------------------------------------- |
+| Invalid UUID/query/body                     | 422 validation error                    |
+| Product missing/deleted/cross-owner         | 404 ProductNotFound                     |
+| Release missing/cross-Product/cross-owner   | 404 ProductReleaseNotFound              |
+| Release not selectable                      | 409 ProductReleaseNotSelectable         |
+| Selection unavailable for Product lifecycle | 409 ProductReleaseSelectionUnavailable  |
+| Disable non-published Release               | 409 ProductReleaseNotDisableable        |
+| Disable active current without replacement  | 409 ProductReleaseReplacementRequired   |
+| Invalid replacement                         | 409 ProductReleaseReplacementInvalid    |
+| Replacement supplied for non-current target | 409 ProductReleaseReplacementNotAllowed |
+| Equal retry/no-op                           | 200 SUCCESS_RESPONSE                    |
 
 ## 12. Security and observability
 
@@ -854,6 +905,7 @@ Suggested files:
 ```text
 src/routes/product-release/
   product-release.controller.ts
+  product-release.constant.ts
   product-release.dto.ts
   product-release.error.ts
   product-release.model.ts
@@ -895,10 +947,18 @@ and `contentHash`; its package service accepts those stored values as immutable 
 - Product Release reserves one Static record before upload, uses the existing UUID-sharded key
   generator, and reuses that reservation across retries.
 - Published Release has Static-backed private ZIP and immutable package hash.
-- First publish atomically activates Product; update atomically replaces current when not stale.
+- Release publication never changes Product status, `currentReleaseId`, or Product audit fields.
+- Current-Release selection changes only the pointer and Product audit fields for an eligible
+  Product lifecycle state; it never reads Offers or changes Product status.
+- Product lifecycle activation/reactivation reuses Product Release eligibility checks after
+  selection and owns all Offer readiness/rate-limit integration.
+- Publishing an update leaves the existing Marketplace Release current until an authorized caller
+  explicitly selects the new Release.
 - Failure preserves Product/current Release and cleans uncommitted object best-effort.
-- Delayed older Release cannot replace newer current Release.
+- Delayed builds cannot replace the current Release.
 - Publisher/Admin rollback and Admin disable follow lifecycle/ownership rules.
+- Disable validates the bounded reason and exact replacement state matrix: non-current rejects a
+  replacement, current `ACTIVE` requires one, and current non-active Product may switch or clear.
 - Mutations return only `SUCCESS_RESPONSE`.
 - Reads are paginated/set-based and expose no storage/key secret.
 

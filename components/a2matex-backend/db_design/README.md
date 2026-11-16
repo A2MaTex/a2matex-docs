@@ -6,13 +6,13 @@ Backend là source of truth cho dữ liệu cloud. Database local của Studio, 
 
 ## Nhóm schema
 
-| File | Nhóm domain | Nội dung chính |
-| --- | --- | --- |
-| `01_identity_publisher_installation.md` | Identity, access và Launcher distribution | Auth/RBAC hiện có, Publisher, Terms, Launcher Release |
-| `02_studio_project_workflow.md` | Studio cloud data | Node Catalog, Project Draft, Workflow Revision, Asset |
-| `03_product_submission_release.md` | Marketplace publishing | Product, Listing, Taxonomy, Submission, Scan, Review, ProductRelease |
-| `04_commerce_entitlement_execution.md` | Customer ownership và execution authorization | Offer, balance Order, Entitlement, Lease, Execution Report, Product Report |
-| `05_operations_support.md` | Hạ tầng hỗ trợ | Audit, Notification, Outbox, Job và Idempotency |
+| File                                    | Nhóm domain                                   | Nội dung chính                                                             |
+| --------------------------------------- | --------------------------------------------- | -------------------------------------------------------------------------- |
+| `01_identity_publisher_installation.md` | Identity, access và Launcher distribution     | Auth/RBAC hiện có, Publisher, Terms, Launcher Release                      |
+| `02_studio_project_workflow.md`         | Studio cloud data                             | Node Catalog, Project Draft, Workflow Revision, Asset                      |
+| `03_product_submission_release.md`      | Marketplace publishing                        | Product, Listing, Taxonomy, Submission, Scan, Review, ProductRelease       |
+| `04_commerce_entitlement_execution.md`  | Customer ownership và execution authorization | Offer, balance Order, Entitlement, Lease, Execution Report, Product Report |
+| `05_operations_support.md`              | Hạ tầng hỗ trợ                                | Audit, Notification, Outbox, Job và Idempotency                            |
 
 ## Quy ước chung
 
@@ -52,7 +52,7 @@ Mỗi JSONB column trong tài liệu có mock shape ở SQL comment:
 
 Thiết kế ưu tiên hai hành trình:
 
-1. Customer activate Publisher → Studio save Project → Web prepare/submit → admin review → publish ProductRelease.
+1. Customer activate Publisher → Studio save Project → Web prepare Product/Offers and submit → admin review → build ProductRelease → Publisher selects current Release → Publisher lifecycle activates Product.
 2. Customer nhận/mua Product → Launcher download → Backend cấp lease → Runtime Agent execute → sync run summary.
 
 Payment production, recommendation, rating/review, coupon, payout và publisher team không phải critical path của MVP đầu tiên.
