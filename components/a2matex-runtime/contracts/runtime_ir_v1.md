@@ -314,7 +314,7 @@ for Tap, Swipe, and Long Press.
 | `android.input_text` | `text: string[0..10000]` | `{}` | `success`, `error` | 30,000 | `STOP`, `ERROR_BRANCH` | `android.device.control` |
 | `android.press_back` | `{}` | `{}` | `success`, `error` | 30,000 | `STOP`, `ERROR_BRANCH` | `android.device.control` |
 | `android.press_home` | `{}` | `{}` | `success`, `error` | 30,000 | `STOP`, `ERROR_BRANCH` | `android.device.control` |
-| `android.screenshot` | `{}` | `artifactId: string[1..]` | `success`, `error` | 30,000 | `STOP`, `ERROR_BRANCH` | `android.screen.capture` |
+| `android.screenshot` | `targetMode: FULL_SCREEN, ABSOLUTE_PIXELS, or SCREEN_PERCENT` with [mode-specific inputs](../f_device_commands/f7_screenshot.md#1-node-contract) | `artifactId: string[1..]` | `success`, `error` | 30,000 | `STOP`, `ERROR_BRANCH` | `android.screen.capture` |
 
 Node-specific output payloads remain separate because their business results
 differ. A5 defines one common execution-result envelope containing the

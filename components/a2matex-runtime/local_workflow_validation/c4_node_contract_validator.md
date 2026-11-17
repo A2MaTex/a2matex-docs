@@ -166,7 +166,7 @@ configuration accepted for each node.
 | `android.input_text` | `android.input_text` | `{}` only | `success`, `error` |
 | `android.press_back` | `android.press_back` | `{}` only | `success`, `error` |
 | `android.press_home` | `android.press_home` | `{}` only | `success`, `error` |
-| `android.screenshot` | `android.screenshot` | `{}` only | `success`, `error` |
+| `android.screenshot` | `android.screenshot` | [F7 targeting config](../f_device_commands/f7_screenshot.md#1-node-contract). Runtime validation pending. | `success`, `error` |
 
 ### Workflow bindings
 

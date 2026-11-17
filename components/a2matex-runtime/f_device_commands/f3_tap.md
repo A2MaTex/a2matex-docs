@@ -24,8 +24,11 @@ flowchart LR
     F -. Later workflow integration .-> G[G checkpoints result and selects next edge]
 ```
 
-**Status** — Specified. F1 already provides the pixel command. The F3 node
-handler and the device reads for percentage and selector modes are pending.
+**Status** — All three targeting modes, display and hierarchy reads, and
+shipped F9 registration are implemented. Linux automated checks and Windows
+cross-compilation pass. Native Windows and the remaining live-device
+acceptance checks are pending. Phase G owns workflow invocation and
+checkpointing.
 
 ## 1. Handler contract
 

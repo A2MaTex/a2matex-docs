@@ -1,17 +1,17 @@
-# F7 — Capture a full screen or percentage region
+# F7 — Capture a full screen or rectangular region
 
 ## Overview
 
 Screenshot captures a PNG from the Android device selected for the current
-execution. The publisher can leave the region empty for a full-screen
-capture or supply its top-left and bottom-right corners as percentages.
+execution. The publisher chooses Full screen, Absolute pixels, or Screen
+percentage. Both region modes use a top-left and a bottom-right corner.
 ADB captures one full frame. For a region, Runtime crops that frame in
 memory and gives D5 only the cropped PNG. The workflow receives an
 `artifactId` after D4 commits the successful attempt.
 
 ```mermaid
 flowchart LR
-    I[Selected device and optional corners] --> V[Validate both corners or no corners]
+    I[Selected device and capture mode] --> V[Validate exact fields for the mode]
     V -->|Invalid| X[Return failure]
     V -->|Valid| C[F1 and E1 capture one bounded PNG]
     C -->|Capture or image fails| X
@@ -23,10 +23,15 @@ flowchart LR
     D -->|Uncertain| P[D4 reads back commit before publication]
 ```
 
-**Status** — Specified. The existing node definition accepts full-screen
-capture with empty inputs. The optional region contract, capture handler,
-storage integration, and Studio controls are pending. Deliver F7 with
-[D5](../d_persistence/d5_artifact_store.md).
+**Status** — Runtime validation, bounded capture, all three capture modes,
+and the staging callback are implemented. The local smoke runner exercises
+the real D4/D5 commit path using the normal Runtime storage location and
+prints the database and PNG paths. Stop the Runtime server before this
+smoke run so it can acquire the storage lock. Linux automated checks and
+Windows cross-compilation pass. Phase G/A7 owns the workflow runner
+callback, checkpoint handoff, artifact retrieval API, and shipped F9
+registration. Native Windows, remaining live-device acceptance, catalog
+publication, and Studio integration remain pending verification.
 
 ## 1. Node contract
 
@@ -34,46 +39,61 @@ storage integration, and Studio controls are pending. Deliver F7 with
 |---|---|
 | Node type and handler key | Both are `android.screenshot`. |
 | Capability | `android.screen.capture`. |
-| Config | Empty. Use the presence of region fields to choose the operation. |
-| Full screen | Empty `bindings` in Editor Graph and empty `inputs` in Runtime IR. |
-| Region | Exactly four literal bindings corresponding to two points. Each value is an integer from 0 to 100 inclusive. |
+| Config | Exactly one field, `targetMode`. Screenshot declares its own list of allowed modes. |
 | Context | The execution supplies the exact ADB serial and attempt deadline. The default node timeout is 30,000 ms. |
 | Successful output | `{"artifactId":"<opaque ID>"}`. Width and height describe the stored image in D5 metadata. |
 | Control flow | `success` and `error` ports with the existing `STOP` and `ERROR_BRANCH` policies. G applies the admitted policy. |
 
-| Corner | X, measured from the left edge | Y, measured from the top edge |
-|---|---|---|
-| Top-left | `leftPercent` | `topPercent` |
-| Bottom-right | `rightPercent` | `bottomPercent` |
+| `targetMode` | Top-left `(x, y)` | Bottom-right `(x, y)` | Literal bounds |
+|---|---|---|---|
+| `FULL_SCREEN` | No bindings | No bindings | Empty `bindings` and empty IR `inputs` |
+| `ABSOLUTE_PIXELS` | `startX`, `startY` | `endX`, `endY` | Integers from 0 to 4,096 |
+| `SCREEN_PERCENT` | `startXPercent`, `startYPercent` | `endXPercent`, `endYPercent` | Integers from 0 to 100 |
 
-Studio shows **Full screen** or **Region** and groups the four values into
-two points. **Full screen** clears and omits all four bindings before
-validation and save. **Region** requires both points. Studio persists
-literal percentages and can show a rectangle preview using the same corner
-ordering. A preview does not establish the size or orientation of the frame
-the device will return during execution.
+Studio builds the dropdown from Screenshot's `editorHints.targeting.modes`,
+selects and saves `FULL_SCREEN` for a new node, and renders only the selected
+mode's fields. It displays **Top-left** and **Bottom-right** point groups,
+with X and Y for each point, and clears previous-mode coordinates when the
+mode changes. Any preview uses the same corner order. Runtime uses the
+actual captured frame to establish dimensions and orientation.
 
-For `20%, 20%` to `40%, 30%`, Runtime IR carries these inputs. Editor Graph
-uses `bindings` and `kind: "LITERAL"` for the same four values.
+For `20%, 20%` to `40%, 30%`, Runtime IR carries this config and these
+inputs. Editor Graph uses `bindings` and `kind: "LITERAL"` for the same
+four values.
 
 ```json
 {
-  "leftPercent": { "source": "LITERAL", "value": 20 },
-  "topPercent": { "source": "LITERAL", "value": 20 },
-  "rightPercent": { "source": "LITERAL", "value": 40 },
-  "bottomPercent": { "source": "LITERAL", "value": 30 }
+  "config": { "targetMode": "SCREEN_PERCENT" },
+  "inputs": {
+    "startXPercent": { "source": "LITERAL", "value": 20 },
+    "startYPercent": { "source": "LITERAL", "value": 20 },
+    "endXPercent": { "source": "LITERAL", "value": 40 },
+    "endYPercent": { "source": "LITERAL", "value": 30 }
+  }
 }
 ```
 
-The catalog declares the four optional integer fields. A Screenshot-specific
-rule in Backend and Runtime validation enforces all-or-none, literal sources,
-`leftPercent < rightPercent`, and `topPercent < bottomPercent`. Local and
-Backend compilation preserve the field names and literal values. G admission
-checks the same rule for supplied IR. F7 defensively rechecks the resolved
-values before any ADB I/O. Reject partial or extra fields, nulls, strings,
-non-integral numbers, out-of-range values, and equal or reversed edges.
-Use the existing integral JSON number semantics, so `20.0` is accepted as
-20. Existing empty-input workflows keep their full-screen behavior.
+Add `FULL_SCREEN` to the accepted catalog mode names and declare it only
+on Screenshot. The shared mode names keep separate binding schemas for
+each node. Tap and Long Press retain selector targeting. Swipe retains its
+two coordinate modes. Screenshot accepts no selector mode.
+
+Require an explicit mode. Each mode requires exactly its own literal fields.
+Check `startX < endX` and `startY < endY` in pixel mode, and
+`startXPercent < endXPercent` and `startYPercent < endYPercent` in percentage
+mode. An invalid mode produces `NODE_CONFIG_INVALID` at `config.targetMode`. Bad
+bindings produce `NODE_BINDINGS_INVALID`. When each field is valid but an
+axis is equal or reversed, point at the trailing edge's `value`. Backend
+and local compilation preserve the mode, field names, and literal values.
+G admission checks the same rules for supplied IR. F7 rechecks the resolved
+values before ADB I/O. Apply the existing integral JSON number semantics,
+so `20.0` is accepted as 20.
+
+Before validating an existing editable Screenshot workflow against the
+revised catalog, upgrade nodes with empty config and empty bindings to
+explicit `FULL_SCREEN` and invalidate stale compiled IR. Previously frozen
+definitions preserve their original full-screen meaning. The revised
+definition requires an explicit mode for every invocation.
 
 ## 2. Capture one bounded frame
 
@@ -108,7 +128,15 @@ many captures can be active. Release capture and decoded image references
 after staging or failure. See [E1 process boundaries](../e_device_subsystem/e1_process_runner.md)
 and [D5 PNG validation](../d_persistence/d5_artifact_store.md#3-validation-and-publication).
 
-## 3. Convert corners to a pixel rectangle
+## 3. Resolve a pixel rectangle
+
+In `ABSOLUTE_PIXELS`, use the four supplied integers as pixel edges. Check
+`0 <= startX < endX <= width` and `0 <= startY < endY <= height` against the
+captured frame. A right edge of `width` and a bottom edge of `height` are
+valid. If the rectangle falls outside the frame, return a non-retryable
+`COMMAND_INPUT_UNSUPPORTED` with a fixed message. Rotation or a smaller
+device can cause this outcome. Runtime uses the exact region and performs
+no clipping or scaling.
 
 Treat percentages as image edges. The left and top edges are inclusive.
 The right and bottom edges are exclusive. Round the leading edges down
@@ -116,10 +144,10 @@ and the trailing edges up so the crop includes the pixels it overlaps.
 With integer division, the formulas are:
 
 ```text
-x0 = (width  * leftPercent) / 100
-y0 = (height * topPercent) / 100
-x1 = (width  * rightPercent + 99) / 100
-y1 = (height * bottomPercent + 99) / 100
+x0 = (width  * startXPercent) / 100
+y0 = (height * startYPercent) / 100
+x1 = (width  * endXPercent + 99) / 100
+y1 = (height * endYPercent + 99) / 100
 ```
 
 Apply the formulas relative to the decoded image's top-left and require
@@ -128,11 +156,12 @@ height. Pixel index conversion used by Tap and Swipe is a separate rule.
 Here, a trailing edge at 100% equals the image dimension. `(0, 0)` to
 `(100, 100)` covers the whole frame.
 
-| Captured frame | Percentage points | Pixel bounds `(x0,y0)` to `(x1,y1)` | Stored PNG |
+| Captured frame | Selected mode and points | Pixel bounds `(x0,y0)` to `(x1,y1)` | Stored PNG |
 |---|---|---|---|
-| 1920 × 1080 | `(20,20)` to `(40,30)` | `(384,216)` to `(768,324)` | 384 × 108 |
-| 1080 × 1920 | `(20,20)` to `(40,30)` | `(216,384)` to `(432,576)` | 216 × 192 |
-| 7 × 5 | `(20,20)` to `(40,30)` | `(1,1)` to `(3,2)` | 2 × 1 |
+| 1920 × 1080 | Pixels `(384,216)` to `(768,324)` | `(384,216)` to `(768,324)` | 384 × 108 |
+| 1920 × 1080 | Percent `(20,20)` to `(40,30)` | `(384,216)` to `(768,324)` | 384 × 108 |
+| 1080 × 1920 | Percent `(20,20)` to `(40,30)` | `(216,384)` to `(432,576)` | 216 × 192 |
+| 7 × 5 | Percent `(20,20)` to `(40,30)` | `(1,1)` to `(3,2)` | 2 × 1 |
 
 Encode the rectangle as PNG with its own dimensions. Bound encoded bytes
 to 16 MiB and check the attempt context before and after decode and encode,
@@ -161,7 +190,7 @@ the stored size and dimensions, which describe the crop in region mode.
 
 The client uses authenticated `GET /api/v1/artifacts/{artifactId}` to open
 the committed PNG. D5 resolves the ID under the Runtime-controlled storage
-root. Studio uses the existing route for both capture options. See the
+root. Studio uses the same route for all three modes. See the
 [D5 publication rules](../d_persistence/d5_artifact_store.md#3-validation-and-publication)
 and [A7 artifact retrieval](../contracts/local_api_v1.md#11-artifact-retrieval).
 
@@ -170,6 +199,7 @@ and [A7 artifact retrieval](../contracts/local_api_v1.md#11-artifact-retrieval).
 | Condition | Required outcome |
 |---|---|
 | Invalid corners, fields, or config | `COMMAND_INPUT_UNSUPPORTED`, non-retryable. No ADB or storage I/O. |
+| Pixel rectangle falls outside the captured frame | `COMMAND_INPUT_UNSUPPORTED`, non-retryable. Capture completed. No file is staged. |
 | Missing execution serial, deadline, or staging callback | `INTERNAL_ERROR`. Stop before capture. |
 | Resolution or process failure | Preserve the existing F1 classification and retryability. F7 makes at most one capture per attempt. |
 | Empty, oversized, invalid, or truncated PNG, invalid dimensions, or crop encoding failure | `COMMAND_FAILED`, non-retryable. Leave no artifact. |
@@ -185,28 +215,26 @@ exclude raw PNG bytes, ADB stdout and stderr, local paths, and device serials.
 
 | Order | Owner | Deliverable |
 |---|---|---|
-| 1 | Backend, Runtime validation, Studio | Define the fields and cross-field checks in the Backend catalog and validators and sync the installed Runtime definition. Add Editor Graph and Runtime IR parity fixtures for empty, valid, partial, and reversed regions. Update the node matrix and Screenshot action example. Studio exposes Region after the matching catalog and Runtime build are available. |
+| 1 | Backend, Runtime validation, Studio | Define the three modes in the Backend catalog and validator. Sync the installed Runtime definition and validation rules before publication. Extend the parity fixtures and have Studio render the per-node schemas, including the zero-field mode. |
 | 2 | D5 and D4 | Implement PNG staging, metadata, recovery, and atomic attempt publication. Verify with synthetic PNGs before adding ADB as a dependency. |
 | 3 | F1 and F7 | Add the bounded binary Screenshot path under `internal/platform/adb` and the F7 handler under `internal/handlers/screenshot`. Use a controlled executable and an injected staging callback to exercise full-screen and region capture. |
 | 4 | G, F9, and A7 | Supply the attempt-scoped staging callback, pass metadata into the finish checkpoint, and enable artifact retrieval by ID. Register and advertise the shipped handler once these paths and native acceptance pass. |
 
-Use the same graph and IR envelope versions. Publish the revised node
-definition through the existing catalog release flow with the minimum
-Runtime version that implements it. Keep frozen definitions for earlier
-workflow revisions. Update [the node matrix](../contracts/runtime_ir_v1.md#9-current-node-matrix)
-and [C4 validation documentation](../local_workflow_validation/c4_node_contract_validator.md)
-with the catalog change. Defer pixel and selector regions, fractional
-percentages, variable-driven corners, display selection, and multi-region
-capture.
+Use the same graph and IR envelope versions. Before synchronizing the
+revised catalog to a shared environment, set its minimum Runtime version
+to the first compatible release and verify the Studio decoder accepts
+`FULL_SCREEN`. Keep the stored definitions for earlier frozen workflow
+revisions. Defer selector regions, fractional percentages, variable-driven
+corners, display selection, and multi-region capture.
 
 ## 7. Acceptance
 
 | Check | Expected evidence |
 |---|---|
-| Empty inputs and a valid region | Backend and Runtime agree. Existing full-screen graphs compile. The example region keeps all four literals in IR. |
-| Partial corners, wrong binding source, equal or reversed edges, range and type errors | Validators reject the same cases. An invalid resolved call starts zero ADB processes. |
+| Full screen and both valid region modes | Backend and Runtime agree. Full screen carries an explicit mode and zero inputs. Both regions keep all four literals in IR. |
+| Missing, unknown, or cross-node mode, extra or partial fields, wrong source, and bad geometry | Validators reject the same cases. An invalid resolved call starts zero ADB processes. Existing Tap, Swipe, and Long Press reject `FULL_SCREEN`. |
 | Controlled ADB capture | One capture uses the exact serial and fixed `exec-out` arguments. PNG bytes reach F7 unchanged. Nonzero exit, cancellation, and stdout truncation publish no result. |
-| Crop geometry | A color-coded test PNG proves the stored pixels come from the expected position. Verify landscape, portrait, odd dimensions, and a `(0,0)` to `(100,100)` region. |
+| Crop geometry | A color-coded test PNG verifies pixel accuracy, matching equivalent regions, edge rounding on odd dimensions, full-image bounds, and rejection when pixel bounds exceed a smaller frame. |
 | Capture and image limits | Exercise the encoded byte boundary, oversized source, malformed and truncated images, axis and pixel-count limits, and an encoded crop exceeding the store limit. |
 | Persistence and recovery | Success opens the expected PNG by `artifactId`. File or checkpoint failure exposes no success reference. Uncertain commit and restart preserve the committed PNG and remove confirmed orphans. |
-| Native and live acceptance | Verify binary ADB arguments and capture on Linux and Windows. On Waydroid and a physical Android device, retrieve both captures and compare visible content and dimensions. Rotate the device and repeat. Confirm the downloaded region is cropped and the full source was never stored for that region. |
+| Native and live acceptance | Verify binary ADB arguments and capture on Linux and Windows. On Waydroid and a physical Android device, retrieve captures from all three modes and compare visible content and dimensions. Rotate the device and repeat. Inspect stored region files to confirm only the cropped content was committed. |

@@ -20,9 +20,11 @@ flowchart LR
     E -. Phase G .-> G
 ```
 
-**Status** — Specified. The Backend catalog and Phase C support the node's
-authoring and compilation contract. The executable handler and adapter are
-pending. Phase G owns run admission, binding resolution, and checkpointing.
+**Status** — Handler, typed command, launch-result parser, and shipped F9
+registration are implemented. Linux automated checks and Windows
+cross-compilation pass. Native Windows and the remaining live-device
+acceptance checks are pending. Phase G owns run admission, binding
+resolution, and checkpointing.
 
 ## 1. Invocation contract
 

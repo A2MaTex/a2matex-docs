@@ -22,8 +22,11 @@ flowchart LR
     A -. Phase G .-> O[Checkpoint result and follow admitted edge]
 ```
 
-**Status** — Specified. F1 dispatch, F3 display reads, and the F9 callable
-boundary are available. The Swipe command and handler are pending.
+**Status** — Both targeting modes, typed dispatch, gesture-budget checks,
+and shipped F9 registration are implemented. Linux automated checks and
+Windows cross-compilation pass. Native Windows and the remaining live-device
+acceptance checks are pending. Phase G owns workflow invocation and
+checkpointing.
 
 ## 1. Files and implementation order
 

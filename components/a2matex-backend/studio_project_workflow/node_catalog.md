@@ -215,7 +215,7 @@ fall-through are outside the MVP contract.
 ### Targeting modes and Long Press
 
 The seed includes Long Press. Catalog presence does not indicate Runtime handler
-availability. Tap, Swipe, and Long Press publish their form contract through
+availability. Tap, Swipe, Long Press, and Screenshot define their form contract through
 `editorHints.targeting.modes`. Each mode contains `mode` and a strict
 `bindingSchema`. Their top-level `inputSchema` is empty because
 the selected mode owns the valid bindings. Backend and local Runtime validate
@@ -226,8 +226,9 @@ the explicit authoring modes below. Executable support belongs to Stage 2.
 | `android.tap`              | `x`, `y` (existing)                           | `xPercent`, `yPercent`                                         | `selector_id`              | None                                                                             |
 | `android.swipe`            | `startX`, `startY`, `endX`, `endY` (existing) | `startXPercent`, `startYPercent`, `endXPercent`, `endYPercent` | Unsupported                | Existing gesture `durationMs` in both modes                                      |
 | `android.long_press` (new) | `x`, `y`                                      | `xPercent`, `yPercent`                                         | `selector_id`              | Required positive safe integer hold `durationMs`. Stage 2 plans a 60,000 ms cap. |
+| `android.screenshot` | `startX`, `startY`, `endX`, `endY` | `startXPercent`, `startYPercent`, `endXPercent`, `endYPercent` | Unsupported | `FULL_SCREEN` accepts zero bindings |
 
-- Percentages are integers from 0 to 100, measured from the top-left of the
+- Gesture percentages are integers from 0 to 100, measured from the top-left of the
   current device screen in its current orientation. Resolve each axis against
   its own dimension: `round(percent × (dimension - 1) / 100)`. Scaling does
   not compensate for controls that move after a layout or orientation change.
@@ -239,7 +240,12 @@ the explicit authoring modes below. Executable support belongs to Stage 2.
 - Long Press is an Android device-control action. The Runtime targeting
   adapter and workflow handler are planned for Phase F.
   the existing Input Text remains a focused-field action and can follow Tap.
-  No input changes for the other nine existing nodes. Scroll is out of scope.
+- Screenshot declares `FULL_SCREEN` only on its own node definition. Each
+  region mode uses Swipe's coordinate names for the top-left and bottom-right
+  points of an ordered rectangle. Pixel edges are integers from 0 to 4,096
+  and percentage edges are integers from
+  0 to 100. See [F7](../../a2matex-runtime/f_device_commands/f7_screenshot.md)
+  for Studio defaults, rollout, and crop math.
 - The [Editor Graph rules](workflow_validation.md#planned-targeting-in-editor-graph-v1)
   describe the validated draft representation. Runtime IR remains unchanged.
 

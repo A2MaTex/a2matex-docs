@@ -326,6 +326,11 @@ Gate:
 
 See the [Phase F specification index](phase_f.md).
 
+The Phase F dispatcher, registry, and required node handlers are implemented.
+The index records shipped registrations, Linux verification, outstanding
+native and live acceptance, and the Screenshot integration assigned to
+Phase G/A7.
+
 | ID  | Module             | Real operation                                                                                                  |
 | --- | ------------------ | --------------------------------------------------------------------------------------------------------------- |
 | F1  | [Command dispatcher](../f_device_commands/f1_command_dispatcher.md) | Binds every command to one explicit ADB serial and rejects arbitrary commands |
@@ -334,7 +339,7 @@ See the [Phase F specification index](phase_f.md).
 | F4  | [Swipe](../f_device_commands/f4_swipe.md) | Swipes between two pixel or percentage targets with a bounded duration |
 | F5  | [Input Text](../f_device_commands/f5_input_text.md) | Types supported text into the focused field through one safely quoted ADB argument |
 | F6  | [Key events](../f_device_commands/f6_key_events.md) | Dispatches one fixed Back or Home key event on the selected Android device |
-| F7  | [Screenshot](../f_device_commands/f7_screenshot.md) | Captures the full screen or a two-point percentage region and publishes its PNG through D5 |
+| F7  | [Screenshot](../f_device_commands/f7_screenshot.md) | Captures the full screen or a two-point pixel or percentage region and publishes its PNG through D5 |
 | F8  | [Flow handlers](../f_device_commands/f8_flow_handlers.md) | Implements Start, End, and cancellable Delay. Log depends on approval of sensitive-data handling. |
 | F9  | [Handler registry](../f_device_commands/f9_handler_registry.md) | Registers enabled type/handler pairs and supplies Runtime Info and future admission lookup. |
 | F10 | [Long Press](../f_device_commands/f10_long_press.md) | Holds a pixel, percentage, or selector-ID target for the requested bounded duration |

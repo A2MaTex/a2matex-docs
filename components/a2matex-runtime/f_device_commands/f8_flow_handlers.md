@@ -22,9 +22,10 @@ flowchart LR
     F -. Phase G .-> G
 ```
 
-**Status** — Specified. The F9 registry is available. Implement Start and
-End first for `Start → Tap → End`, then add Delay. Publisher-authored
-Log remains conditional on the sensitive-data policy.
+**Status** — Start, End, and cancellable Delay are implemented, tested, and
+registered in the shipped F9 registry. Their local completion criteria are
+met. Phase G owns graph transitions and persisted workflow integration.
+Publisher-authored Log remains deferred pending its sensitive-data contract.
 
 ## 1. Files and implementation order
 

@@ -20,9 +20,11 @@ flowchart LR
     X -. Phase G .-> G
 ```
 
-**Status** — Specified. The catalog already defines the node and its input
-schema. F5 adds the executable handler and adapter. Phase G owns binding
-resolution, workflow order, and attempt records.
+**Status** — Handler, text validation and quoting, Windows command-length
+guard, and shipped F9 registration are implemented. Linux automated checks
+and Windows cross-compilation pass. Native Windows and the remaining
+live-device acceptance checks are pending. Phase G owns binding resolution,
+workflow order, and attempt records.
 
 ## 1. Invocation contract
 

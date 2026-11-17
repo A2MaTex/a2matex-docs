@@ -19,10 +19,11 @@ flowchart LR
     E -. Phase G .-> G
 ```
 
-**Status** — Specified. The catalog, the F1 dispatch path, and the F9 callable
-boundary are available. Both key handlers and their adapter cases are pending.
-Phase G will invoke them in workflow order, persist outcomes, and apply the
-node's error policy.
+**Status** — Both key handlers, fixed-command adapters, and shipped F9
+registrations are implemented. Linux automated checks and Windows
+cross-compilation pass. Native Windows and the remaining live-device
+acceptance checks are pending. Phase G owns workflow order, persisted
+outcomes, and the node's error policy.
 
 ## 1. Node and invocation contracts
 

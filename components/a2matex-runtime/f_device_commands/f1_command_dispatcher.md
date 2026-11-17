@@ -20,8 +20,10 @@ flowchart LR
     O -. Future workflow integration .-> G[G records attempt and decides next step]
 ```
 
-**Status** — Specified. E1 and E2 are available in Runtime. F1 implementation
-and acceptance are pending.
+**Status** — Implemented using the shared E1 runner and E2 resolver. Linux
+automated dispatch and failure checks pass, and Windows cross-compilation
+passes. Native Windows and the remaining live-device acceptance checks are
+pending. Phase G owns invocation during workflow execution.
 
 ## 1. Ownership and dependencies
 

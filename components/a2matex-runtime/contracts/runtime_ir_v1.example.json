@@ -98,7 +98,7 @@
       "id": "screenshot_01",
       "type": "android.screenshot",
       "runtimeHandler": "android.screenshot",
-      "config": {},
+      "config": { "targetMode": "FULL_SCREEN" },
       "inputs": {},
       "timeoutMs": 30000,
       "retryPolicy": {

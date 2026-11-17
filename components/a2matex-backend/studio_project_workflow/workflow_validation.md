@@ -171,6 +171,15 @@ binding where required. Explicit modes require strict literal objects.
 Invalid mode configuration yields `NODE_CONFIG_INVALID`. Invalid target
 bindings yield `NODE_BINDINGS_INVALID` with the binding path.
 
+The revised Screenshot definition requires its own explicit `targetMode`.
+`FULL_SCREEN` takes zero bindings. `ABSOLUTE_PIXELS` and `SCREEN_PERCENT`
+each require the four literals for their own coordinate unit. Validate the
+leading edge is strictly before the trailing edge on each axis when the
+fields are individually valid. Report bad ordering at the trailing edge's
+`value` with `NODE_BINDINGS_INVALID`. F7 checks absolute edges against the
+captured frame during execution. See the
+[F7 mode contract](../../a2matex-runtime/f_device_commands/f7_screenshot.md#1-node-contract).
+
 Every node accepts `STOP`. `ERROR_BRANCH` is valid only when the active Node
 Definition declares the static `error` output-port key. Otherwise Backend and
 Runtime return `NODE_ERROR_POLICY_INVALID` at the node's `errorPolicy` path.

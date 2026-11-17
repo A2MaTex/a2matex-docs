@@ -46,17 +46,22 @@ extra fields, and non-literal binding sources fail admission.
 | Tap | `x`, `y` | `xPercent`, `yPercent` | `selector_id` | None |
 | Swipe | `startX`, `startY`, `endX`, `endY` | `startXPercent`, `startYPercent`, `endXPercent`, `endYPercent` | Unsupported | `durationMs` |
 | Long Press | `x`, `y` | `xPercent`, `yPercent` | `selector_id` | `durationMs` |
+| Screenshot | `startX`, `startY`, `endX`, `endY` | `startXPercent`, `startYPercent`, `endXPercent`, `endYPercent` | Unsupported | `FULL_SCREEN` is a Screenshot-only mode with zero bindings |
 
-Mode names are `ABSOLUTE_PIXELS`, `SCREEN_PERCENT`, and `SELECTOR_ID`.
-Pixel coordinates are integers from 0 to 100,000. Percentages are integers
-from 0 to 100. Durations are integers from 1 to 60,000 ms and must fit within
-the attempt timeout to finish. Selector IDs use the full Android resource ID.
+Allowed modes come from each node's catalog entry. Gesture pixel coordinates
+are integers from 0 to 100,000. Screenshot pixel edges use 0 to 4,096 and must
+form an ordered rectangle. Percentages are integers from 0 to 100. Durations
+are integers from 1 to 60,000 ms and must fit within the attempt timeout to
+finish. Selector IDs use the full Android resource ID.
 
 ## Resolution and dispatch
 
-- Pixels go straight to dispatch. Percentage targeting reads the current
+- Gesture pixels go straight to dispatch. Gesture percentage targeting reads the current
   default display size and rounds each axis as
   `round(percent × (dimension − 1) / 100)`. Swipe uses one size snapshot.
+- Screenshot captures one frame in all three modes. The two region modes
+  resolve edge bounds from that frame and store the cropped PNG through D5.
+  See [F7](../f_device_commands/f7_screenshot.md#3-resolve-a-pixel-rectangle).
 - Selector targeting reads the current hierarchy, requires exactly one
   resource-ID match, and dispatches to the center of its screen-clipped
   bounds. Missing, ambiguous, hidden, malformed, or empty bounds fail before

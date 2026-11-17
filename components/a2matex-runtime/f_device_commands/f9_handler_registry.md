@@ -18,9 +18,11 @@ flowchart LR
     L -->|Missing or mismatched| E[Reject before creating a run]
 ```
 
-**Status** — Specified. F3 Tap already has a Go handler. F9 adds the lookup,
-the Tap adapter, and Runtime Info wiring. F9 can be tested before Phase G
-exists.
+**Status** — Registry construction, exact type/key lookup, immutable
+capability snapshots, and authenticated Runtime Info wiring are implemented
+and tested. The shipped registry exposes ten pairs, covering seven Android
+actions and Start, End, and Delay. Screenshot registration follows its
+G/A7 integration. Phase G owns executable admission and workflow invocation.
 
 ## 1. Put the map in `internal/handlers/registry/registry.go`
 

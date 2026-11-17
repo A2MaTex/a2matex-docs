@@ -169,14 +169,17 @@ Handler nhận package/activity đã validate rồi tạo command tương ứng.
 adb -s <serial> exec-out screencap -p
 ```
 
-PNG bytes được lưu vào Artifact Store:
+`config.targetMode` chọn `FULL_SCREEN`, `ABSOLUTE_PIXELS` hoặc
+`SCREEN_PERCENT`. Hai chế độ tọa độ sử dụng góc trên trái và góc dưới phải.
+F7 cắt ảnh theo vùng đã chọn và D5 lưu PNG cuối cùng. Workflow nhận:
 
 ```json
 {
-  "artifactId": "artifact_01",
-  "width": 1080,
-  "height": 1920
+  "artifactId": "artifact_01"
 }
 ```
+
+Chiều rộng và chiều cao được lưu trong metadata của D5. Xem
+[đặc tả F7](f_device_commands/f7_screenshot.md).
 
 Selector chỉ hoạt động nếu ứng dụng expose UI element qua Android Accessibility/UIAutomator. Với game, Canvas, Unity hoặc một số WebView, Runtime phải sử dụng tọa độ, tọa độ tương đối, tìm ảnh hoặc OCR.

@@ -22,9 +22,11 @@ flowchart LR
     X -. Phase G .-> G
 ```
 
-**Status** — Specified. The Backend catalog and Phase C already recognize
-the node. F10 adds the executable handler and command. Phase G owns workflow
-admission, invocation in graph order, and checkpointing.
+**Status** — All three targeting modes, typed command, gesture-budget
+checks, and shipped F9 registration are implemented. Linux automated checks
+and Windows cross-compilation pass. Native Windows and the remaining
+live-device acceptance checks are pending. Phase G owns workflow admission,
+invocation in graph order, and checkpointing.
 
 ## 1. Implementation order
 
