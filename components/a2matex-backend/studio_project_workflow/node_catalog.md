@@ -70,7 +70,8 @@ Each definition declares:
   `additionalProperties: false`;
 - unique static output-port keys; `flow.switch` additionally resolves its ordered rule IDs and
   `default` as instance ports from validated config;
-- optional targeting-mode binding schemas in `editorHints`;
+- allowed binding sources and their saved fields in each self-describing `inputSchema` property;
+- optional targeting-mode binding schemas in `editorHints.targeting`;
 - capability codes.
 
 Required fields must exist in `properties`; duplicate ports and capabilities are
@@ -81,16 +82,15 @@ expression or JavaScript is accepted.
 
 ### Reduced Studio metadata
 
-Studio maps icon, color, field layout, port labels, and target-mode labels from
-stable identifiers, with fallbacks for unknown values. The Backend keeps only
-semantic targeting schemas under `editorHints.targeting`. Catalog hashing and
-ETag continue to cover the returned catalog content.
+Studio maps icon, color, field layout, port labels, and target-mode labels from stable identifiers, with fallbacks for unknown values. The Backend keeps only semantic targeting and binding schemas required to avoid duplicating business
+options in Studio. Catalog hashing and ETag continue
+to cover the returned catalog content.
 
 ## 5. Initial catalog
 
 | Category | Node types                                                                                                                                                         |
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Flow     | `flow.start`, `flow.end`, `flow.delay`, `flow.wait_variable`, `flow.switch`, `flow.set_variable`                                                                     |
+| Flow     | `flow.start`, `flow.end`, `flow.delay`, `flow.wait_variable`, `flow.switch`, `flow.set_variable`                                                                   |
 | Utility  | `utility.log`                                                                                                                                                      |
 | Android  | `android.launch_app`, `android.tap`, `android.swipe`, `android.input_text`, `android.press_back`, `android.press_home`, `android.screenshot`, `android.long_press` |
 
@@ -98,12 +98,119 @@ The Backend source catalog contains 15 definitions.
 
 Special Flow contracts:
 
-- `flow.set_variable` requires `config.name`, accepts optional `scope` (`FLOW` or `RUN_GROUP`), and
+- `flow.set_variable` requires `config.name` and explicit `scope` (`FLOW` or `RUN_GROUP`), and
   receives its value through `bindings.value`;
 - `flow.wait_variable` requires only `config.name`; the node instance's optional `timeoutMs`, or the
   definition default when omitted, is the wait deadline;
 - `flow.switch` owns ordered `config.rules`; each rule ID and `default` is a required instance output
   port, with conditional `error` when the node uses `ERROR_BRANCH`.
+
+### Set Variable authoring contract
+
+`flow.set_variable` stores one resolved scalar under a case-sensitive name. `FLOW` belongs to one
+device execution. `RUN_GROUP` is read through `GLOBAL_VARIABLE` and belongs to the current Runtime
+Run Group. Studio initializes scope to `FLOW` from the schema default and always saves it explicitly;
+Backend rejects a missing or unsupported scope. The required `inputSchema.value` property publishes
+the allowed sources and the fields saved for each source:
+
+```json
+{
+  "type": "flow.set_variable",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,99}$"
+      },
+      "scope": {
+        "type": "string",
+        "enum": ["FLOW", "RUN_GROUP"],
+        "default": "FLOW"
+      }
+    },
+    "required": ["name", "scope"],
+    "additionalProperties": false
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "value": {
+        "bindingKinds": {
+          "LITERAL": {
+            "fields": {
+              "value": { "types": ["string", "number", "boolean"] }
+            }
+          },
+          "WORKFLOW_INPUT": { "fields": ["inputName"] },
+          "NODE_OUTPUT": { "fields": ["nodeId", "field"] },
+          "FLOW_VARIABLE": { "fields": ["name"] },
+          "GLOBAL_VARIABLE": { "fields": ["name"] }
+        }
+      }
+    },
+    "required": ["value"],
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {},
+    "required": [],
+    "additionalProperties": false
+  },
+  "outputPorts": { "ports": ["success", "error"] },
+  "editorHints": {}
+}
+```
+
+Studio renders `configSchema` into `node.config` and each `inputSchema` property into the matching
+`node.bindings` key. For `value`, the selected binding kind declares exactly which fields Studio
+collects and saves. The schemas are never copied into a Project Draft. Backend authoring validation
+requires `bindings.value`, rejects unpublished binding kinds and additional binding keys, and accepts
+only string, finite-number, or boolean literal values.
+
+Catalog publication does not claim Runtime execution support. The variable store, binding resolver,
+scope-aware Set Variable handler, and atomic checkpoint write remain owned by Runtime Phase G/H.
+
+### Switch authoring contract
+
+`flow.switch` evaluates one shared `bindings.value` against one to 32 ordered rules and follows the
+first matching branch. Studio generates each rule ID as a UUID, never exposes it as an editable
+field, and preserves it during edits and reordering. The UUID joins three pieces of instance data:
+
+```text
+config.rules[].id = bindings[rule.id] key = edge.sourcePort
+```
+
+The definition publishes:
+
+- `configSchema.rules`: ordered UUID/operator records;
+- operator options with supported value types and `operandCount`;
+- `inputSchema.properties.value`: the shared left-side binding contract;
+- `inputSchema.dynamicInputs.ruleOperand`: the per-rule operand contract, keyed by rule UUID;
+- `outputPorts.dynamicPorts`: rule UUIDs as branch ports, plus static `default` and conditional
+  `error` ports.
+
+Binary operators `EQ`, `NE`, `LT`, `LTE`, `GT`, `GTE`, `CONTAINS`, `NOT_CONTAINS`, `STARTS_WITH`,
+and `ENDS_WITH` have `operandCount: 1` and require `bindings[rule.id]`. Unary operators `IS_EMPTY`,
+`IS_NOT_EMPTY`, `IS_TRUE`, and `IS_FALSE` have `operandCount: 0` and forbid that binding. Both the
+shared value and binary operands accept `LITERAL`, `WORKFLOW_INPUT`, `NODE_OUTPUT`, `FLOW_VARIABLE`,
+and `GLOBAL_VARIABLE` using the same field contracts as Set Variable.
+
+Static type rules are:
+
+| Operators                                              | Required resolved type                           |
+| ------------------------------------------------------ | ------------------------------------------------ |
+| `EQ`, `NE`                                             | matching string, number, or boolean values                |
+| `LT`, `LTE`, `GT`, `GTE`                               | number on both sides; Runtime compares floating-point values |
+| `CONTAINS`, `NOT_CONTAINS`, `STARTS_WITH`, `ENDS_WITH` | string on both sides                             |
+| `IS_EMPTY`, `IS_NOT_EMPTY`                             | string left value                                |
+| `IS_TRUE`, `IS_FALSE`                                  | boolean left value                               |
+
+Unknown variable types are checked when Runtime resolves them. Every rule and `default` requires one
+outgoing edge. `error` requires one edge only when the node selects `ERROR_BRANCH`. Switch has no
+bindable output data fields. Range operators, regex, null, object keys, nested conditions, and
+fall-through are outside the MVP contract.
 
 ### Targeting modes and Long Press
 

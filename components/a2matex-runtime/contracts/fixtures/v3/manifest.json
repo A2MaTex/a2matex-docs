@@ -208,7 +208,7 @@
         "classification": "VALID",
         "definitions": {
           "path": "fixtures/v3/compilation/node_definitions.json",
-          "sha256": "6a747b3d98a73d411a05c853594e6568117857a10140232e654920e07aed5e12"
+          "sha256": "dfa337f16ea3a9c2abf7b524bc99bfb6c7e16af2416a957f64d3809ee0c83000"
         }
       }
     },
@@ -221,7 +221,7 @@
         "classification": "VALID",
         "definitions": {
           "path": "fixtures/v3/compilation/node_definitions.json",
-          "sha256": "6a747b3d98a73d411a05c853594e6568117857a10140232e654920e07aed5e12"
+          "sha256": "dfa337f16ea3a9c2abf7b524bc99bfb6c7e16af2416a957f64d3809ee0c83000"
         }
       }
     },
@@ -234,7 +234,7 @@
         "classification": "INVALID",
         "definitions": {
           "path": "fixtures/v3/compilation/node_definitions.json",
-          "sha256": "6a747b3d98a73d411a05c853594e6568117857a10140232e654920e07aed5e12"
+          "sha256": "dfa337f16ea3a9c2abf7b524bc99bfb6c7e16af2416a957f64d3809ee0c83000"
         }
       }
     },
@@ -247,7 +247,7 @@
         "classification": "INVALID",
         "definitions": {
           "path": "fixtures/v3/compilation/node_definitions.json",
-          "sha256": "6a747b3d98a73d411a05c853594e6568117857a10140232e654920e07aed5e12"
+          "sha256": "dfa337f16ea3a9c2abf7b524bc99bfb6c7e16af2416a957f64d3809ee0c83000"
         }
       }
     },
@@ -260,7 +260,7 @@
         "classification": "INVALID",
         "definitions": {
           "path": "fixtures/v3/compilation/node_definitions.json",
-          "sha256": "6a747b3d98a73d411a05c853594e6568117857a10140232e654920e07aed5e12"
+          "sha256": "dfa337f16ea3a9c2abf7b524bc99bfb6c7e16af2416a957f64d3809ee0c83000"
         }
       }
     }

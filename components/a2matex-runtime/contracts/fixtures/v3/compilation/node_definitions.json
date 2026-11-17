@@ -26,9 +26,7 @@
       "additionalProperties": false
     },
     "outputPorts": {
-      "ports": [
-        "success"
-      ]
+      "ports": ["success"]
     },
     "editorHints": {},
     "capabilities": []
@@ -88,9 +86,7 @@
           "maximum": 300000
         }
       },
-      "required": [
-        "durationMs"
-      ],
+      "required": ["durationMs"],
       "additionalProperties": false
     },
     "outputSchema": {
@@ -101,16 +97,11 @@
           "minimum": 0
         }
       },
-      "required": [
-        "durationMs"
-      ],
+      "required": ["durationMs"],
       "additionalProperties": false
     },
     "outputPorts": {
-      "ports": [
-        "success",
-        "error"
-      ]
+      "ports": ["success", "error"]
     },
     "editorHints": {
       "bindingKinds": [
@@ -146,9 +137,7 @@
           "maxLength": 4000
         }
       },
-      "required": [
-        "message"
-      ],
+      "required": ["message"],
       "additionalProperties": false
     },
     "outputSchema": {
@@ -158,10 +147,7 @@
       "additionalProperties": false
     },
     "outputPorts": {
-      "ports": [
-        "success",
-        "error"
-      ]
+      "ports": ["success", "error"]
     },
     "editorHints": {
       "bindingKinds": [
@@ -190,9 +176,7 @@
           "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,99}$"
         }
       },
-      "required": [
-        "name"
-      ],
+      "required": ["name"],
       "additionalProperties": false
     },
     "inputSchema": {
@@ -208,10 +192,7 @@
       "additionalProperties": false
     },
     "outputPorts": {
-      "ports": [
-        "success",
-        "error"
-      ]
+      "ports": ["success", "error"]
     },
     "editorHints": {},
     "capabilities": []
@@ -226,14 +207,134 @@
     "defaultTimeoutMs": 1000,
     "configSchema": {
       "type": "object",
-      "properties": {},
-      "required": [],
+      "properties": {
+        "rules": {
+          "type": "array",
+          "minimumItems": 1,
+          "maximumItems": 32,
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string", "format": "uuid", "readOnly": true },
+              "operator": {
+                "type": "string",
+                "options": [
+                  {
+                    "value": "EQ",
+                    "supportedTypes": ["string", "number", "boolean"],
+                    "operandCount": 1
+                  },
+                  {
+                    "value": "NE",
+                    "supportedTypes": ["string", "number", "boolean"],
+                    "operandCount": 1
+                  },
+                  {
+                    "value": "LT",
+                    "supportedTypes": ["number"],
+                    "operandCount": 1
+                  },
+                  {
+                    "value": "LTE",
+                    "supportedTypes": ["number"],
+                    "operandCount": 1
+                  },
+                  {
+                    "value": "GT",
+                    "supportedTypes": ["number"],
+                    "operandCount": 1
+                  },
+                  {
+                    "value": "GTE",
+                    "supportedTypes": ["number"],
+                    "operandCount": 1
+                  },
+                  {
+                    "value": "CONTAINS",
+                    "supportedTypes": ["string"],
+                    "operandCount": 1
+                  },
+                  {
+                    "value": "NOT_CONTAINS",
+                    "supportedTypes": ["string"],
+                    "operandCount": 1
+                  },
+                  {
+                    "value": "STARTS_WITH",
+                    "supportedTypes": ["string"],
+                    "operandCount": 1
+                  },
+                  {
+                    "value": "ENDS_WITH",
+                    "supportedTypes": ["string"],
+                    "operandCount": 1
+                  },
+                  {
+                    "value": "IS_EMPTY",
+                    "supportedTypes": ["string"],
+                    "operandCount": 0
+                  },
+                  {
+                    "value": "IS_NOT_EMPTY",
+                    "supportedTypes": ["string"],
+                    "operandCount": 0
+                  },
+                  {
+                    "value": "IS_TRUE",
+                    "supportedTypes": ["boolean"],
+                    "operandCount": 0
+                  },
+                  {
+                    "value": "IS_FALSE",
+                    "supportedTypes": ["boolean"],
+                    "operandCount": 0
+                  }
+                ]
+              }
+            },
+            "required": ["id", "operator"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["rules"],
       "additionalProperties": false
     },
     "inputSchema": {
       "type": "object",
-      "properties": {},
-      "required": [],
+      "properties": {
+        "value": {
+          "bindingKinds": {
+            "LITERAL": {
+              "fields": {
+                "value": { "types": ["string", "number", "boolean"] }
+              }
+            },
+            "WORKFLOW_INPUT": { "fields": ["inputName"] },
+            "NODE_OUTPUT": { "fields": ["nodeId", "field"] },
+            "FLOW_VARIABLE": { "fields": ["name"] },
+            "GLOBAL_VARIABLE": { "fields": ["name"] }
+          }
+        }
+      },
+      "dynamicInputs": {
+        "ruleOperand": {
+          "bindingKeyFrom": "config.rules[].id",
+          "operandCountFrom": "config.rules[].operator",
+          "bindingKinds": {
+            "LITERAL": {
+              "fields": {
+                "value": { "types": ["string", "number", "boolean"] }
+              }
+            },
+            "WORKFLOW_INPUT": { "fields": ["inputName"] },
+            "NODE_OUTPUT": { "fields": ["nodeId", "field"] },
+            "FLOW_VARIABLE": { "fields": ["name"] },
+            "GLOBAL_VARIABLE": { "fields": ["name"] }
+          }
+        }
+      },
+      "required": ["value"],
       "additionalProperties": false
     },
     "outputSchema": {
@@ -243,19 +344,10 @@
       "additionalProperties": false
     },
     "outputPorts": {
-      "ports": [
-        "error"
-      ]
+      "ports": ["default", "error"],
+      "dynamicPorts": { "keysFrom": "config.rules[].id" }
     },
-    "editorHints": {
-      "bindingKinds": [
-        "LITERAL",
-        "WORKFLOW_INPUT",
-        "NODE_OUTPUT",
-        "FLOW_VARIABLE",
-        "GLOBAL_VARIABLE"
-      ]
-    },
+    "editorHints": {},
     "capabilities": []
   },
   {
@@ -275,18 +367,31 @@
         },
         "scope": {
           "type": "string",
-          "pattern": "^(FLOW|RUN_GROUP)$"
+          "enum": ["FLOW", "RUN_GROUP"],
+          "default": "FLOW"
         }
       },
-      "required": [
-        "name"
-      ],
+      "required": ["name", "scope"],
       "additionalProperties": false
     },
     "inputSchema": {
       "type": "object",
-      "properties": {},
-      "required": [],
+      "properties": {
+        "value": {
+          "bindingKinds": {
+            "LITERAL": {
+              "fields": {
+                "value": { "types": ["string", "number", "boolean"] }
+              }
+            },
+            "WORKFLOW_INPUT": { "fields": ["inputName"] },
+            "NODE_OUTPUT": { "fields": ["nodeId", "field"] },
+            "FLOW_VARIABLE": { "fields": ["name"] },
+            "GLOBAL_VARIABLE": { "fields": ["name"] }
+          }
+        }
+      },
+      "required": ["value"],
       "additionalProperties": false
     },
     "outputSchema": {
@@ -296,20 +401,9 @@
       "additionalProperties": false
     },
     "outputPorts": {
-      "ports": [
-        "success",
-        "error"
-      ]
+      "ports": ["success", "error"]
     },
-    "editorHints": {
-      "bindingKinds": [
-        "LITERAL",
-        "WORKFLOW_INPUT",
-        "NODE_OUTPUT",
-        "FLOW_VARIABLE",
-        "GLOBAL_VARIABLE"
-      ]
-    },
+    "editorHints": {},
     "capabilities": []
   },
   {
@@ -336,9 +430,7 @@
           "pattern": "^[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)+$"
         }
       },
-      "required": [
-        "packageName"
-      ],
+      "required": ["packageName"],
       "additionalProperties": false
     },
     "outputSchema": {
@@ -348,10 +440,7 @@
       "additionalProperties": false
     },
     "outputPorts": {
-      "ports": [
-        "success",
-        "error"
-      ]
+      "ports": ["success", "error"]
     },
     "editorHints": {
       "bindingKinds": [
@@ -362,9 +451,7 @@
         "GLOBAL_VARIABLE"
       ]
     },
-    "capabilities": [
-      "android.device.control"
-    ]
+    "capabilities": ["android.device.control"]
   },
   {
     "type": "android.tap",
@@ -379,16 +466,10 @@
       "properties": {
         "targetMode": {
           "type": "string",
-          "enum": [
-            "ABSOLUTE_PIXELS",
-            "SCREEN_PERCENT",
-            "SELECTOR_ID"
-          ]
+          "enum": ["ABSOLUTE_PIXELS", "SCREEN_PERCENT", "SELECTOR_ID"]
         }
       },
-      "required": [
-        "targetMode"
-      ],
+      "required": ["targetMode"],
       "additionalProperties": false
     },
     "inputSchema": {
@@ -404,15 +485,10 @@
       "additionalProperties": false
     },
     "outputPorts": {
-      "ports": [
-        "success",
-        "error"
-      ]
+      "ports": ["success", "error"]
     },
     "editorHints": {
-      "bindingKinds": [
-        "LITERAL"
-      ],
+      "bindingKinds": ["LITERAL"],
       "targeting": {
         "modes": [
           {
@@ -431,10 +507,7 @@
                   "maximum": 100000
                 }
               },
-              "required": [
-                "x",
-                "y"
-              ],
+              "required": ["x", "y"],
               "additionalProperties": false
             }
           },
@@ -454,10 +527,7 @@
                   "maximum": 100
                 }
               },
-              "required": [
-                "xPercent",
-                "yPercent"
-              ],
+              "required": ["xPercent", "yPercent"],
               "additionalProperties": false
             }
           },
@@ -471,18 +541,14 @@
                   "pattern": "^[^\\s:]+:id/[^\\s/]+$"
                 }
               },
-              "required": [
-                "selector_id"
-              ],
+              "required": ["selector_id"],
               "additionalProperties": false
             }
           }
         ]
       }
     },
-    "capabilities": [
-      "android.device.control"
-    ]
+    "capabilities": ["android.device.control"]
   },
   {
     "type": "android.swipe",
@@ -497,15 +563,10 @@
       "properties": {
         "targetMode": {
           "type": "string",
-          "enum": [
-            "ABSOLUTE_PIXELS",
-            "SCREEN_PERCENT"
-          ]
+          "enum": ["ABSOLUTE_PIXELS", "SCREEN_PERCENT"]
         }
       },
-      "required": [
-        "targetMode"
-      ],
+      "required": ["targetMode"],
       "additionalProperties": false
     },
     "inputSchema": {
@@ -521,15 +582,10 @@
       "additionalProperties": false
     },
     "outputPorts": {
-      "ports": [
-        "success",
-        "error"
-      ]
+      "ports": ["success", "error"]
     },
     "editorHints": {
-      "bindingKinds": [
-        "LITERAL"
-      ],
+      "bindingKinds": ["LITERAL"],
       "targeting": {
         "modes": [
           {
@@ -563,13 +619,7 @@
                   "maximum": 60000
                 }
               },
-              "required": [
-                "startX",
-                "startY",
-                "endX",
-                "endY",
-                "durationMs"
-              ],
+              "required": ["startX", "startY", "endX", "endY", "durationMs"],
               "additionalProperties": false
             }
           },
@@ -617,9 +667,7 @@
         ]
       }
     },
-    "capabilities": [
-      "android.device.control"
-    ]
+    "capabilities": ["android.device.control"]
   },
   {
     "type": "android.input_text",
@@ -643,9 +691,7 @@
           "maxLength": 10000
         }
       },
-      "required": [
-        "text"
-      ],
+      "required": ["text"],
       "additionalProperties": false
     },
     "outputSchema": {
@@ -655,10 +701,7 @@
       "additionalProperties": false
     },
     "outputPorts": {
-      "ports": [
-        "success",
-        "error"
-      ]
+      "ports": ["success", "error"]
     },
     "editorHints": {
       "bindingKinds": [
@@ -669,9 +712,7 @@
         "GLOBAL_VARIABLE"
       ]
     },
-    "capabilities": [
-      "android.device.control"
-    ]
+    "capabilities": ["android.device.control"]
   },
   {
     "type": "android.press_back",
@@ -700,15 +741,10 @@
       "additionalProperties": false
     },
     "outputPorts": {
-      "ports": [
-        "success",
-        "error"
-      ]
+      "ports": ["success", "error"]
     },
     "editorHints": {},
-    "capabilities": [
-      "android.device.control"
-    ]
+    "capabilities": ["android.device.control"]
   },
   {
     "type": "android.press_home",
@@ -737,15 +773,10 @@
       "additionalProperties": false
     },
     "outputPorts": {
-      "ports": [
-        "success",
-        "error"
-      ]
+      "ports": ["success", "error"]
     },
     "editorHints": {},
-    "capabilities": [
-      "android.device.control"
-    ]
+    "capabilities": ["android.device.control"]
   },
   {
     "type": "android.screenshot",
@@ -775,21 +806,14 @@
           "minLength": 1
         }
       },
-      "required": [
-        "artifactId"
-      ],
+      "required": ["artifactId"],
       "additionalProperties": false
     },
     "outputPorts": {
-      "ports": [
-        "success",
-        "error"
-      ]
+      "ports": ["success", "error"]
     },
     "editorHints": {},
-    "capabilities": [
-      "android.screen.capture"
-    ]
+    "capabilities": ["android.screen.capture"]
   },
   {
     "type": "android.long_press",
@@ -804,16 +828,10 @@
       "properties": {
         "targetMode": {
           "type": "string",
-          "enum": [
-            "ABSOLUTE_PIXELS",
-            "SCREEN_PERCENT",
-            "SELECTOR_ID"
-          ]
+          "enum": ["ABSOLUTE_PIXELS", "SCREEN_PERCENT", "SELECTOR_ID"]
         }
       },
-      "required": [
-        "targetMode"
-      ],
+      "required": ["targetMode"],
       "additionalProperties": false
     },
     "inputSchema": {
@@ -829,15 +847,10 @@
       "additionalProperties": false
     },
     "outputPorts": {
-      "ports": [
-        "success",
-        "error"
-      ]
+      "ports": ["success", "error"]
     },
     "editorHints": {
-      "bindingKinds": [
-        "LITERAL"
-      ],
+      "bindingKinds": ["LITERAL"],
       "targeting": {
         "modes": [
           {
@@ -860,11 +873,7 @@
                   "minimum": 1
                 }
               },
-              "required": [
-                "x",
-                "y",
-                "durationMs"
-              ],
+              "required": ["x", "y", "durationMs"],
               "additionalProperties": false
             }
           },
@@ -888,11 +897,7 @@
                   "minimum": 1
                 }
               },
-              "required": [
-                "xPercent",
-                "yPercent",
-                "durationMs"
-              ],
+              "required": ["xPercent", "yPercent", "durationMs"],
               "additionalProperties": false
             }
           },
@@ -910,18 +915,13 @@
                   "minimum": 1
                 }
               },
-              "required": [
-                "selector_id",
-                "durationMs"
-              ],
+              "required": ["selector_id", "durationMs"],
               "additionalProperties": false
             }
           }
         ]
       }
     },
-    "capabilities": [
-      "android.device.control"
-    ]
+    "capabilities": ["android.device.control"]
   }
 ]

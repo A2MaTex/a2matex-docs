@@ -81,17 +81,20 @@ Supported field types:
 |---|---|
 | `string` | `minLength`, `maxLength` |
 | `integer` | `minimum`, `maximum` |
+| `number` | `minimum`, `maximum` |
 | `boolean` | None |
 
 String lengths are integers from zero to 10,000. Integer values and integer
 bounds remain inside JavaScript's safe range:
 `-9007199254740991..9007199254740991`.
+`number` accepts finite JSON numbers, including integers and decimals. Runtime normalizes numeric
+values to its floating-point comparison representation.
 
 System-owned Node Definitions may use an approved fixed `pattern`, such as the
 Android package-name pattern. Publisher-authored workflow inputs cannot add
 arbitrary patterns in v1.
 
-Unsupported features include decimal numbers, nulls, defaults, enums, unions,
+Unsupported features include non-finite numbers, nulls, defaults, enums, unions,
 schema composition, recursive schemas, arbitrary formats, and implicit type
 conversion.
 
@@ -182,8 +185,9 @@ data type.
 }
 ```
 
-The object contains exactly `source` and `value`. The value is a string,
-integer, or boolean and must satisfy the destination input field contract.
+The object contains exactly `source` and `value`. The value is a string, finite number, or boolean
+and must satisfy the destination input field contract. A destination declared as `integer` still
+rejects decimal literals.
 
 ### `WORKFLOW_INPUT`
 
@@ -301,7 +305,7 @@ for Tap, Swipe, and Long Press.
 | `flow.delay` | `durationMs: int[0..300000]` | `durationMs: int>=0` | `success`, `error` | 300,000 | `STOP`, `ERROR_BRANCH` | None |
 | `flow.set_variable` | `value: supported scalar source` | `{}` | `success`, `error` | 1,000 | `STOP`, `ERROR_BRANCH` | None |
 | `flow.wait_variable` | `{}` | `{}` | `success`, `error` | 600,000 | `STOP`, `ERROR_BRANCH` | None |
-| `flow.switch` | `value` plus one operand per non-`IS_EMPTY` rule | `{}` | ordered rule IDs, `default`, conditional `error` | 1,000 | `STOP`, `ERROR_BRANCH` | None |
+| `flow.switch` | `value` plus one operand per binary rule | `{}` | ordered UUID rule IDs, `default`, conditional `error` | 1,000 | `STOP`, `ERROR_BRANCH` | None |
 | `utility.log` | `message: string[1..4000]` | `{}` | `success`, `error` | 1,000 | `STOP`, `ERROR_BRANCH` | None |
 | `android.launch_app` | `packageName: string[3..255]` with approved package pattern | `{}` | `success`, `error` | 30,000 | `STOP`, `ERROR_BRANCH` | `android.device.control` |
 | `android.tap` | Mode-specific point | `{}` | `success`, `error` | 30,000 | `STOP`, `ERROR_BRANCH` | `android.device.control` |
@@ -316,13 +320,14 @@ Node-specific output payloads remain separate because their business results
 differ. A5 defines one common execution-result envelope containing the
 node-specific payload under `output`.
 
-`flow.set_variable.config` contains required `name` and optional `scope`; scope
-defaults to `FLOW` and accepts `FLOW` or `RUN_GROUP`. Its `value` input accepts
+`flow.set_variable.config` contains required `name` and explicit `scope`; Studio initializes scope
+to `FLOW`, and only `FLOW` or `RUN_GROUP` is valid. Its `value` input accepts
 any supported scalar source. `flow.wait_variable.config` contains only required
 Global variable `name`; the node's effective `timeoutMs` is its wait deadline.
-`flow.switch.config.rules` contains one to 32 ordered unique rule IDs and
-operators. It resolves `inputs.value` once, evaluates rules from first to last,
-follows the first matching rule port, and otherwise follows `default`.
+`flow.switch.config.rules` contains one to 32 ordered unique Studio-generated UUIDs and the accepted
+numeric, string, and boolean operators. Binary rule operands compile from `bindings[rule.id]`; unary
+rules have no operand input. It resolves `inputs.value` once, evaluates rules from first to last,
+follows the first matching UUID rule port, and otherwise follows `default`.
 
 ## 10. Compilation contract
 
