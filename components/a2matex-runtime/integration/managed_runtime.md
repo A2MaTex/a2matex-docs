@@ -69,6 +69,8 @@ uses HTTP on a loopback IP with the `/api/v1` suffix before using it. Bypass
 proxies and reject redirects for local requests. Keep the token out of logs,
 URLs, and renderer state. Managed mode sends credentials through the pipe.
 Standalone development uses the protected connection file.
+See the [local authentication guide](local_authentication.md) for locating
+the file and testing bearer requests on Linux and Windows.
 
 For every operation, confirm the owned child and control channel are live, then
 make a bounded authenticated `GET {apiBaseUrl}/runtime-info` request using
