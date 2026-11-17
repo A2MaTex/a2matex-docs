@@ -324,18 +324,20 @@ Gate:
 
 ### Phase F — Real device commands and current handlers
 
+See the [Phase F specification index](phase_f.md).
+
 | ID  | Module             | Real operation                                                                                                  |
 | --- | ------------------ | --------------------------------------------------------------------------------------------------------------- |
-| F1  | Command dispatcher | Binds every command to one explicit ADB serial and rejects arbitrary commands                                   |
-| F2  | Launch App         | Dispatches launch for the configured package; success has no workflow-visible payload                           |
-| F3  | Tap                | Taps using explicit pixel, screen-percentage, or selector-ID targeting                                          |
-| F4  | Swipe              | Swipes between two pixel or percentage targets with a bounded duration                                          |
-| F5  | Input Text         | Safely encodes the configured text without shell interpretation                                                 |
-| F6  | Key events         | Implements Back and Home                                                                                        |
-| F7  | Screenshot         | Captures a real PNG, verifies it, extracts dimensions, and stores it as an artifact                             |
-| F8  | Flow handlers      | Implements Start, End, and cancellable Delay; implements Log only after its sensitive-data behavior is approved |
-| F9  | Handler registry   | Registers exactly one handler for every supported `runtimeHandler`; rejects duplicates and unknown handlers     |
-| F10 | Long Press         | Holds a pixel, percentage, or selector-ID target for the requested bounded duration                             |
+| F1  | [Command dispatcher](../f_device_commands/f1_command_dispatcher.md) | Binds every command to one explicit ADB serial and rejects arbitrary commands |
+| F2  | [Launch App](../f_device_commands/f2_launch_app.md) | Dispatches a package-scoped launcher intent and checks Android's launch result |
+| F3  | [Tap](../f_device_commands/f3_tap.md) | Taps using explicit pixel, screen-percentage, or selector-ID targeting |
+| F4  | [Swipe](../f_device_commands/f4_swipe.md) | Swipes between two pixel or percentage targets with a bounded duration |
+| F5  | [Input Text](../f_device_commands/f5_input_text.md) | Types supported text into the focused field through one safely quoted ADB argument |
+| F6  | [Key events](../f_device_commands/f6_key_events.md) | Dispatches one fixed Back or Home key event on the selected Android device |
+| F7  | [Screenshot](../f_device_commands/f7_screenshot.md) | Captures the full screen or a two-point percentage region and publishes its PNG through D5 |
+| F8  | [Flow handlers](../f_device_commands/f8_flow_handlers.md) | Implements Start, End, and cancellable Delay. Log depends on approval of sensitive-data handling. |
+| F9  | [Handler registry](../f_device_commands/f9_handler_registry.md) | Registers enabled type/handler pairs and supplies Runtime Info and future admission lookup. |
+| F10 | [Long Press](../f_device_commands/f10_long_press.md) | Holds a pixel, percentage, or selector-ID target for the requested bounded duration |
 
 The [Android targeting contract](../contracts/android_targeting.md) is split by
 responsibility. C7–C9 compile the selected mode and its bindings into Runtime
@@ -415,6 +417,16 @@ against the [Wait for Variable contract](../contracts/workflow_bindings.md#wait-
 | H6  | Cancellation             | Blocks new dispatch, settles active attempts, and commits cancellation state and events before closing execution storage on an intentional shutdown. |
 | H7  | Device disconnect policy | Fails only the affected device execution with the approved A6 device error                                                                                                 |
 | H8  | Group result aggregation | Derives group counters and terminal state from persisted device-execution states                                                                                           |
+
+For H3, keep one fresh display-size read per percentage action on the
+selected device. A Swipe uses the same measurement for both endpoints.
+If profiling shows repeated reads are a bottleneck, evaluate an in-memory
+cache owned by each device execution. Reuse a cached size only when changes
+to orientation, logical display size, and the ADB connection can reliably
+invalidate it. Without reliable invalidation, keep the fresh read. Exercise
+the same percentage coordinates on devices with different sizes and rotate
+one device mid-run to check isolation and freshness. The cache is a future
+optimization outside the Phase H MVP gate.
 
 Context ownership should be:
 

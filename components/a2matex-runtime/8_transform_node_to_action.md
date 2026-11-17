@@ -148,10 +148,12 @@ adb -s <serial> shell input swipe 500 1500 500 400 500
 ## Input Text
 
 ```powershell
-adb -s <serial> shell input text <escaped-text>
+adb -s <serial> shell -T input text <one quoted Android shell argument>
 ```
 
-Adapter phải xử lý khoảng trắng, Unicode và ký tự đặc biệt. Không chạy chuỗi do người dùng nhập qua `cmd /c`.
+F5 nhập các ký tự ASCII in được vào trường đang có tiêu điểm, giữ nguyên
+khoảng trắng và dấu câu. Với Unicode, ký tự điều khiển hoặc chuỗi `%s`,
+Runtime báo lỗi trước khi gửi lệnh. Xem [đặc tả F5](f_device_commands/f5_input_text.md).
 
 ## Launch App
 
