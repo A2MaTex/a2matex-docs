@@ -176,7 +176,7 @@ NodeAttempt errors.
 ## 7. Retryability
 
 `retryable: true` means the producer proved that retry cannot duplicate an
-uncertain side effect. It does not instruct Runtime to retry by itself. G4 also
+uncertain side effect. It does not instruct Runtime to retry by itself. G8 also
 checks the admitted A2 policy, remaining attempts, and lifecycle state.
 
 For Android commands, a failure before process/command dispatch may be marked

@@ -131,7 +131,7 @@ See [F1 dispatch](f1_command_dispatcher.md#3-dispatch-sequence) and the
 | Missing deadline or invalid execution-owned serial          | `INTERNAL_ERROR` under F1's invocation rules.                                                                                             |
 | Display or hierarchy cannot establish a usable point        | Preserve the F3 observation failure. A missing, ambiguous, or unusable point is `COMMAND_FAILED`. No hold.                                |
 | ADB resolution, process launch, or process exit fails       | Preserve the F1 classification.                                                                                                           |
-| Attempt cancelled, expired, or has insufficient hold budget | Propagate `context.Canceled` or `context.DeadlineExceeded`. G4 maps the attempt outcome. A gesture already sent may have affected the UI. |
+| Attempt cancelled, expired, or has insufficient hold budget | Propagate `context.Canceled` or `context.DeadlineExceeded`. G7 maps the attempt outcome. A gesture already sent may have affected the UI. |
 
 Return once per invocation. F10 performs no retry, fallback targeting, or
 device substitution. Use the existing contextual error path with safe

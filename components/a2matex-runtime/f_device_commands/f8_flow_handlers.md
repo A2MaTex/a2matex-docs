@@ -47,7 +47,7 @@ func Invoke(ctx context.Context, call registry.Invocation) (map[string]any, erro
 objects. At this boundary a nil or empty map represents an object with no
 fields. The functions read their inputs without modifying them. They do
 not use `call.ADBSerial`, so a direct test can leave it empty. G1 validates
-the exact IR and G2 resolves bindings before calling the registered function.
+the exact IR and G2/G4/G17 resolve bindings before calling the registered function.
 See the [F9 registry spec](f9_handler_registry.md) and
 [Runtime IR node matrix](../contracts/runtime_ir_v1.md#9-current-node-matrix).
 
@@ -229,6 +229,6 @@ until the team approves supported inputs, audience, redaction, and whether
 messages may be streamed or stored. Keep it out of F9 capabilities until
 then. B4 continues to own Runtime operational logs.
 
-Switch belongs to G3 routing. Set Variable belongs to G5 execution with a
+Switch belongs to G15 routing. Set Variable belongs to G18 execution with a
 Phase D checkpoint. Wait for Variable belongs to Phase H scheduling. See
 [workflow bindings](../contracts/workflow_bindings.md).

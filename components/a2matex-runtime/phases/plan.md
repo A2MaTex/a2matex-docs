@@ -106,7 +106,8 @@ The first usable Runtime release includes:
 
 - Generic Android device discovery through ADB.
 - Real execution—never simulated execution.
-- The 15 accepted MVP node contracts:
+- The catalog has these 15 accepted node contracts; execution availability follows
+  the tested feature matrix (Wait Variable follows H8; utility.log remains deferred):
   - `flow.start`
   - `flow.end`
   - `flow.delay`
@@ -134,7 +135,6 @@ Explicitly deferred until after release:
 
 - Node-handler versioning.
 - Loops and parallel/join graph logic.
-- Selector-based interaction.
 - Wait-for-element.
 - OCR and image matching.
 - HTTP, Telegram, Google Sheets, and other connectors.
@@ -364,208 +364,327 @@ For example, a successful tap means ADB accepted the tap command; it does not pr
 
 ### Phase G — Workflow engine
 
-| ID  | Module                         | Deliverable and checkout condition                                                                                                                                    |
-| --- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| G1  | Runtime IR admission validator | Strictly validates the exact executable document, version, graph, bindings, workflow inputs, handler availability, compatibility, and size limits before run creation |
-| G2  | Binding resolver               | Resolves literals, per-device workflow inputs, and prior node outputs without cross-device leakage                                                                    |
-| G3  | Transition engine              | Supports deterministic success and error edges plus Switch first-match routing using stable rule ports and Default                                                    |
-| G4  | Timeout and retry engine       | Per-attempt timeout, bounded retries, recorded attempts, cancellation, and retry classification                                                                       |
-| G5  | Single-device runner           | Executes nodes sequentially for one device and persists every transition                                                                                              |
-| G6  | Output validator               | Rejects handler results that violate the declared node output schema                                                                                                  |
-| G7  | Final result calculator        | Produces authoritative device-execution status and summary from persisted results                                                                                     |
+See the [Phase G specification index](phase_g.md). G1 is accepted and implemented.
+G2–G22 are the implementation order, with one focused responsibility per step.
+G2–G13 are implemented and verified internally on Linux, with Windows amd64
+cross-compilation. G10's real-ADB manual milestone and native Windows execution
+remain pending.
+G11 shutdown is verified with controlled workflows, SQLite, and Linux owner
+processes. Live Android stop acceptance remains unverified.
+G12 admission is implemented and verified with real SQLite and controlled
+device readiness. G13 snapshot APIs are implemented and Linux-verified; native Windows execution
+remains unverified. G14 single-device POST is implemented and Linux-verified, including live
+Waydroid and managed shutdown/recovery. Windows cross-compilation passes;
+native Windows remains unverified. H1/H2 remain later multi-device work.
+G15 Switch execution is implemented and Linux-verified, including compile/start/
+snapshot integration with real SQLite. Windows cross-compilation passes;
+native Windows remains unverified.
+G16–G22 specifications and code are pending.
+Each step receives its own spec when that work is taken up; this roadmap does
+not create placeholder specifications.
 
-`G1` is mandatory even when Phase C, Studio, or Backend previously reported the
-workflow as valid. It validates the exact Runtime IR and execution inputs at the
-trust boundary. Failure creates no active run and dispatches no device command.
-In Development, that IR is the exact successful C9 result supplied by Studio;
-in Production, it is the exact decrypted IR loaded through I2. G1 never
-recompiles Editor Graph source and never trusts a cached validation result.
+| ID  | Module                                                                                        | Deliverable and checkout condition                                                                                                                                                                                                                                  |
+| --- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| G1  | [Runtime IR admission validator](../g_workflow_engine/g1_runtime_ir_admission.md)             | Implemented. Validate the exact IR, graph, bindings, per-device inputs, installed handlers, compatibility, and content bounds before run creation.                                                                                                                  |
+| G2  | [Direct input bindings](../g_workflow_engine/g2_direct_input_bindings.md)                     | Implemented and verified. Resolve literal and per-device workflow inputs into owned, typed handler inputs; reject missing or invalid values without dispatch.                                                                                                       |
+| G3  | [Handler output validation](../g_workflow_engine/g3_handler_output_validation.md)             | Implemented and verified. Validate returned output against the installed definition before success, persistence, or downstream consumption.                                                                                                                         |
+| G4  | [Previous-node output bindings](../g_workflow_engine/g4_previous_node_output_bindings.md)     | Implemented and verified. Resolve NODE_OUTPUT from successful committed results belonging to this device execution; reject unavailable or incompatible values.                                                                                                      |
+| G5  | [Ordinary routing](../g_workflow_engine/g5_ordinary_routing.md)                               | Implemented and verified. Choose the success edge, configured error edge, or terminal result for ordinary nodes; preserve STOP and ERROR_BRANCH semantics. G9/G10 checkpoint and sequential dispatch integration is verified.                                       |
+| G6  | [Attempt deadlines](../g_workflow_engine/g6_attempt_deadlines.md)                             | Implemented and verified. Invoke one registered handler under its effective attempt timeout and caller cancellation; return observations for G7. G9/G10 attempt and sequential execution integration is verified.                                                   |
+| G7  | [Execution outcome normalization](../g_workflow_engine/g7_execution_outcome_normalization.md) | Implemented and verified. Map invocation and engine evidence to consistent attempt outcomes and safe A6 errors; prohibit unsafe continuation through an internal Stop flag. G9/G10 attempt and sequential execution integration is verified.                        |
+| G8  | [Safe retry policy](../g_workflow_engine/g8_safe_retry_policy.md)                             | Implemented and verified. Reuse D4 metadata to decide proven-safe retries within attempt limits and provide a cancellable fixed delay; G9/G10 retry execution is verified; G11 retry-gap cancellation settlement is verified.                                       |
+| G9  | [Checkpointed node attempt](../g_workflow_engine/g9_checkpointed_node_attempt.md)             | Implemented and verified. Coordinate one attempt through G2–G8 and D4; confirm begin before dispatch and finish before releasing output or continuation. G10 owns retry waiting and the loop.                                                                       |
+| G10 | [Sequential device runner](../g_workflow_engine/g10_sequential_device_runner.md)              | Internal runner implemented and verified. Execute one admitted device through G9 with isolated inputs/outputs, retry waiting, and G11 handoff. JSON smoke and SQLite checks pass; real-ADB/native Windows acceptance remain pending.                                |
+| G11 | [Runner shutdown](../g_workflow_engine/g11_runner_shutdown.md)                                | Implemented and Linux-verified. Preserve owner cause, fence/join work, and commit intentional cancellation before SQLite closes; owner loss/failure retains D6 fallback. Windows cross-build passes; native Windows/live Android stop acceptance remain unverified. |
+| G12 | [Admission coordination](../g_workflow_engine/g12_admission_coordination.md) | Internal service implemented and Linux-verified. Replay, G1/G10/E6, fenced D2 admission, CREATED-only handoff, concurrency/shutdown/fault tests, and SQLite smoke pass. Windows cross-compilation passes; no scheduler/API is introduced. |
+| G13 | [Run snapshot APIs](../g_workflow_engine/g13_run_snapshot_apis.md) | Implemented and Linux-verified. Both authenticated GET routes reuse consistent D2 reads; DTO/errors, real SQLite, concurrent cursors, built agent, ownership regression, and client guides verified. Windows agent/API tests cross-compile; native Windows remains unverified. |
+| G14 | [Start-run API](../g_workflow_engine/g14_start_run_api.md) | Implemented and Linux-verified. POST /runs uses G12.AdmitSingleDevice and G11 ownership; 201 new/200 replay. Real SQLite, live Waydroid, and stop/recovery checks pass. Phase H expands scheduling; Windows cross-build passes, native Windows unverified. |
+| G15 | [Switch execution](../g_workflow_engine/g15_switch_execution.md) | Implemented and Linux-verified. Resolve the left once, lazily evaluate ordered typed rules, and checkpoint UUID/default/error continuation. Compile/start/snapshot/replay and error-branch integration pass with real SQLite; Windows agent/test cross-compilation passes, native Windows unverified. |
+| G16 | Scoped variable storage                                                                       | Specify scalar encoding, ownership, limits, confidentiality, retention, and restart behavior, then implement scoped storage and checkpoint transaction primitives.                                                                                                  |
+| G17 | Variable input bindings                                                                       | Resolve FLOW_VARIABLE and GLOBAL_VARIABLE reads in the current DeviceExecution or RunGroup; check existence and destination value constraints.                                                                                                                      |
+| G18 | Set Variable execution                                                                        | Execute the single scope-aware Set Variable node; commit the resolved value and successful attempt atomically before making the write visible.                                                                                                                      |
+| G19 | Screenshot execution integration                                                              | Supply the attempt-scoped F7 staging callback and commit through D4/D5; expose artifactId only after a successful checkpoint.                                                                                                                                       |
+| G20 | Artifact API                                                                                  | Expose GET /artifacts/{artifactId} through D5 lookup; return only committed PNG content and never expose caller-controlled paths.                                                                                                                                   |
+| G21 | Final-result verification                                                                     | Verify terminal statuses and derived summaries against D4 and repository behavior; reuse the existing calculation instead of adding a second calculator.                                                                                                            |
+| G22 | Workflow-engine integration acceptance                                                        | Verify complete single-device workflows combining bindings, routing, variables, Android actions, screenshots, safe retries, shutdown, and crash boundaries.                                                                                                         |
 
-For Android targeting, G1 checks the explicit mode and allowed literal inputs.
-G2 resolves the inputs, and G4–G5 invoke the registered handler and record the
-result through Phase D checkpoints. Backend compiles authoritative Submission
-targeting inputs; the Runtime local compiler applies the same mapping to source
-data supplied by Studio for Test Run after integration and real-device acceptance.
+**G1 implementation status (2026-11-18).** The pure admission service is implemented
+and verified on Linux, with Windows amd64 cross-build passing. Its accepted
+behavior and implementation remain unchanged. G10 consumes the checked content,
+G12 connects admission, and G14 exposes the start API. See the G1 spec for its
+verification record and build-version gate.
 
-The [Stage 3 binding contract](../contracts/workflow_bindings.md) is available
-for authoring. G1 owns executable validation, G2 resolves direct outputs and
-Flow and Global values, and G5 runs the single Set Variable handler and
-commits its scope-aware write through Phase D. Phase H verifies shared
-RunGroup visibility and last-committed-write-wins across device workers.
+**Execution guarantees.** G1 always checks the exact executable document, even
+when Phase C, Studio, or Backend previously validated the source. Development
+uses the successful C9 IR; Production later uses the decrypted IR verified by J7/J10.
+G1 never recompiles source or trusts a cached validation result. G10 owns that
+checked document and per-device inputs for the run's in-memory lifetime. Losing
+the HTTP connection after admission does not cancel execution; owner shutdown
+does, through G11.
 
-**First runnable milestone.** Run `Start → Tap → End` on one real Android
-device. Verify a successful run, a failed Tap that ends the run, replay after
-reconnect, and `INTERRUPTED` after a restart during Tap with no redispatch.
-Use the D4 checkpoints and D6 recovery for these cases.
-Verify the B3/B5 managed lifecycle with a test parent process first. Bring
-forward H6 finalization for **Stop and exit** before integrating the first
-real run with a desktop app.
+G2, G4, and G17 resolve the five accepted input sources. G3 checks output;
+G5 and G15 select routes; G6–G8 enforce invocation outcomes and retry policy.
+G9 advances only after a confirmed D4 commit. A failed or unresolved persistence
+operation stops further dispatch; it is not an ordinary error branch or a
+reason to repeat an uncertain Android action. Only committed results become
+available to downstream bindings or observers. Runtime logs and A6 errors must
+not reveal workflow inputs, variable values, raw process output, or protected IR.
 
-**Full Phase G gate.** One real device can run a complete workflow using all
-applicable current nodes, including an error branch and retry/timeout behavior.
-Automatic retries and error routes follow the first milestone. Phase H then
-adds multi-device scheduling and lifecycle controls.
+The [workflow binding contract](../contracts/workflow_bindings.md) remains the
+source for variable and Switch semantics. G16 defines and approves the storage
+contract before adding tables. G18 commits each scoped write with its successful
+checkpoint. Phase H verifies shared RunGroup visibility and last-committed-write-wins
+across device workers and owns Wait Variable scheduling. G15 and G18 advertise
+their exact executable pairs only after runner integration is usable. G19 does
+the same for Screenshot after its staging and checkpoint path is verified.
 
-### Phase H — Multi-device scheduling and lifecycle
+**Internal runnable milestone — G10.** Run `Start → Tap → End` on one real
+Android device with durable checkpoints. Verify successful execution, an
+unhandled failure, an error route, eligible retry, timeout, and `INTERRUPTED`
+after restart during an uncertain action without redispatch. G11 verifies
+**Stop and exit** through B3/B5 before desktop integration; H14 extends that
+acceptance to scheduler states.
 
-Stage 6 Global waits release worker capacity and wake after a committed
-write. Verify the one-slot, two-device handoff, timeout, and cancellation
-against the [Wait for Variable contract](../contracts/workflow_bindings.md#wait-for-variable).
+**Public run milestone — G12–G14, single-device MVP.** G12 coordinates
+admission; G13 exposes committed snapshots. G14 accepts exactly one device per
+new POST and returns 201 after confirmed admission and G11 worker ownership.
+Request-ID replay returns 200 without another handoff. The execution lifetime
+belongs to Runtime, independently of the HTTP connection.
 
-| ID  | Module                   | Deliverable and checkout condition                                                                                                                                         |
-| --- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| H1  | Run-group coordinator    | After G1 and device preflight pass, idempotently admits at most one non-terminal run group by A7 request ID and creates one persisted device execution per accepted serial |
-| H2  | Bounded scheduler        | Starts only the configured number of device executions concurrently and queues the rest                                                                                    |
-| H3  | Per-device worker        | One supervised goroutine per active device execution; nodes remain sequential within it                                                                                    |
-| H4  | Failure isolation        | One device failure does not stop unaffected devices under the fixed MVP rule                                                                                               |
-| H5  | Pause/resume             | Stops before the next node, persists a safe checkpoint, and resumes only from a valid state                                                                                |
-| H6  | Cancellation             | Blocks new dispatch, settles active attempts, and commits cancellation state and events before closing execution storage on an intentional shutdown. |
-| H7  | Device disconnect policy | Fails only the affected device execution with the approved A6 device error                                                                                                 |
-| H8  | Group result aggregation | Derives group counters and terminal state from persisted device-execution states                                                                                           |
+G14 uses AdmitSingleDevice's limit after replay lookup, retaining G12.Admit's
+internal 1–32-device capacity. G11's outer start lease covers the gap between
+admission return and asynchronous worker registration. Intentional shutdown
+settles accepted work; uncertain admission/handoff failure fences dispatch and
+uses the existing supervised failure path. G20 separately exposes committed
+Screenshot retrieval.
 
-For H3, keep one fresh display-size read per percentage action on the
-selected device. A Swipe uses the same measurement for both endpoints.
-If profiling shows repeated reads are a bottleneck, evaluate an in-memory
-cache owned by each device execution. Reuse a cached size only when changes
-to orientation, logical display size, and the ADB connection can reliably
-invalidate it. Without reliable invalidation, keep the fresh read. Exercise
-the same percentage coordinates on devices with different sizes and rotate
-one device mid-run to check isolation and freshness. The cache is a future
-optimization outside the Phase H MVP gate.
+**Phase H follow-up.** H1–H3 add group ownership, the bounded queue, configured
+concurrency, and completion/failure handling. H4 then replaces the G14
+single-device admission/dispatch policy with an all-device handoff. Preserve
+replay, shutdown, and failure
+fencing. Update A7 cardinality, G12/G14 specs, device picker/client guides,
+and tests together. The [G14 expansion checklist](../g_workflow_engine/g14_start_run_api.md#15-phase-h-expansion-checklist)
+records these changes; no Phase H scheduling is implemented as part of G14.
 
-Context ownership should be:
+**Full Phase G gate — G21–G22.** Verify existing terminal calculation first,
+including a handled node failure followed by a successful End. Then exercise
+complete single-device workflows combining the implemented features, with
+consistent SQLite state, API snapshots, and committed events. Include output
+publication, variable/artifact rollback, duplicate start, client disconnection,
+intentional shutdown, and crash/no-redispatch checks. Keep automated integration
+evidence distinct from real-device and native Linux/Windows acceptance.
 
-```text
-Agent context
-└── Run-group context
-    └── Device-execution context
-        └── Node-attempt timeout context
+Full multi-device scheduling, Pause/Resume, cross-device waits, and group
+lifecycle controls retain their Phase H ownership. Production package
+authorization belongs to Phase J. Attempt history is I1 and SSE is I2–I4;
+G13 remains limited to snapshots.
+Log remains deferred under F8's sensitive-data policy.
+
+## H–K delivery map
+
+The remaining work is split by functional responsibility and observable
+checkout. H has 15 steps, I has 8, J has 15, and K has 7. All are planned unless
+later evidence explicitly changes their status. Numbering in this roadmap and
+the phase indexes is authoritative; detailed step specs are created only when
+that step is selected. No placeholder step-spec files are generated.
+Use sequential IDs within each phase. If a pending step needs splitting,
+renumber the following pending steps directly rather than adding decimal IDs
+or keeping parallel old/new implementation sequences.
+
+| Phase           | Responsibility                                       | Delivery gate and owner                                                                                                      |
+| --------------- | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| [H](phase_h.md) | Multi-device scheduling and execution controls       | Runtime: bounded multiple-device execution, waits, pause/resume/cancel, and shutdown/recovery.                               |
+| [I](phase_i.md) | Observability APIs and Studio integration            | Runtime APIs, followed by explicit Studio-owner integration/acceptance. Current G14/G13 polling integration can proceed now. |
+| [J](phase_j.md) | Protected package execution and Launcher integration | Runtime protection/authorization APIs, real Backend counterpart, then Launcher-owner acceptance.                             |
+| [K](phase_k.md) | Distribution and release acceptance                  | Installed Linux/Windows bundles, consolidated evidence, and final client/release handoff.                                    |
+
+```mermaid
+flowchart LR
+    G[Remaining G engine features] --> H[H scheduling and execution controls]
+    H --> I[I observability APIs and Studio acceptance]
+    I --> J[J protected products and Launcher]
+    B[Backend package and authorization counterparts] --> J
+    J --> K[K installed release acceptance]
+    N[Current G14/G13 single-device APIs] --> S[Studio polling integration now]
 ```
 
-Gate: two or more real devices can execute independently, concurrency is bounded, data is isolated, and all resources are released at termination.
+**Review scope.** One step delivers one functional responsibility. Target 3–6
+handwritten files and about 100–250 production lines in a normal code change.
+Before exceeding eight handwritten files or roughly 400 production lines,
+explain the dependency and propose a split before editing. These are review
+triggers, not reasons to leave a correctness requirement unfinished. Report
+production, tests, documentation, and generated changes separately while
+counting all of them in the reviewed diff. Prepare substantial specs/guides
+and structural refactoring as their own reviewable changes.
 
-### Phase I — Client integration
+Each spec names the exact input/output and failure behavior, existing functions
+to reuse, direct dependencies, expected files, and an observable test. Agree
+appropriate test scope before coding; update the relevant guide with each
+verified API rather than waiting for final client acceptance. New configuration,
+concurrency, persistence, transport, and client UI work must have explicit
+ownership instead of being hidden prerequisites in one large implementation.
 
-#### I1. Studio Development mode
+### Phase H — Multi-device scheduling and execution controls
 
-Studio owns the Runtime it starts for validation, compilation, or a Test Run.
-Studio and Launcher both
-show Runtime status and offer **Shut down Runtime**. On app exit during a
-run, the owner offers **Stop and exit** or **Stay open**. The other app
-reports **Runtime already in use** on a conflicting launch. Pause and Resume
-follow under H5. The [managed lifecycle guide](../integration/managed_runtime.md)
-documents the Linux-verified launch and shutdown protocol. The
-[Studio authoring example](../integration/studio.md) and
-[Launcher ownership example](../integration/launcher.md) describe client
-integration. Native Windows verification and execution examples remain pending.
+See the [H index](phase_h.md) for dependencies and acceptance boundaries.
+G12/D2 already admit work, G10/G11 already execute/supervise devices, and D4
+already calculates authoritative results. H extends those foundations.
 
-Use one shared native Runtime client for every local API operation. On first
-use, start the installed executable as a child and wait for the private ready
-message. Reuse the owned process and run the bounded authenticated
-`/runtime-info` probe before each operation. Concurrent requests share one
-startup or replacement and wait for it. A failed readiness signal triggers
-replacement for pending work under the B3 policy. If the replacement fails
-or the other app owns the store, display the error and leave requests unsent.
-After **Shut down Runtime**, suspend automatic editor validation until an
-explicit action requests Runtime again.
+| Step | One responsibility                      | Observable checkout                                                                                                                  |
+| ---- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| H1   | Group execution ownership               | One admitted group owns its contexts and device work; existing single-device execution remains usable.                               |
+| H2   | Bounded queue and worker slots          | Three admitted devices with two slots produce two running executions and one queued execution.                                       |
+| H3   | Worker completion and failure isolation | Completion releases capacity; ordinary device failure leaves siblings running; infrastructure uncertainty fences dispatch.           |
+| H4   | Public multi-device start               | POST /runs accepts 1–32 ordered serial/input pairs with one admission/handoff and correct request-ID replay.                         |
+| H5   | Device-disconnect handling              | Disconnecting one endpoint fails only its execution with the approved device error and no unsafe action replay.                      |
+| H6   | Variable-wait registration              | Existence checking and waiter registration cannot miss a concurrent committed write; false, zero, and empty string count as present. |
+| H7   | Release and reacquire worker capacity   | A waiting execution frees its slot, remains supervised, and reacquires capacity before continuing.                                   |
+| H8   | Wait Variable node integration          | With one slot, A waits, B commits the key, and A continues; timeout/error routing and cancellation are verified.                     |
+| H9   | Pause checkpoint transitions            | Persist valid group/device pause transitions while preserving next position, attempt evidence, and atomic events.                    |
+| H10  | Pause coordination                      | Fence new node dispatch, settle active work at the approved boundary, then acknowledge PAUSED.                                       |
+| H11  | Resume coordination                     | Requeue paused devices under the current slot limit without repeating completed actions or losing execution inputs/outputs.          |
+| H12  | Run cancellation                        | Cancel active/queued/waiting work while Runtime stays alive; a later new run starts normally.                                        |
+| H13  | Lifecycle-action API                    | Expose group PAUSE/RESUME/CANCEL with exact 200/202/409 bodies, idempotency, and guide examples.                                     |
+| H14  | Scheduler shutdown and recovery         | Queued, waiting, paused, and active work settle on owner stop or become INTERRUPTED after crash, without redispatch.                 |
+| H15  | Combined multi-device acceptance        | Verify bounds, isolation, committed global-variable visibility, derived summaries, and two independent real Android targets.         |
 
-- Send the current Editor Graph and Input Schema to the authenticated local
-  Runtime compiler and render deterministic diagnostics.
-- Cache a successful Runtime IR only while it corresponds to the current local
-  draft source, then send that exact IR to the run API. Studio does not compile.
-- List and select ready ADB endpoints.
-- Run the complete draft workflow.
-- Stream typed execution events.
-- Reconnect using the last persisted Runtime-wide event cursor.
-- Query the authoritative snapshot if events were missed.
-- Inspect screenshots, node attempts, failures, and final summaries.
+H4 is an early usable multi-device milestone. H6–H8 depend on G16–G18 and the
+[Wait Variable contract](../contracts/workflow_bindings.md#wait-for-variable).
+H9's spec approves pause behavior for queued work, retry delay, and waits before
+implementation; H10/H11 coordinate pause and resume. H12 cancels a group while
+Runtime stays alive, distinct from G11 process shutdown verified further by H14.
+Reuse D2/D4 summaries and final-state calculation, including concurrent finishes.
 
-This does not depend on Submission, Product, or Product Release.
+Context ownership remains Runtime → RunGroup → DeviceExecution → attempt.
+Keep per-device fresh percentage display measurements; cache invalidation is
+future optimization. Real multi-device acceptance requires independent targets.
 
-Test-one-node and arbitrary run-from-node modes are deferred until their input,
-`NODE_OUTPUT` dependency, stopping, and result contracts are explicitly
-defined. They do not change the A5 full-workflow execution state.
+### Phase I — Observability APIs and Studio integration
 
-Publisher-authored `utility.log` persistence or streaming is also deferred
-until its workflow-input and sensitive-data rules are approved. Operational
-Runtime logs remain B4 scope and are not A6 execution events.
+See the [I index](phase_i.md). I1–I4 are Runtime deliveries; I5–I8 are explicit
+Studio-owner work with focused Runtime fixes. Initial authoring and single-device
+Test Run integration using G14/G13 is available before these remaining steps.
 
-#### I2. Launcher Production mode
+| Step | One responsibility                     | Observable checkout                                                                                                             |
+| ---- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| I1   | Node-attempt history API               | Read ordered attempts with bounded pagination through the existing repository and publish exact client examples.                |
+| I2   | Committed-event observation            | Reuse EventWakeup for bounded observer lifetime; commit wakes observers, rollback does not, and coalesced signals lose no data. |
+| I3   | Replay-to-live continuity              | Replay retained events and continue live without a gap; bound buffering and terminate slow consumers safely.                    |
+| I4   | Authenticated SSE endpoint             | Verify framing, cursor errors, expiry, heartbeats, stream write deadlines, disconnect cleanup, and shutdown.                    |
+| I5   | Studio event and reconnect integration | Studio resumes from its processed cursor and repairs expiry using a watermarked authoritative snapshot.                         |
+| I6   | Studio execution inspector             | Display attempts, outputs, failures, and committed screenshots for the correct run/device/node identity.                        |
+| I7   | Studio lifecycle controls              | Connect pause/resume/cancel and owner shutdown to clear pending, achieved, conflict, and failure UI states.                     |
+| I8   | Studio end-to-end acceptance           | Exercise editing, compilation, run, observation, controls, reconnect, and app exit with explicit platform evidence.             |
 
-This waits for the Product–Submission–Release backend group.
-Launcher starts and owns Runtime when a product operation first needs it.
-Use the same per-request readiness probe, shared replacement, and shutdown
-controls defined in I1 for every Runtime API operation.
+D2 already provides attempt reads and D3 already provides replay and EventWakeup.
+I2 integrates those after-commit signals; no second broker/notifier is added.
+I3/I4 deliver A7 SSE as a combined correctness gate: no replay/live gap, bounded
+slow consumers, heartbeats/write deadlines, expiry recovery, and cleanup.
+G20 remains the artifact API owner. Test-one-node, arbitrary run-from-node, and
+publisher-authored utility.log remain deferred under their existing contracts.
 
-It includes:
+The shared native client preserves the accepted B3/B5 launch, actual readiness
+before each operation, shared startup/replacement, current credentials, and
+one-owner rule. Closing the owner offers Stop and exit / Stay open; explicit
+Runtime shutdown suspends automatic validation until an explicit new operation.
+Studio integration remains independent of Product/Submission/Release.
 
-- Installed package format.
-- Release identity and integrity verification.
-- Runtime compatibility verification.
-- Runtime authorization-session key generation.
-- Signed customer/Release lease verification and renewal.
-- Runtime-bound key-envelope opening and protected Runtime IR loading.
-- No plaintext workflow persistence.
-- `PAUSED` with `AUTHORIZATION_EXPIRED` when the hard lease deadline passes.
-- Safe checkpoint, transient-key cleanup, and reauthorization resume.
-- Launcher handshake and production execution APIs.
+### Phase J — Protected package execution and Launcher integration
 
-Backend authorization has no installation, machine, device-count, active-lease,
-or concurrent-run limit. Runtime resource bounds remain local scheduling rules.
-The execution engine is reused; Production mode adds a protected workflow source
-and authorization boundary defined by
-[Production Execution Authorization v1](../../../specifications/production_execution_authorization_v1.md).
+See the [J index](phase_j.md). The existing
+[Production authorization contract](../../../specifications/production_execution_authorization_v1.md)
+and [key-security contract](../../../specifications/cryptographic_key_security.md)
+remain the business/security sources. J1 approves exact transport and policy
+fixtures before implementation; Backend/Launcher counterpart work has explicit
+owners and acceptance dependencies.
 
-### Phase J — MVP hardening and release gate
+| Step | One responsibility                         | Observable checkout                                                                                                                     |
+| ---- | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| J1   | Production transport and policy contract   | Approve session/start/renewal/status schemas, identity bindings, errors, disclosure, lifecycle signals, and cross-component fixtures.   |
+| J2   | Constrained package access and ZIP reading | Resolve an approved installed .a2m reference and reject path escapes, invalid entries, and archive size/decompression violations.       |
+| J3   | Package identity and manifest verification | Detect modified package bytes, invalid manifests/hashes, and incompatible metadata before protected execution.                          |
+| J4   | Runtime authorization sessions             | Generate ephemeral session keys/public metadata and bound pending-session lifetime, count, ownership, and cleanup.                      |
+| J5   | Execution-lease verification               | Verify signatures, required claims, time bounds, session/public-key identity, and immutable package/release bindings without dispatch.  |
+| J6   | Key-envelope opening                       | Open only the envelope bound to the accepted Runtime session/lease and retain no plaintext key outside its owned lifetime.              |
+| J7   | Protected workflow loading                 | Authenticate/decrypt in RAM, verify IR/schema consistency, validate exact IR, and return only approved Production disclosure.           |
+| J8   | Authorization attempt gate and hard expiry | Prevent unauthorized attempt starts; checkpoint/pause safely at hard expiry and release protected plaintext/key material.               |
+| J9   | Production session-preparation API         | Expose bounded package/session preparation with current local authentication and exact Launcher request/response examples.              |
+| J10  | Production start API                       | Admit verified protected work through the existing engine/scheduler with correct replay, ownership, errors, and no plaintext transport. |
+| J11  | Lease renewal                              | Accept valid advancing renewals without repeating workflow decryption or interrupting authorized execution.                             |
+| J12  | Authorization status and renewal signals   | Expose approved state/renewal-required signals so Launcher can renew in time without exposing lease/key/plaintext material.             |
+| J13  | Reauthorization and resume                 | Use a fresh authorization session after hard expiry and continue the same package from a confirmed checkpoint without action replay.    |
+| J14  | Backend authorization integration          | Verify a real entitled Release/package/key-envelope/lease round trip, renewal, denial, and session/package mismatch cases.              |
+| J15  | Launcher integration acceptance            | Run an installed product, renew, expire, reauthorize/resume, stop, and reopen its saved result using verified guides.                   |
 
-Before considering the MVP releasable:
+An installed encrypted .a2m may remain on disk; Runtime handles decrypted IR
+and transient keys only within their authorized in-memory lifetime. Cleanup is
+implemented with material creation/loading in each owning step, not postponed
+to final acceptance. J10 starts no protected run before J5–J8 authorization and
+expiry enforcement pass. Normal renewal reuses the active decrypted workflow;
+reauthorization after hard expiry creates a fresh session without uncertain
+side-effect replay. Both API families coexist without a global mode flag.
+Backend commercial authorization has no machine/device/concurrent-run limit;
+local worker bounds remain resource controls. Guides accompany each API.
 
-- Unit tests for parsers, validators, transitions, state machines, and result calculation.
-- Hash-verified A8 Editor Graph, Runtime IR, event/error, Local API, and SSE
-  contract tests in every applicable Go and TypeScript consumer.
-- Paired compiler fixtures covering explicit timeout/retry values, fallback
-  defaults, uppercase binding mapping, capability deduplication, and exact IR.
-- Authenticated `POST /api/v1/workflow-compilation` strict request/response
-  tests, including invalid source returning `runtimeIr: null` with no partial
-  document.
-- Tests proving local compilation performs no Project Draft or Runtime SQLite
-  write, run creation, device discovery, ADB process, queue publication, or
-  command dispatch.
-- Tests proving validation failure creates no run, database execution record,
-  ADB process, or partial multi-device execution.
-- Integration tests using controlled ADB/process test doubles.
-- SQLite transaction and restart-recovery tests.
-- HTTP authentication and strict-decoding tests.
-- Start-request idempotency tests, including a lost-response retry.
-- SSE replay/live handoff, slow-client disconnect, and expired-cursor recovery tests.
-- Race detection.
-- Goroutine leak checks.
-- Fuzzing for ADB output and Runtime IR decoding.
-- Command-injection and path-traversal tests.
-- Real-device matrix:
-  - Physical Android device.
-  - Official Android Emulator on Ubuntu.
-- Single-device end-to-end test.
-- Multi-device failure-isolation test.
-- Client disconnect/reconnect test.
-- Agent crash and `INTERRUPTED` recovery test.
-- Log redaction and artifact-access review.
+### Phase K — Distribution and release acceptance
 
-Tests remain part of each proposed checkout, but I will confirm the test scope with you before implementing that checkout, as requested.
+See the [K index](phase_k.md). Each feature is tested in its own phase; these
+steps consolidate the release candidate's evidence and installed behavior.
+A defect found here gets a focused follow-up instead of a catch-all rewrite.
+
+| Step | One responsibility                 | Observable checkout                                                                                                                       |
+| ---- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| K1   | Distribution bundle                | Produce versioned Linux/Windows bundles containing required ADB files and embedded migrations; define installed paths/configuration.      |
+| K2   | Contract and CI release checks     | Run applicable Go/TypeScript fixtures, compiler/IR/API/event/Production checks, build, vet, race, and required release checks.            |
+| K3   | Installed Linux acceptance         | Test installed startup, paths, migration/data preservation, Android execution, owner shutdown, reconnect, and crash recovery.             |
+| K4   | Installed Windows acceptance       | Run equivalent native Windows process/storage/ADB tests; cross-compilation alone cannot satisfy this checkout.                            |
+| K5   | Resource and fault testing         | Check sustained execution/observation, bounded queues/goroutines/memory, injected persistence/process faults, and focused parser fuzzing. |
+| K6   | Security and disclosure acceptance | Review tampering, authorization boundaries, injection/path handling, redaction, artifact access, and protected-data persistence.          |
+| K7   | Final release handoff              | Publish the actual supported-feature/platform matrix, evidence, limitations, runnable demos, and verified integration guides.             |
+
+Applicable checks include hash-verified Go/TypeScript A8 and Production fixtures,
+compiler defaults/exact IR, strict auth/decoding, stateless authoring, atomic
+admission/checkpoint/recovery, request-ID replay, SSE continuity/backpressure,
+race/resource/fault/fuzz checks, native Android execution, and redaction/access
+review. Reuse earlier tests and add specific missing release evidence. Do not
+reset user data or claim native Windows acceptance from cross-compilation.
+Automatic updating and catalog synchronization remain separately approved work.
 
 ## 4. Release milestones
 
-| Milestone                   | Observable result                                                |
-| --------------------------- | ---------------------------------------------------------------- |
-| M1 — Contract ready         | Contracts and cross-language fixtures approved                   |
-| M2 — Validation ready       | Studio receives bounded local diagnostics without execution      |
-| M3 — Device ready           | Runtime lists, selects, and revalidates generic ADB endpoints    |
-| M4 — Command ready          | All eight Android operations execute on real devices             |
-| M5 — Engine ready           | All 15 accepted handlers run on one device with persisted events |
-| M6 — Multi-device ready     | Bounded, isolated concurrent execution works                     |
-| M7 — Studio MVP             | Draft workflows can be tested end-to-end from Studio             |
-| M8 — Production MVP         | Launcher executes authorized installed releases                  |
-| M9 — Post-release evolution | Handler versioning, advanced nodes, and advanced graph semantics |
+| Milestone                       | Observable result                                                                                      | Gate                                                         |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------ |
+| M1 — Contract ready             | Applicable shared contracts and cross-language fixtures approved.                                      | A and subsequent approved extensions.                        |
+| M2 — Validation ready           | Studio receives bounded diagnostics and exact compilation results without execution.                   | C; Studio initial integration.                               |
+| M3 — Device ready               | Runtime discovers, selects, and freshly checks generic ADB endpoints.                                  | E.                                                           |
+| M4 — Command ready              | Declared Android handler operations execute on real devices with supported targeting modes.            | F and the declared device/platform matrix.                   |
+| M5 — Single-device engine ready | Approved single-device features run with durable checkpoints/events and advertised executable pairs.   | G22; Wait Variable follows in H8 and Log remains deferred.   |
+| M6 — Multi-device ready         | Bounded, isolated execution, waits, controls, shutdown, and derived results verified.                  | Early start milestone H4; complete Phase H gate H15.         |
+| M7 — Studio MVP                 | Draft workflows are tested, observed, inspected, and controlled end to end from Studio.                | I8; initial single-device polling integration can start now. |
+| M8 — Production MVP             | Launcher runs an authorized installed Release with renewal, expiry, and safe resume.                   | J15 with real Backend integration.                           |
+| M9 — Release ready              | Distributed builds pass the declared installed platform/security/resource gates and have final guides. | K7; remaining gaps are explicit.                             |
+| M10 — Post-release evolution    | Separately approved advanced nodes, graph semantics, updating, and catalog rollout.                    | Future work, not an implicit MVP promise.                    |
+
+The catalog's 15 accepted definitions are not a claim that all 15 handlers are
+executable at M5. Runtime Info advertises actual enabled pairs. Wait Variable
+requires H scheduling; utility.log remains deferred until its sensitive-data
+policy is approved. Milestones follow the tested feature matrix.
+
+## Documentation reference follow-up
+
+This pass updates this roadmap and four H–K phase indexes. Existing A–G specs,
+contracts, and integration guides contain phase-number references that need a
+separate, mechanical documentation pass before their numbers are used to assign
+remaining work. Resolve responsibility from this roadmap/indexes in the interim.
+That pass changes references only; approved business behavior and historical
+verification evidence are not silently rewritten.
+
+Reference owners are now: multi-device public start H4; disconnect H5; waits
+H6–H8; pause/resume H9–H11; run cancellation H12; action API H13; owner-stop
+acceptance H14; attempts I1; SSE observation/continuity/transport I2–I4; Studio
+handoff I5–I8; Production J1–J15; installed release gates K1–K7. It must also
+update the Production authorization contract's phase label and A8's consumer
+assignments. This is documentation follow-up, not additional implementation.
 
 ## 5. Existing documents that conflict with this plan
 

@@ -33,7 +33,7 @@ workflow order, and attempt records.
 | Type and handler key | Both are `android.input_text`. |
 | Capability | `android.device.control`. Minimum Runtime version `0.1.0`. |
 | Configuration | Empty object. An empty or absent internal map represents that object. |
-| Resolved inputs | Exactly one `text` field containing a JSON string. The catalog accepts 0–10,000 characters. G2 supplies the value from the admitted binding. |
+| Resolved inputs | Exactly one `text` field containing a JSON string. The catalog accepts 0–10,000 characters. G2/G4/G17 supply the value from the admitted binding. |
 | Device and deadline | Use the execution-owned `registry.Invocation.ADBSerial` and the original attempt context. The catalog default is 30,000 ms. |
 | Success | Return `{}` on success. For empty text, return `{}` after validation with zero device calls. |
 | Failure | Return a classified error and no success output. Phase G applies the admitted `STOP` or `ERROR_BRANCH` policy. |

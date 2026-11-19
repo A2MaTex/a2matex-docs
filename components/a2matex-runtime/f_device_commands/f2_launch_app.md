@@ -33,7 +33,7 @@ resolution, and checkpointing.
 | Node type and handler key | Both are `android.launch_app`. |
 | Capability | `android.device.control`. Minimum Runtime version `0.1.0`. |
 | Config | Empty object. An empty or absent internal map represents that object. |
-| Resolved inputs | Exactly one field, `packageName`. G2 supplies the resolved value from the admitted binding. A direct Phase F test can supply the value directly. |
+| Resolved inputs | Exactly one field, `packageName`. G2/G4/G17 supply the resolved value from the admitted binding. A direct Phase F test can supply the value directly. |
 | Device and deadline | Use `registry.Invocation.ADBSerial` and the caller's attempt context throughout. The catalog default is 30,000 ms. |
 | Output and routing | Return `{}` on success. On failure, return no success output. G applies the admitted `STOP` or `ERROR_BRANCH` policy. |
 
@@ -138,8 +138,9 @@ logs the result once. See [F1 failure mapping](f1_command_dispatcher.md#4-result
 | Emulator and physical Android | From the launcher, start a known test app and observe it open. Put the existing task in the background and repeat. Verify a syntactically valid absent package fails. Include an installed package without a launcher activity when the test environment provides one. |
 | Native adapter and Runtime Info | Run adapter checks on Linux and Windows. After live and native acceptance, register the verified `android.launch_app` pair. The existing Runtime Info response advertises that pair without starting ADB. |
 
-Phase G1 uses the enabled registry for admission. G2 resolves the package
-binding, and G4–G6 own attempt execution, checkpointing, and output checking.
+Phase G1 uses the enabled registry for admission. G2/G4/G17 resolve the package
+binding. G3 checks output, and G6–G9 own invocation, outcome normalization,
+retry policy, and checkpoint integration.
 F2 provides no standalone launch endpoint.
 
 ## 7. Local smoke fixture

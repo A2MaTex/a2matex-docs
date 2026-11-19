@@ -384,7 +384,11 @@ Rules:
   snapshot with HTTP `200` and never starts another execution. Runtime does not
   reinterpret the replacement body.
 - `runtimeIr` is the exact A2 document and remains subject to its 1 MiB limit.
-- `devices` contains 1 through 32 unique serial/input objects.
+- For the G14 single-device MVP, `devices` contains exactly one serial/input
+  object. New requests with zero or multiple devices are rejected before
+  admission. Existing request-ID replay does not reinterpret replacement
+  device cardinality. Phase H expands new requests to 1–32 unique devices
+  after bounded scheduling is implemented; the array envelope is unchanged.
 - Each `inputs` object must satisfy the admitted A2 workflow input schema.
 - The complete request is limited to 4 MiB.
 - Runtime revalidates all devices and all G1 admission rules before creating

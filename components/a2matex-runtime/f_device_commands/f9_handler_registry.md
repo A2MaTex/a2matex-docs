@@ -160,9 +160,9 @@ conditional. Switch, Set Variable, and Wait for Variable belong to G/H.
 
 G1 looks up the exact `type` and `runtimeHandler` from each admitted IR
 node. If a pair is missing, it rejects the run before writing execution
-records or sending device commands. For an accepted node, G2 resolves the
-inputs and the attempt runner calls the function with that device's serial
-and deadline. G validates the returned output and commits the transition.
+records or sending device commands. For an accepted node, G2/G4/G17 resolve
+the inputs and G6 invokes the function with that device's serial and deadline.
+G3 validates returned output, and G9 commits the transition.
 For example, G follows Tap's success edge and treats End as terminal.
 F9 does not create runs or choose edges.
 See [Runtime IR compatibility](../contracts/runtime_ir_v1.md#8-capabilities-and-compatibility).
