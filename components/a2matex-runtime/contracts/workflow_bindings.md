@@ -65,8 +65,9 @@ The Backend Node Catalog exposes this as a normal required input property:
 Studio renders that input contract but saves only `config.name`, explicit `config.scope`, and
 `bindings.value` in the Editor Graph. The compiler preserves the config and maps the binding to
 Runtime IR `inputs.value`; it does not persist the input schema in Runtime IR. Authoring validation is
-implemented independently of execution support. Runtime variable persistence, source resolution,
-the Set Variable handler, and atomic scope-aware checkpoint writes remain Phase G/H work.
+implemented independently of execution support. G16 RAM storage and G17's execution-bound
+read path are implemented. G18 live-store ownership, the Set Variable handler, and
+checkpoint-confirmed publication are implemented and Linux-verified; waiting/control follows in H.
 
 For other nodes, authoring validation checks `NODE_OUTPUT`, `FLOW_VARIABLE`,
 and `GLOBAL_VARIABLE`
@@ -166,14 +167,18 @@ failure uses the configured error policy.
 
 Flow variables belong to a single device execution. The first
 write creates a key and later writes replace it. Global variables belong to
-one RunGroup on one Runtime Agent. Writes commit atomically with the node
-checkpoint. Global writes become visible after commit, and the last committed
-write wins. A Switch followed by Set Variable remains two operations.
+one RunGroup on one Runtime Agent. Values live only in Runtime RAM. A successful
+assignment becomes visible after its existing node checkpoint is confirmed and
+before readers or continuation are released. Global writes use
+last-committed-write-wins. A Switch followed by Set Variable remains two operations.
+Variables survive Pause/Resume while Runtime stays alive; exit/crash loses them.
+Restart recovery interrupts old work instead of restoring or continuing it.
 
-### Deferred Runtime implementation decisions
+### Runtime variable implementation boundaries
 
-The authoring and compilation contracts above are accepted, but variable execution is not yet
-implemented. Later Runtime work must preserve these decisions:
+The authoring and compilation contracts above are accepted. G16 storage and G17 internal
+read bindings plus G18 public run store ownership and Set Variable execution are implemented
+and Linux-verified. Runtime integration must preserve these decisions:
 
 1. The validation/compiler registry may recognize `flow.set_variable`, `FLOW_VARIABLE`, and
    `GLOBAL_VARIABLE` before they are executable. This must not register a handler or claim execution
@@ -186,22 +191,36 @@ implemented. Later Runtime work must preserve these decisions:
 4. The binding resolver resolves `inputs.value` before the Set Variable handler writes anything. A
    missing variable, unavailable node output, invalid workflow input, or unsupported value fails the
    node through its configured error policy and creates no variable mutation.
-5. A successful Set Variable write and its successful node checkpoint commit in one SQLite
-   transaction. No reader, event, retry, or recovered execution may observe a variable write without
-   the corresponding committed checkpoint.
+5. G18 holds the RAM candidate under the store gate while confirming the existing successful node
+   checkpoint, then publishes before releasing readers or continuation. No reader or waiter observes
+   an unconfirmed candidate. Variable values/maps are not stored in that SQLite transaction, events,
+   or checkpoint read-back. No migration or variable repository is required.
 6. The first committed write creates a name and a later committed write replaces it. A committed
    `RUN_GROUP` write becomes visible to other device executions only after commit. Concurrent writes
    use last-committed-write-wins for the MVP.
 7. Runtime must never log variable values. Events may contain bounded identifiers and state changes,
    but not the resolved scalar or protected workflow input.
 8. Phase G owns executable admission, variable-source resolution, the Set Variable handler, and the
-   atomic checkpoint extension. Phase H owns cross-device RunGroup visibility and Wait Variable
+   checkpoint-confirmed RAM publication. Phase H owns cross-device RunGroup visibility and Wait Variable
    scheduling.
 
-Before implementation, extend the accepted execution-state contract with the selected SQLite
-representation, scalar encoding, per-scope count and value-size limits, sensitive-data policy,
-retention/cleanup, restart behavior, and repository transaction interface. Do not add provisional
-variable tables merely to complete authoring or local compilation.
+The [G16 storage specification](../g_workflow_engine/g16_scoped_variable_storage.md)
+and [execution-state extension](execution_state_v1.md#9-scoped-variable-state)
+define the representation and lifecycle. G16 storage and G17 internal variable reads are
+implemented and Linux-verified, together with G18 live store ownership and writer integration.
+G16 supplies bounded RAM scopes, compact scalar JSON, synchronized lookup, publication,
+and cleanup. Limits are 64 KiB per raw/encoded value, 512 names, and 1 MiB of name/value
+bytes per scope: 2 MiB of payload for one device or 33 MiB for the future 32-device limit,
+plus Go overhead/copies. There is no variable persistence, database table, migration,
+repository method, or durable value history.
+
+G17 connects variable-source reads through the optional execution-bound view. G18
+provides views from its live run-owned store and executes the single Set Variable node,
+publishing each assignment after confirmation of the existing node checkpoint. Keep maps during live
+Pause/Resume; close them after terminal settlement and joined workers. Runtime exit
+loses them, and a new run starts empty. This RAM-only policy applies to Development and
+future Production. Do not enable a handler or broaden current capability claims merely
+to complete authoring or local compilation.
 
 ### Wait for Variable
 
@@ -217,6 +236,6 @@ Runtime succeeds immediately when the key exists. Values such as `false`,
 error policy, and run cancellation cancels the wait. Runtime coordinates
 the existence check with waiter registration so a concurrent commit cannot
 be missed. A waiting execution releases its worker slot and becomes runnable
-after the producing checkpoint commits.
+after the producing checkpoint is confirmed and its RAM value is published.
 Verify an already-present value, timeout, cancellation, and the two-device
 handoff with only one worker slot.

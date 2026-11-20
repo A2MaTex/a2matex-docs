@@ -399,7 +399,8 @@ Resolves node input from:
 - variables;
 - previous node outputs.
 
-Values must remain isolated by `DeviceExecution`.
+Workflow inputs, node outputs, and Flow variables remain isolated by
+`DeviceExecution`. Global variables are explicitly shared within one RunGroup.
 
 ### Workflow Interpretation Engine
 
@@ -470,6 +471,16 @@ Owns one independent `DeviceExecution`:
 - cancellation and pause boundary;
 - terminal result.
 
+### Scoped Variable Store
+
+G16 owns RAM-only Flow maps per DeviceExecution and one shared Global map per
+RunGroup in the Runtime process. Keep the same store through live Pause/Resume.
+Release it after terminal settlement and joined workers; exit/crash loses it.
+There is no variable table, migration, snapshot, or restart restoration.
+G18 confirms the existing node checkpoint before publishing an assignment to
+RAM and allowing readers/continuation. See the
+[G16 contract](g_workflow_engine/g16_scoped_variable_storage.md).
+
 ### Multi-Device Scheduling Engine
 
 Creates one device execution per selected device and provides:
@@ -514,16 +525,16 @@ Checks each handler against:
 2. **Run Group Repository**
 3. **Device Execution Repository**
 4. **Node Execution Repository**
-5. **Execution Variable Store**
-6. **Execution Event Store**
-7. **Device Snapshot Store**
-8. **Artifact Metadata Store**
-9. **Checkpoint Engine**
-   - Atomically saves result, variables, next node, sequence, state, and event.
-10. **Crash Recovery**
-    - Marks previously running work `INTERRUPTED`.
-    - Does not blindly replay side effects.
-11. **Retention and Cleanup**
+5. **Execution Event Store**
+6. **Device Snapshot Store**
+7. **Artifact Metadata Store**
+8. **Checkpoint Engine**
+   - Atomically saves result, next node, sequence, state, and event.
+   - Scoped variable maps/values are not persisted; G18 publishes RAM after confirmation.
+9. **Crash Recovery**
+   - Marks previously unfinished work, including paused runs, `INTERRUPTED`.
+   - Never resumes old runs, restores variables, or blindly replays side effects.
+10. **Retention and Cleanup**
     - Execution history.
     - Old events.
     - Artifact files.

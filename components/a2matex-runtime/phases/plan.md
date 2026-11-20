@@ -297,9 +297,10 @@ Gate: committed state always exists before an event is broadcast.
 The first real run uses D1–D4 and D6. Deliver D5 with F7 Screenshot, when the
 engine needs to commit a retrievable image reference with a successful attempt.
 
-Stage 3 Flow and Stage 5 Global variables will add per-device and RunGroup
-variable state to the checkpoint. Specify store ownership and commit behavior
-before implementing variable writes.
+Flow and Global variables are RAM-only under G16/G17. G18 confirms the existing
+successful node checkpoint before publishing its assignment to RAM and owns
+store handoff/cleanup. Variable values/maps are not added to SQLite or checkpoint
+schemas. See the [G18 ownership and publication specification](../g_workflow_engine/g18_set_variable_execution.md).
 
 ### Phase E — Generic Android device subsystem
 See the [Phase E specification index](phase_e.md).
@@ -379,7 +380,36 @@ native Windows remains unverified. H1/H2 remain later multi-device work.
 G15 Switch execution is implemented and Linux-verified, including compile/start/
 snapshot integration with real SQLite. Windows cross-compilation passes;
 native Windows remains unverified.
-G16–G22 specifications and code are pending.
+G16 RAM-only scoped storage is implemented and Linux-verified, including quotas,
+checkpoint-confirmed publication, concurrency/cancellation tests, and a local
+smoke demo. Windows cross-compilation passes; native Windows remains unverified.
+G17 internal variable reads are implemented and Linux-verified through resolver,
+runner, and attempt integration, including real-SQLite checkpoint tests and a
+local RAM/resolver demo. Windows cross-compilation passes; native Windows is
+unverified. G18 now supplies live run ownership and Set Variable execution.
+G18 is implemented and Linux-verified: checkpoint-confirmed RAM writes,
+CREATED-only store/views, joined cleanup, and compile/start/poll/replay pass.
+Real-SQLite fault/rollback tests and built-agent managed shutdown, owner loss,
+and forced crash/restart checks pass with controlled ADB readiness. Full/race
+tests, vet, formatting, Linux build, and Windows amd64 agent/test cross-builds
+pass; native Windows and live Android acceptance remain unverified.
+G19 Screenshot execution is implemented and Linux-verified through the actual
+handler registry, real PNG/SQLite settlement, and built-agent HTTP flows with
+controlled ADB output. Full/race tests, vet, Linux build, and Windows amd64
+agent/test cross-compilation pass. Managed stop/owner loss and forced crash
+at PNG publication preserve committed images, remove orphan files on restart,
+and never recapture old work. Native Windows/live Android remain unverified.
+G20's authenticated PNG download API is implemented and Linux-verified.
+Automatic committed-output discovery remains A7/I1.
+G21 final-result verification is complete and Linux-verified: 23 focused scenarios
+plus existing terminal-race, persistence, recovery, and lifecycle regressions
+pass. Full/race tests, vet, Linux build, and Windows cross-compilation pass;
+no production change was needed. Native Windows/live Android remain unverified.
+G22 specification, combined example, and automated Linux process acceptance are
+delivered: ten scenarios pass against the real built agent with controlled ADB,
+plus full/race suites and an independently race-instrumented child agent.
+No production change was needed. Real Android and native Windows acceptance
+remain pending; the M5 real-device gate is not yet closed.
 Each step receives its own spec when that work is taken up; this roadmap does
 not create placeholder specifications.
 
@@ -400,13 +430,13 @@ not create placeholder specifications.
 | G13 | [Run snapshot APIs](../g_workflow_engine/g13_run_snapshot_apis.md) | Implemented and Linux-verified. Both authenticated GET routes reuse consistent D2 reads; DTO/errors, real SQLite, concurrent cursors, built agent, ownership regression, and client guides verified. Windows agent/API tests cross-compile; native Windows remains unverified. |
 | G14 | [Start-run API](../g_workflow_engine/g14_start_run_api.md) | Implemented and Linux-verified. POST /runs uses G12.AdmitSingleDevice and G11 ownership; 201 new/200 replay. Real SQLite, live Waydroid, and stop/recovery checks pass. Phase H expands scheduling; Windows cross-build passes, native Windows unverified. |
 | G15 | [Switch execution](../g_workflow_engine/g15_switch_execution.md) | Implemented and Linux-verified. Resolve the left once, lazily evaluate ordered typed rules, and checkpoint UUID/default/error continuation. Compile/start/snapshot/replay and error-branch integration pass with real SQLite; Windows agent/test cross-compilation passes, native Windows unverified. |
-| G16 | Scoped variable storage                                                                       | Specify scalar encoding, ownership, limits, confidentiality, retention, and restart behavior, then implement scoped storage and checkpoint transaction primitives.                                                                                                  |
-| G17 | Variable input bindings                                                                       | Resolve FLOW_VARIABLE and GLOBAL_VARIABLE reads in the current DeviceExecution or RunGroup; check existence and destination value constraints.                                                                                                                      |
-| G18 | Set Variable execution                                                                        | Execute the single scope-aware Set Variable node; commit the resolved value and successful attempt atomically before making the write visible.                                                                                                                      |
-| G19 | Screenshot execution integration                                                              | Supply the attempt-scoped F7 staging callback and commit through D4/D5; expose artifactId only after a successful checkpoint.                                                                                                                                       |
-| G20 | Artifact API                                                                                  | Expose GET /artifacts/{artifactId} through D5 lookup; return only committed PNG content and never expose caller-controlled paths.                                                                                                                                   |
-| G21 | Final-result verification                                                                     | Verify terminal statuses and derived summaries against D4 and repository behavior; reuse the existing calculation instead of adding a second calculator.                                                                                                            |
-| G22 | Workflow-engine integration acceptance                                                        | Verify complete single-device workflows combining bindings, routing, variables, Android actions, screenshots, safe retries, shutdown, and crash boundaries.                                                                                                         |
+| G16 | [Scoped variable storage](../g_workflow_engine/g16_scoped_variable_storage.md) | Implemented and Linux-verified. RAM scopes, codec, quotas, synchronized publication, cancellation/fencing, and cleanup; full/race tests, vet, Linux build, and local demo pass. Windows cross-compilation passes, native Windows unverified. No SQLite change; G18 live ownership/writes are implemented; Phase H controls remain pending. |
+| G17 | [Variable input bindings](../g_workflow_engine/g17_variable_input_bindings.md) | Implemented and Linux-verified. Flow/Global reads, destination validation, optional view identity/transport, and lazy Switch semantics; full/race tests, vet, build, real-SQLite checkpoint integration, and local demo pass. Windows cross-compiles; native execution unverified. G18 live ownership and writes are implemented. |
+| G18 | [Set Variable execution](../g_workflow_engine/g18_set_variable_execution.md) | Implemented and Linux-verified: pure handler, checkpoint-confirmed RAM assignments, CREATED-only store/views, joined cleanup, and actual compile/start/poll/replay. Full/race tests, SQLite faults, managed stop/crash/restart, vet, Linux build, and Windows agent/test cross-builds pass with controlled ADB readiness; native Windows/live Android unverified. No variable SQL or Phase H scheduling. |
+| G19 | [Screenshot execution integration](../g_workflow_engine/g19_screenshot_execution.md) | Implemented and Linux-verified: attempt-bound staging, metadata/output pairing, D4/D5 settlement, safe cleanup, and actual registry/API flows. Full/race tests, SQLite faults, managed stop/crash/restart, vet, Linux build, and Windows cross-builds pass with controlled ADB PNG output. Native Windows/live Android unverified; G20 now separately implements retrieval. |
+| G20 | [Artifact API](../g_workflow_engine/g20_artifact_api.md) | Implemented and Linux-verified: authenticated GET /artifacts/{artifactId}, exact D5 PNG streaming, safe errors/aborts, and handle closure. Real HTTP, PNG/SQLite, built-agent lifecycle, full/race tests, vet, Linux build, and Windows cross-compilation pass. Native Windows/live Android/UI unverified; automatic output discovery remains A7/I1. |
+| G21 | [Final-result verification](../g_workflow_engine/g21_final_result_verification.md) | Complete for the verification scope, Linux-verified: 23 focused real-runner/SQLite/event/HTTP and group-summary cases plus existing terminal-race/persistence/crash regressions pass. Existing D4/repository calculations are reused; no production change needed. Full/race tests, vet, Linux build, Windows agent/test cross-compilation pass; native Windows/live Android unverified. |
+| G22 | [Workflow-engine integration acceptance](../g_workflow_engine/g22_workflow_engine_acceptance.md) | Spec/tests/example delivered. Ten actual-agent Linux process scenarios with controlled ADB, real HTTP/SQLite/PNGs/private owner pipes pass, plus full/race suites and independently instrumented agent. No production changes. Windows cross-compilation passes; real Android/native Windows and M5 device gate remain pending. |
 
 **G1 implementation status (2026-11-18).** The pure admission service is implemented
 and verified on Linux, with Windows amd64 cross-build passing. Its accepted
@@ -431,9 +461,13 @@ available to downstream bindings or observers. Runtime logs and A6 errors must
 not reveal workflow inputs, variable values, raw process output, or protected IR.
 
 The [workflow binding contract](../contracts/workflow_bindings.md) remains the
-source for variable and Switch semantics. G16 defines and approves the storage
-contract before adding tables. G18 commits each scoped write with its successful
-checkpoint. Phase H verifies shared RunGroup visibility and last-committed-write-wins
+source for variable and Switch semantics. G16 defines bounded RAM-only storage;
+no variable table, migration, repository method, or durable history is required.
+G18 confirms the existing successful checkpoint before publishing its RAM
+assignment and releasing readers/continuation. Live Pause/Resume retains maps;
+run completion releases them after workers join. Exit/crash loses variables,
+and restart never continues an old run. Phase H verifies shared RunGroup
+visibility and last-committed-write-wins
 across device workers and owns Wait Variable scheduling. G15 and G18 advertise
 their exact executable pairs only after runner integration is usable. G19 does
 the same for Screenshot after its staging and checkpoint path is verified.
@@ -532,7 +566,7 @@ already calculates authoritative results. H extends those foundations.
 
 | Step | One responsibility                      | Observable checkout                                                                                                                  |
 | ---- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| H1   | Group execution ownership               | One admitted group owns its contexts and device work; existing single-device execution remains usable.                               |
+| H1   | [Group execution ownership](../h_multi_device_execution/h1_group_execution_ownership.md) | Implemented and Linux-verified: group-owned contexts/work/RAM, joined cleanup and consecutive starts. Full/race and process checks pass; Windows cross-compiles, native execution unverified. |
 | H2   | Bounded queue and worker slots          | Three admitted devices with two slots produce two running executions and one queued execution.                                       |
 | H3   | Worker completion and failure isolation | Completion releases capacity; ordinary device failure leaves siblings running; infrastructure uncertainty fences dispatch.           |
 | H4   | Public multi-device start               | POST /runs accepts 1–32 ordered serial/input pairs with one admission/handoff and correct request-ID replay.                         |

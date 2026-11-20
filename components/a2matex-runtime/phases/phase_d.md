@@ -23,7 +23,7 @@ flowchart LR
   C -. restart with unfinished work .-> H[Mark interrupted before readiness]
 ```
 
-**Status:** D1–D4 and D6 are implemented. D5 is scheduled with F7 Screenshot.
+**Status:** D1–D6 core storage is implemented. G19 connects D5/F7 to workflow execution; G20 now implements authenticated artifact retrieval. Native/live acceptance remains separate.
 Native Windows storage checks and the real-device integration remain open.
 
 | Sub-phase | Specification | Suggested delivery |
@@ -32,7 +32,7 @@ Native Windows storage checks and the real-device integration remain open.
 | D2 | [Execution repository](../d_persistence/d2_execution_repository.md) | Implemented. File-backed repository tests pass. |
 | D3 | [Execution event repository](../d_persistence/d3_event_repository.md) | Implemented. Atomic append, durable replay, commit wakeups, and supervised retention are covered by SQLite and simulated publisher tests. A7 transport integration remains later. |
 | D4 | [Atomic checkpoint writer](../d_persistence/d4_atomic_checkpoint.md) | Implemented. Atomic attempt start and finish, rollback, and commit read-back are covered by file-backed SQLite tests. |
-| D5 | [Screenshot artifact store](../d_persistence/d5_artifact_store.md) | Deliver with Phase F Screenshot |
+| D5 | [Screenshot artifact store](../d_persistence/d5_artifact_store.md) | Implemented. G19 verifies capture/commit/recovery through the real engine; G20 HTTP retrieval is separately implemented; native/live acceptance remains pending. |
 | D6 | [Startup recovery](../d_persistence/d6_startup_recovery.md) | Implemented. Reopen and startup failure tests verify recovery before HTTP readiness. |
 
 Contracts governing the baseline include [Execution State A5](../contracts/execution_state_v1.md),
@@ -58,7 +58,7 @@ SQLite closes. D6 handles any unfinished work left by an unexpected exit.
 | Checkpoints and durable ordered events. Reconnect uses a cursor and a consistent snapshot on expiry. | One event stream and a simple bounded retention policy. Use the event table for replay and a lightweight wakeup. Defer a separate broker and per-device subscriptions. |
 | Recovery before readiness. Preserve uncertain attempts and mark active work interrupted. | Defer crash resume and automatic replay. Keep resolved inputs and protected Runtime IR out of SQLite. |
 | A known run can be inspected from its committed attempts. | Deliver D5 with Screenshot. Defer artifact listing, upload, export, and configurable retention. Include D5 before calling Screenshot shippable. |
-| Preserve the future Flow, Global, Switch, and Wait authoring contracts. | Deliver variable storage and chosen-port persistence alongside the executable nodes. Defer waiter scheduling to H. |
+| Preserve the future Flow, Global, Switch, and Wait authoring contracts. | G16 keeps scoped variables in RAM only; G18 publishes after the existing successful checkpoint. No variable table or migration is needed. Switch reuses the next-node checkpoint. Defer waiter scheduling to H. |
 
 Follow the first run with automatic retries, error routes, and multi-device
 scheduling. Deliver D5 and F7 together for Screenshot. The [Runtime roadmap](plan.md#phase-g--workflow-engine)

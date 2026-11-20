@@ -185,6 +185,41 @@ current native-owned Bearer token, and no query parameters. The entire request
 is limited to 4 MiB, and runtimeIr to 1 MiB. Validation/compilation do not execute
 Android commands; a newly admitted POST /runs does.
 
+Set Variable is now executable when Runtime Info advertises its exact pair.
+Render one node with scope `FLOW` or `RUN_GROUP`, a name, and its value binding.
+The Runtime creates empty RAM scopes for a new run; Studio supplies no variable
+store DTO. Its output is `{}`, so it offers no Set Variable output field to
+later nodes. Flow/Global bindings read current named values; absent values fail
+through the node's error policy. These values disappear when the run finishes
+or Runtime exits. Follow the [G18 example](../../../../a2matex-runtime/examples/g18/README.md)
+to test Set Variable → Switch through the existing APIs. Scheduling and live
+Pause/Resume/Wait Variable remain Phase H.
+
+Screenshot Test Run is now supported when the exact Screenshot pair appears
+in Runtime Info. Render its selected mode from the catalog: FULL_SCREEN has
+no coordinate bindings; pixel/percentage regions require their four literal
+start/end coordinates. Later nodes may bind the declared artifactId output
+after the Screenshot succeeds. That ID is neither image data nor a local
+path. GET run snapshots still expose state, not per-node output or images.
+G20 now supports [authenticated PNG downloads](managed_runtime.md#screenshot-artifact-download-api)
+by known artifactId. Automatic delivery of committed IDs through attempt/event
+transport remains A7/I1; do not query SQLite from Studio. Use the
+[G19/G20 example](../../../../a2matex-runtime/examples/g19/README.md) for manual
+compile/start/poll, ID lookup, and download verification. Advertising Screenshot
+in Runtime Info establishes node support, not REST route availability in an
+older build; integrate against the verified G20 build.
+
+To display a known artifact, the native bridge must check actual Runtime
+readiness, attach the current Bearer token, GET `/artifacts/{artifactId}` with
+no body/query, and consume the complete binary response. Check HTTP errors and
+body-read errors before exposing PNG bytes or an asset handle to the renderer.
+An incomplete body after 200 is a failed preview, not a successful image or a
+JSON error. Use an object URL/host asset bridge; revoke temporary object URLs
+when the view closes. A bare `<img src="http://...">` cannot attach the Bearer
+header. Keep tokens native and out of query strings. Cancel an in-flight GET
+when the preview closes; this neither cancels the workflow nor by itself
+requires relaunching Runtime. Repeated reads do not recapture the screen.
+
 ### Expected native/UI sequence
 
 1. Guard against duplicate Run clicks before the first asynchronous operation.

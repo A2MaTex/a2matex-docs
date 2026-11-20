@@ -1,8 +1,8 @@
 # Execution State v1 Contract
 
-**Status:** Accepted
+**Status:** Accepted. G16 RAM storage, G17 reads, and G18 live store ownership/Set Variable execution implemented and Linux-verified. Phase H controls remain later work.
 
-**Phase:** A5 — Execution schemas
+**Phase:** A5 — Execution schemas; G16 — scoped variable state extension
 
 ## 1. Purpose
 
@@ -16,9 +16,10 @@ RunGroup
     └── NodeAttempt
 ```
 
-This contract is storage-independent. Phase D maps it to SQLite and implements
-transactions; A6 defines referenced errors and events; A7 defines JSON API
-projections.
+The original execution records are storage-independent. Phase D maps them to
+SQLite and implements transactions; A6 defines referenced errors and events;
+A7 defines JSON API projections. Section 9 adds scoped variable state for G16;
+its RAM layout and internal interfaces belong to the G16 specification.
 
 ## 2. Shared rules
 
@@ -28,8 +29,9 @@ projections.
 - A selected ADB serial occurs at most once in one RunGroup.
 - At most one non-terminal RunGroup exists. `RUNNING` and `PAUSED` are
   non-terminal; a second admission fails with the A6 busy error.
-- Each DeviceExecution owns its attempts and node outputs. Data is never shared
-  between sibling device executions.
+- Each DeviceExecution owns its attempts and node outputs; those are not shared
+  between siblings. Shared mutable state is available only through explicit
+  RunGroup variables under section 9.
 - States change only through the transitions listed in this contract.
 - Terminal records never return to a non-terminal state.
 
@@ -178,6 +180,12 @@ The transaction commits before any event is broadcast. Runtime must also
 persist a `RUNNING` NodeAttempt before invoking a handler so startup recovery
 can identify an uncertain side effect.
 
+G18 publishes a successful Set Variable assignment to
+RAM after this checkpoint is confirmed and before readers or execution
+continuation are released. Its scalar/map is not a member of the SQLite
+transaction. Other outcomes do not publish an assignment. Section 9 defines
+the synchronized boundary and the deliberate exclusion of crash resume.
+
 ## 7. Group aggregation
 
 Device failures are isolated: unaffected device executions continue. The group
@@ -205,22 +213,117 @@ In one recovery transaction it changes:
 This preserves evidence that a side-effecting handler may have completed before
 the process stopped without claiming that it is safe to replay.
 
-## 9. Excluded responsibilities
+## 9. Scoped variable state
+
+**G16–G18 extension — RAM storage, reads, live ownership, and Set Variable
+execution implemented and Linux-verified.** Phase H owns actual Pause/Resume
+and waiter controls. The Set Variable handler is executable; its maps add no
+persisted record or separate execution lifecycle.
+
+### 9.1 Ownership, encoding, and bounds
+
+| Scope | Key | Visibility |
+|---|---|---|
+| `FLOW` | `(deviceExecutionId, name)` | The owning device execution only. |
+| `RUN_GROUP` | `(runGroupId, name)` | Device executions admitted to that RunGroup on one Runtime. |
+
+Global is the authoring name for `RUN_GROUP`, not a permanent account-wide,
+process-wide, or cross-run store. A new admitted run begins with empty scopes.
+Names are case-sensitive and use the existing variable-name contract. First
+write creates; subsequent writes replace, including replacement with a
+different scalar type. No prior declaration is required.
+
+Values are compact JSON scalars: string, finite `float64` number, or boolean.
+Null and containers are unsupported. Missing is separate from present false,
+zero, or empty string. Preserve floating-point comparison semantics and reject
+invalid UTF-8, invalid/trailing JSON, and non-finite numbers.
+
+| Bound | Value |
+|---|---|
+| Raw and encoded bytes per value | 64 KiB each |
+| Names per Flow or RunGroup scope | 512 |
+| Aggregate name plus encoded-value bytes per scope | 1 MiB |
+
+Replacement changes byte accounting by its size delta and does not consume
+another name slot. Enforce bounds in the synchronized RAM store before the
+successful-checkpoint closure is invoked. The current single-device payload
+bound is 2 MiB; the future 32-device bound is 33 MiB. Map overhead, temporary
+copies, inputs, and node outputs are separate from those payload totals.
+
+### 9.2 RAM publication and checkpoint ordering
+
+Keep live variables only in the Runtime process's RAM, owned by the RunGroup.
+There are no variable tables, migrations, repositories, shutdown snapshots,
+or durable variable history. Existing SQLite execution checkpoints remain
+unchanged.
+The [G16 storage specification](../g_workflow_engine/g16_scoped_variable_storage.md)
+defines the codec, memory quotas, scope gate, and Get/Apply/Close interfaces.
+
+A candidate remains unpublished while G18 invokes its existing successful
+node-checkpoint closure under the variable-store gate. After confirmation,
+publish the RAM value before releasing readers or continuing execution.
+Set Variable's successful node output remains `{}`. The checkpoint and event
+payloads do not gain variable names, values, or maps.
+
+If commit confirmation requires D4's existing read-back, retain the candidate
+in the live invocation until that result is known. Do not add variable data
+to checkpoint requests/read-back. An unresolved persistence failure publishes
+nothing and fences the store/execution. If Runtime dies between checkpoint
+commit and RAM publication, the old execution is interrupted after restart;
+it cannot resume into missing state.
+
+G16 supplies the RAM boundary, G17 supplies binding reads, and G18 owns its
+engine/checkpoint integration and failed-candidate finalization. Failed,
+timed-out, cancelled, or retried attempts publish no assignment.
+
+Concurrent Global writes use last-committed-write-wins. Individual reads see
+published committed state; several reads are not a multi-key snapshot.
+Switch followed by Set Variable is not atomic compare-and-set. Phase H adds
+cross-device scheduling and waiter notification after publication.
+
+### 9.3 Pause, cleanup, restart, and confidentiality
+
+Pause/Resume while Runtime stays alive preserves the same maps and accounting.
+An HTTP disconnect does not own the accepted run's variable lifetime. Keep the
+group store while sibling executions remain active, then close/clear it after
+the group is terminal and workers have joined. Intentional cancellation and
+owner shutdown settle work before cleanup. Releasing references makes the
+memory eligible for Go garbage collection; immediate RSS reduction is not
+promised.
+
+Runtime exit/crash loses variables. Startup recovery marks unfinished work,
+including paused runs, INTERRUPTED and restores no maps or execution. New runs
+start empty. Replaying an old request ID returns its existing snapshot without
+creating another store. Pause/Resume does not mean restart-and-resume.
+
+Flow and Global values are RAM-only for Development and future Production.
+They must not be serialized into variable files, SQLite, ordinary logs,
+events, Runtime Info, current run snapshots, diagnostic dumps, or exports.
+Existing node-output persistence is unchanged; a scalar present in a producer's
+ordinary output history is not a variable snapshot or a restoration source.
+
+Phase J still owns Production authorization/decryption. G16 does not authorize
+persistence of decrypted workflows, keys, or credentials. There is no separate
+plaintext-variable persistence policy to implement for either mode.
+
+## 10. Excluded responsibilities
 
 A5 does not define:
 
-- SQLite tables, indexes, migrations, retention, or repository interfaces;
+- SQLite DDL, indexes, migration files, or concrete repository implementations;
+- general execution-history retention and deletion APIs;
 - event envelopes, cursor retention, error codes, or redaction rules;
 - HTTP/SSE request and response shapes;
 - process diagnostics, logs, or artifact metadata;
 - persistent device inventory or device snapshots;
-- mutable workflow variables;
 - Production release, license, authorization, or package fields;
 - test-one-node or arbitrary run-from-node semantics; or
 - automatic device-offline recovery or crash replay.
 
-## 10. Checkout condition
+## 11. Checkout condition
 
 A5 is complete when all execution records, states, transitions, isolation
 rules, checkpoint ownership, aggregation rules, and interruption behavior have
-one unambiguous owner without selecting a persistence implementation.
+one unambiguous owner without selecting a persistence implementation for the
+original execution records. G16's variable extension is complete only after
+its separate storage acceptance criteria pass; it does not complete G17/G18.

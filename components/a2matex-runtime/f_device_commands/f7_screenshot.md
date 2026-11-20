@@ -18,7 +18,7 @@ flowchart LR
     C -->|Valid frame| R[F7 selects full frame or crops]
     R --> S[D5 stages the selected PNG]
     S -->|Stage fails| X
-    S -. Phase G hands staged metadata to D4 .-> D[D4 commits artifact and attempt]
+    S -->|G19 hands staged metadata to D4| D[D4 commits artifact and attempt]
     D -->|Confirmed| O[Workflow receives artifactId]
     D -->|Uncertain| P[D4 reads back commit before publication]
 ```
@@ -28,10 +28,14 @@ and the staging callback are implemented. The local smoke runner exercises
 the real D4/D5 commit path using the normal Runtime storage location and
 prints the database and PNG paths. Stop the Runtime server before this
 smoke run so it can acquire the storage lock. Linux automated checks and
-Windows cross-compilation pass. Phase G/A7 owns the workflow runner
-callback, checkpoint handoff, artifact retrieval API, and shipped F9
-registration. Native Windows, remaining live-device acceptance, catalog
-publication, and Studio integration remain pending verification.
+Windows cross-compilation pass. G19 now implements the workflow runner
+callback/checkpoint handoff and shipped F9 registration. Real-PNG/SQLite and
+built-agent HTTP checks cover full screen, both crop modes, cancellation,
+rollback/read-back, replay, and managed stop/crash recovery with controlled
+ADB output. G20 now implements authenticated artifact HTTP retrieval with
+real HTTP and built-agent verification. Native Windows, remaining live-device
+acceptance, catalog publication, and actual Studio integration remain pending
+verification; automatic output discovery remains A7/I1.
 
 ## 1. Node contract
 

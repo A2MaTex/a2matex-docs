@@ -12,19 +12,24 @@ flowchart LR
     F[F7 supplies the final PNG] --> S[D5 stages the file]
     S -->|Stage fails| E[Fail the attempt]
     S -->|File ready| C[D4 commits metadata, output, and events]
-    C -->|Confirmed| R[A7 can read the PNG by ID]
+    C -->|Confirmed| R[G20: authenticated PNG retrieval]
     C -->|Known unused file| X[D5 discards the staged file]
     C -->|Commit uncertain| V[D4 reads back the attempt and artifact row]
     V -->|Confirmed| R
     V -->|Still uncertain| P[Keep the file for startup recovery]
 ```
 
-**Status** — Specified. Runtime implementation is pending. D1 provides the
-state directory and store lock. D4 provides the checkpoint transaction and
-commit read-back. D5 can be verified with synthetic images before connecting
-[F7 capture](../f_device_commands/f7_screenshot.md). See the
-[D1 storage contract](d1_sqlite_schema.md) and
-[D4 checkpoint contract](d4_atomic_checkpoint.md).
+**Status** — Core storage is implemented and Linux-verified. The existing
+artifact migration/repository, PNG file service, D4 atomic publication/read-back,
+and startup reconciliation are implemented. G19 now connects F7 to real
+workflow execution and verifies modes, metadata, rollback/read-back, and
+stop/crash recovery using real PNGs, SQLite, and controlled ADB output.
+Windows cross-compilation passes; native Windows and remaining live-device
+acceptance are unverified. G20 now implements authenticated HTTP retrieval;
+real HTTP and built-agent checks verify exact bytes, missing files, integrity
+errors, cancellation, and historical downloads without ADB.
+See [G19 execution](../g_workflow_engine/g19_screenshot_execution.md),
+[D1 storage](d1_sqlite_schema.md), and [D4 checkpoints](d4_atomic_checkpoint.md).
 
 ## 1. Ownership and handoff
 

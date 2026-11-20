@@ -169,12 +169,12 @@ version is a compatibility result to display, independent of child readiness.
 |---|---|---|
 | 400 | `INVALID_REQUEST` | Unexpected query, malformed request envelope, or invalid request transport |
 | 401 | `UNAUTHORIZED` | Missing or invalid bearer credential |
-| 404 | `RESOURCE_NOT_FOUND` | Unknown route/method, missing saved run, or no active run |
+| 404 | `RESOURCE_NOT_FOUND` | Unknown route/method, missing saved run/artifact, or no active run |
 | 409 | `RUNTIME_BUSY` | Another workflow group is active; no new run admitted |
 | 422 | `VALIDATION_FAILED`, `RUNTIME_INCOMPATIBLE`, or a device availability code | New run rejected before admission; see start API |
 | 413 | `PAYLOAD_TOO_LARGE` | A documented request size limit was exceeded |
 | 500 | `INTERNAL_ERROR` | Unexpected Runtime failure with a generic response |
-| 500 | `PERSISTENCE_FAILED` | Admission or execution snapshot persistence failed |
+| 500 | `PERSISTENCE_FAILED` | Admission, execution snapshot, or artifact read persistence failed |
 | 503 | `ADB_UNAVAILABLE` | Device refresh or admission preflight could not complete |
 | 503 | `INTERNAL_ERROR` | Runtime is stopping before accepting new work |
 
@@ -436,6 +436,29 @@ execution to the Runtime owner, and returns a snapshot. The HTTP response waits
 for admission/handoff, not workflow completion. Execution continues after the
 request disconnects. This endpoint is available now for one device per new run.
 Production package/path admission remains I2.
+
+Set Variable is executable through this same API. A newly created run receives
+empty Flow/Global RAM scopes; Studio sends no variable seed map or persistence
+fields. `config.scope` selects `FLOW` or `RUN_GROUP`, `config.name` is the key,
+and `bindings.value` supplies the scalar before compilation. Assignment becomes
+visible after its successful node checkpoint; its node output is `{}`. Missing
+reads follow STOP/ERROR_BRANCH, and variables are released after the worker
+joins. Replay neither creates scopes nor executes again. Runtime restart
+interrupts unfinished work and restores no variables. Multi-device scheduling
+and Pause/Resume/Wait Variable remain Phase H. Use the
+[G18 manual example](../../../../a2matex-runtime/examples/g18/README.md)
+for the complete compile/start/poll scenario and SQLite evidence.
+
+Screenshot is also executable through this API when Runtime Info advertises
+`android.screenshot` with the same handler key. It supports FULL_SCREEN,
+ABSOLUTE_PIXELS, and SCREEN_PERCENT through the existing catalog fields.
+Successful output is only the committed artifactId; the PNG file and metadata
+are stored by the Runtime. Run snapshots remain status-only and do not gain
+image bytes or node-output fields. A replay takes no new capture. G20 now
+provides [authenticated PNG downloads](#screenshot-artifact-download-api)
+when the artifactId is known. Automatic committed-output delivery remains
+A7/I1. The [G19/G20 walkthrough](../../../../a2matex-runtime/examples/g19/README.md)
+uses read-only SQL solely as a manual test aid, not a client dependency.
 
 | Request setting | Exact value |
 |---|---|
@@ -871,6 +894,92 @@ Phase H later expands devices to 1–32 through a bounded queue and configured
 concurrency. Its [expansion checklist](../g_workflow_engine/g14_start_run_api.md#15-phase-h-expansion-checklist)
 records changes to admission policy, handoff, client pickers, guides, and tests.
 The current client permits exactly one selected device.
+
+## Screenshot artifact download API
+
+### GET /api/v1/artifacts/{artifactId}
+
+Implemented in G20 for a committed Screenshot PNG. This is a read-only binary
+request, independent of whether its workflow is still running, completed,
+failed, cancelled, or interrupted. Downloads need no connected Android device
+or ADB executable and never capture again or change run state.
+
+| Request setting | Exact value |
+|---|---|
+| Method | GET |
+| URL | `{apiBaseUrl}/artifacts/{artifactId}` |
+| Authorization | Exactly one `Authorization: Bearer <current-session-token>` header |
+| artifactId | Committed Screenshot output ID, a canonical lowercase UUIDv4 |
+| Query/body | None; no Content-Type request header is needed |
+| Optional cancellation | Client may cancel the HTTP request when closing its preview |
+
+Use the existing actual-readiness gate before sending. On restart, obtain the
+new session token; the same historical artifact ID remains valid if its stored
+row/file survive. Runtime Info's supportedNodes list advertises executable
+nodes, not API routes. Use a build containing G20 for downloads.
+
+**ID discovery boundary:** current POST/GET run snapshots do not return node
+outputs. A7/I1 still owns the committed attempt/event output transport used by
+Studio to discover artifactId automatically. Do not add a SQLite dependency to
+Studio or Launcher. The [G19/G20 example](../../../../a2matex-runtime/examples/g19/README.md)
+provides a read-only SQL lookup solely for manual testing with today's API.
+A known ID is sufficient for this endpoint; no file path is accepted.
+
+### Response and failure handling
+
+A successful response is the stored PNG bytes, with these headers:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: image/png
+Content-Length: <stored PNG byte count>
+Cache-Control: no-store
+```
+
+There is no JSON success envelope, Base64, filename, path, digest, or dimensions
+in the response. Range, If-Range, and conditional requests are ignored: the
+Runtime returns the complete image with 200, without Accept-Ranges, ETag,
+Last-Modified, or Content-Disposition. Do not expect 206 or 304.
+
+| Result before PNG headers start | Meaning and client action |
+|---|---|
+| 400 `INVALID_REQUEST` | Malformed/uppercase/non-v4 ID, nonempty query, or body. Fix the request. |
+| 401 `UNAUTHORIZED` | Missing/invalid/duplicate Bearer credential. Apply the shared session/readiness policy; do not put a token in the URL. |
+| 404 `RESOURCE_NOT_FOUND` | Unknown ID, uncommitted artifact, missing stored PNG, or unknown method/route. Show image unavailable; do not recapture automatically. |
+| 500 `PERSISTENCE_FAILED` | Storage/integrity failure; safe message `unable to read screenshot artifact`. Preserve workflow state and show a read error. |
+| 500 `INTERNAL_ERROR` | Unexpected internal failure. Show the safe error and retain the artifact ID for diagnosis/retry. |
+
+Failures before headers use the shared JSON error envelope, with
+`retryable: false`. Once PNG headers start, a read/write failure or cancellation
+aborts the connection; no JSON is appended and the already-started 200 cannot
+change. A client must consume the complete body successfully before declaring
+the preview/download complete. Discard partial bytes. Intentional cancellation
+is not by itself evidence of lost readiness; do not relaunch because a user
+closed a preview. For an unexpected transport failure, follow the shared
+actual-readiness policy before retrying this side-effect-free GET. A failed
+preview never changes the committed Screenshot result or run status.
+
+### Postman on Linux or Windows
+
+1. Start a G20 Runtime build. Follow the [authentication guide](local_authentication.md)
+   to obtain its actual apiBaseUrl and current session token.
+2. Run the [Screenshot example](../../../../a2matex-runtime/examples/g19/README.md)
+   and obtain its committed artifact_id using the manual read-only query.
+3. Create GET `{apiBaseUrl}/artifacts/<artifact_id>`. Select Authorization →
+   Bearer Token, paste the current token, select Body → none, and clear Params.
+4. Send. Expect 200 and an image/png body. Use Preview to inspect it, or Postman's
+   save-response/download action to write a chosen host PNG. Saving a response
+   is a client action; Runtime still stores its original in its managed folder.
+5. Check Content-Length equals the query's byte_length and the saved file size;
+   inspect the expected full-frame/cropped dimensions. Repeat the GET: same
+   bytes, no new attempt or capture. The Android device may be disconnected.
+6. Check missing token → 401; authenticated `not-an-id` → 400; a fresh unknown
+   lowercase UUIDv4 → 404. Adding Range still returns the full 200 image.
+
+The native client owns readiness/authentication and binary fetching. Pass
+bytes or a managed asset handle/object URL to the UI; keep the token native.
+A bare image URL cannot attach the required Bearer header. Automatic Studio
+preview awaits the output-discovery bridge above; this route supplies retrieval.
 
 ## Adding an API in later phases
 
