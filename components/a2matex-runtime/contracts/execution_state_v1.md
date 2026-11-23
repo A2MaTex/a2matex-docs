@@ -65,13 +65,28 @@ Allowed transitions:
 | `PAUSED` | `RUNNING`, `CANCELLED`, `INTERRUPTED` |
 
 Admission creates the group directly as `RUNNING`; the MVP has no group-level
-`CREATED` or `QUEUED` state. Concurrency limits and group counters are not
-stored fields. Configuration owns the limit, and counters are derived from
-DeviceExecution states.
+`CREATED` or `QUEUED` state. Execution capacity is derived from admitted
+membership and has no separate configuration or stored field. Group counters
+are derived from DeviceExecution states.
 
 `requestId` prevents a retried HTTP start request from creating another real
 execution after the first response was lost. It is not a display number,
 execution ordering key, or replacement for the Runtime-created `id`.
+
+## Device selection and execution capacity
+
+One active RunGroup owns a finite, explicit non-empty selection with no fixed
+Runtime device-count ceiling. Its execution capacity equals the number of
+admitted devices. Users control resource usage by selecting fewer or more
+devices; there is no separate maximum-device preference or YAML/env/CLI setting.
+Practical capacity depends on hardware. Existing resource/deadline failures
+remain failures, never permission to repeat an uncertain device action.
+
+Admission, snapshots, sibling aggregation, cancellation and recovery handle
+all accepted/stored members. A new run's smaller selection cannot truncate or
+invalidate an older group. The fixed count ceiling is removed in code; H2's
+configuration-removal revision derives reservations directly from membership.
+H4 exposes complete multi-device dispatch through the existing run API.
 
 ## 4. DeviceExecution
 
@@ -108,9 +123,13 @@ Allowed transitions:
 | `RUNNING` | `PAUSED`, `SUCCEEDED`, `FAILED`, `CANCELLED`, `INTERRUPTED` |
 | `PAUSED` | `QUEUED`, `CANCELLED`, `INTERRUPTED` |
 
-Pause is a group-level MVP control applied at safe node boundaries. Resume
-moves paused device executions back to `QUEUED` so H2 can reapply the current
-concurrency limit. Loss of an ADB endpoint fails only the affected execution
+Pause is a group-level MVP control applied at safe node boundaries. The
+[implemented H9–H11 behavior](../h_multi_device_execution/h9_h11_pause_resume.md)
+parks the existing live workers, then atomically commits PAUSED for all surviving
+members. Resume moves paused devices back to `QUEUED` and the group to `RUNNING`
+before granting their next attempt permissions. Workers retain their membership
+reservations and RAM; QUEUED does not mean starting another Runner.Run or
+replaying completed work. Loss of an ADB endpoint fails only the affected execution
 with an A6 device error; the MVP does not wait indefinitely in a specialized
 offline-pause state.
 
@@ -217,7 +236,9 @@ the process stopped without claiming that it is safe to replay.
 
 **G16–G18 extension — RAM storage, reads, live ownership, and Set Variable
 execution implemented and Linux-verified.** Phase H owns actual Pause/Resume
-and waiter controls. The Set Variable handler is executable; its maps add no
+and control integration. Waiter registration/notification and the Wait Variable
+node are deferred under H6–H8; H9 proceeds with current executable nodes.
+The Set Variable handler is executable; its maps add no
 persisted record or separate execution lifecycle.
 
 ### 9.1 Ownership, encoding, and bounds
@@ -247,7 +268,8 @@ invalid UTF-8, invalid/trailing JSON, and non-finite numbers.
 Replacement changes byte accounting by its size delta and does not consume
 another name slot. Enforce bounds in the synchronized RAM store before the
 successful-checkpoint closure is invoked. The current single-device payload
-bound is 2 MiB; the future 32-device bound is 33 MiB. Map overhead, temporary
+bound is 2 MiB; for N admitted devices the variable payload bound is
+`(N + 1) MiB`, with no fixed device-count ceiling. Map overhead, temporary
 copies, inputs, and node outputs are separate from those payload totals.
 
 ### 9.2 RAM publication and checkpoint ordering
@@ -279,7 +301,9 @@ timed-out, cancelled, or retried attempts publish no assignment.
 Concurrent Global writes use last-committed-write-wins. Individual reads see
 published committed state; several reads are not a multi-key snapshot.
 Switch followed by Set Variable is not atomic compare-and-set. Phase H adds
-cross-device scheduling and waiter notification after publication.
+cross-device scheduling. Waiter notification after publication remains deferred
+under H6–H8; a future waiter stays owned while suspended and must respect
+pause/cancel authority. See the [deferral decision](../phases/phase_h.md#wait-variable-deferral--approved-2026-11-22).
 
 ### 9.3 Pause, cleanup, restart, and confidentiality
 

@@ -12,7 +12,7 @@ The Runtime Agent is a local, per-user Go daemon shared by Studio and Launcher:
 - Launcher uses Production mode with an installed release and authorization.
 - Runtime owns session device discovery, execution state, checkpoints, events, artifacts, and detailed local history.
 - Studio and Launcher are clients; they must not call ADB directly or reconstruct execution state.
-- Execution runs in one long-lived agent process, with one isolated `DeviceExecution` per selected device and bounded concurrency.
+- Execution runs in one long-lived agent process, with one isolated `DeviceExecution` per selected device. Capacity equals admitted membership, with no fixed count ceiling or separate maximum-device setting. H4 still owns public multi-device dispatch.
 
 The functional scope is well described in [the 69 Runtime requirements](/home/dino/dev/a2matex/a2matex-plan/specifications/3.1.4_3.2.5_a2matex_runtime_functional_requirements.md:100), but it is not yet strict enough for implementation.
 

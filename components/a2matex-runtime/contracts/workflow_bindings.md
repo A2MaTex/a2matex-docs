@@ -210,8 +210,9 @@ define the representation and lifecycle. G16 storage and G17 internal variable r
 implemented and Linux-verified, together with G18 live store ownership and writer integration.
 G16 supplies bounded RAM scopes, compact scalar JSON, synchronized lookup, publication,
 and cleanup. Limits are 64 KiB per raw/encoded value, 512 names, and 1 MiB of name/value
-bytes per scope: 2 MiB of payload for one device or 33 MiB for the future 32-device limit,
-plus Go overhead/copies. There is no variable persistence, database table, migration,
+bytes per scope: 2 MiB for one device or `(N + 1) MiB` for N admitted devices,
+plus Go overhead/copies. Variable membership follows the full admitted group
+with no fixed count ceiling; membership checks are aligned in code. There is no variable persistence, database table, migration,
 repository method, or durable value history.
 
 G17 connects variable-source reads through the optional execution-bound view. G18
@@ -224,6 +225,12 @@ to complete authoring or local compilation.
 
 ### Wait for Variable
 
+**Deferred — 2026-11-22.** H6–H8 and executable `flow.wait_variable` support
+are postponed while the Backend node contract is unfinished. Continue Runtime
+controls from H9 for current executable nodes; no waiter implementation or
+capability claim is required now. The following describes the future contract.
+See the [deferral and return checklist](../phases/phase_h.md#wait-variable-deferral--approved-2026-11-22).
+
 `flow.wait_variable` waits for a named Global key in the current RunGroup.
 Its config has exactly `name`. Use the Set Variable name rule. Bindings are
 empty. The node has success and error ports and no data output. Studio supplies
@@ -235,7 +242,10 @@ Runtime succeeds immediately when the key exists. Values such as `false`,
 `0`, and the empty string count as present. Timeout follows the node's
 error policy, and run cancellation cancels the wait. Runtime coordinates
 the existence check with waiter registration so a concurrent commit cannot
-be missed. A waiting execution releases its worker slot and becomes runnable
-after the producing checkpoint is confirmed and its RAM value is published.
-Verify an already-present value, timeout, cancellation, and the two-device
-handoff with only one worker slot.
+be missed. A waiter becomes eligible to continue after the producing checkpoint
+is confirmed and its RAM value is published, subject to pause/cancel authority.
+The execution remains owned and joinable while suspended. Membership-derived
+capacity already permits sibling devices to run; reassess H7 before introducing
+slot release/reacquisition. No one-worker-slot requirement or device ceiling is
+implied. On resumption, verify an already-present value, concurrent publication,
+timeout/cancellation, pause/notification ordering and cross-device wakeup.

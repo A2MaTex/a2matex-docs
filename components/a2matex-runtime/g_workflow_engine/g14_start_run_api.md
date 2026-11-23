@@ -2,6 +2,12 @@
 
 ## Overview
 
+**Current public policy:** [H4](../h_multi_device_execution/h4_public_multi_device_start.md)
+now exposes the complete non-empty selection through POST /runs. Any one-device
+public gate described below records this step’s original delivery boundary;
+that gate and AdmitSingleDevice are removed. Earlier test evidence remains scoped
+to the step that produced it.
+
 G14 lets Studio start a complete Development workflow through
 `POST /api/v1/runs`. It connects the existing G12 admission service to a
 process-owned single-device runner and returns the saved execution snapshot. The request
@@ -41,9 +47,9 @@ rejection checks, intentional active-run cancellation, and crash/restart
 interruption without redispatch. Native Windows execution remains unverified.
 
 The user-approved MVP accepts exactly one device per new public start. G12's
-broader internal admission and D2's 32-device capacity remain available for
+broader internal admission and D2's multi-device capability remain available for
 Phase H. H1/H2 are not G14 delivery prerequisites; no public multi-device queue
-or concurrency setting is implemented.
+is implemented by G14; no separate concurrency setting is required.
 
 Authoritative dependencies are [A7 admission](../contracts/local_api_v1.md#8-run-admission-and-idempotency),
 [A5 execution state](../contracts/execution_state_v1.md),
@@ -60,7 +66,7 @@ Authoritative dependencies are [A7 admission](../contracts/local_api_v1.md#8-run
 | G14 | Start request/response DTOs, HTTP validation, process-owned start orchestration, error projection, route/Wire integration, and client-guide updates after verification. |
 | G12 | Request-ID lookup, G1 validation, G10 preparation, E6 fresh preflight, G11-fenced D2 admission, and CREATED-only prepared work. |
 | G11 single-device handoff | Register the accepted device worker synchronously, run it under the Runtime owner, track starts through shutdown, and publish infrastructure failure. |
-| Phase H later | Expand public admission to multiple devices and introduce the bounded queue and configurable concurrency. |
+| Phase H later | Expand public admission to multiple devices and use the bounded queue with capacity equal to admitted membership. |
 | G10/G11 | Execute sequentially per device, supervise workers, stop dispatch, join work, and settle intentional cancellation. |
 | D2/D4 | Atomic admission, consistent snapshots, authoritative checkpoints, events, and final-state calculation. |
 | B3/B5/API middleware | Process ownership, loopback listener, readiness, bearer authentication, no-store headers, and contextual request logging. |
@@ -72,9 +78,10 @@ request-ID lookup so an existing run can still be replayed. There is at most
 one non-terminal RunGroup; no queue of additional groups is introduced.
 
 The public start path calls G12.AdmitSingleDevice; the existing internal
-G12.Admit still supports 1–32 devices. Both reuse the same ordered admission
-implementation. Do not lower MaxAdmissionDevices globally or remove the
-repository's multi-device capability.
+G12.Admit retains multi-device capability. The approved capacity revision
+removes its fixed count guard during a prerequisite alignment change; current
+code still has that guard. Preserve ordered admission and G14's public
+single-device gate until H4; do not remove repository multi-device capability.
 
 G14 includes the small G11 connection needed to own one asynchronous worker
 and fence/join the commit-to-dispatch gap. This phase does not implement
@@ -250,7 +257,7 @@ completion handling rather than copying the runner. Normal terminal device
 failure is a saved outcome; unexpected runner/infrastructure errors reach Wait.
 
 Phase H replaces this one-device handoff with group coordination, a bounded
-queue, and configured worker slots. It must preserve these ownership guarantees.
+queue, and worker reservations derived from admitted membership. It must preserve these ownership guarantees.
 
 ## 6. HTTP lifetime, stop, and infrastructure failure
 
@@ -572,23 +579,27 @@ real-ADB acceptance, and native-Windows acceptance recorded separately.
 The temporary public limit is explicit in constants.MaxStartDevices and
 Service.AdmitSingleDevice. When multi-device scheduling is implemented:
 
-1. Add the H1 group owner and H2 bounded queue/configuration; do not spawn one
-   unrestricted goroutine per selected device.
+1. Use the H1 group owner and H2 membership-derived queue; reserve at most
+   one execution per admitted identity, with capacity equal to admitted count.
+   Never spawn a worker for an unselected device or accept a separate maximum.
 2. Replace the start service's SingleDeviceAdmitter policy with existing
-   G12.Admit and expand the accepted array from exactly one to 1–32 devices.
+   G12.Admit and expand the array to a non-empty ordered selection without
+   a fixed device-count ceiling.
    Preserve request-ID lookup before replacement-body semantics.
 3. Replace the single Work.Devices[0] Dispatch with an atomic ownership handoff
    for every ordered device/input pair. Retain the outer start reservation,
    stop-race acknowledgement, and fatal uncertain-handoff fence.
-4. Schedule through G11/G10 with configured concurrency, device failure/input
+4. Schedule all admitted devices through G11/G10 with device failure/input
    isolation, queued-work settlement, and no background recovery redispatch.
 5. Update A7, this spec, G12's public-policy note, Phase G/H roadmaps, and both
    client guides/device pickers. Keep the current envelope, snapshot fields,
    replay statuses, and per-device SQLite identities.
-6. Replace public multi-device rejection tests with 2/32-device queue/slot,
+6. Replace public multi-device rejection tests with multi-device queue/slot checks including controlled groups above 32,
    isolation, failure, and shutdown tests; retain all replay/disconnect checks.
    Run real multi-device and native Windows acceptance separately.
 
 No H1/H2 implementation or Phase H completion is claimed by G14. The internal
-32-device admission/persistence tests remain preparation, not public scheduling
-acceptance.
+earlier 32-device admission/persistence fixtures are historical samples, not
+a maximum or public scheduling acceptance. Remove count assumptions from
+G1/E6/domain/variables and D2/D4/D6 reads together before H3/H4, retaining
+payload checks and atomic state/event settlement.

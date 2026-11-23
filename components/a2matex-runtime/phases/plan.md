@@ -79,8 +79,8 @@ Studio (Development) or Launcher (Production)
   ADB-visible emulators.
 - **Safety at the boundary:** workflows cannot provide executable paths, shell
   fragments, raw ADB arguments, target serials, or artifact paths.
-- **Predictable multi-device operation:** devices run independently under a
-  configured concurrency limit, while nodes remain ordered within each device.
+- **Predictable multi-device operation:** all selected devices may run concurrently,
+  with capacity derived from admitted membership and sequential nodes per device.
 - **Observable and recoverable execution:** committed state is the source of
   truth; events describe committed changes, and a client can recover its view
   from a snapshot when event history is unavailable.
@@ -107,7 +107,7 @@ The first usable Runtime release includes:
 - Generic Android device discovery through ADB.
 - Real execution—never simulated execution.
 - The catalog has these 15 accepted node contracts; execution availability follows
-  the tested feature matrix (Wait Variable follows H8; utility.log remains deferred):
+  the tested feature matrix (Wait Variable is deferred with H6–H8; utility.log remains deferred):
   - `flow.start`
   - `flow.end`
   - `flow.delay`
@@ -125,7 +125,7 @@ The first usable Runtime release includes:
   - `android.screenshot`
 - Success and error transitions.
 - Timeout, bounded retry, and error policies.
-- Single-device and bounded multi-device execution.
+- Single-device and selection-driven multi-device execution without a fixed count ceiling.
 - Persistent execution state, checkpoints, typed events, and screenshot artifacts, plus separate structured operational logs.
 - Pause, resume, cancel, disconnect recovery, and crash interruption handling.
 - Studio Development mode.
@@ -428,9 +428,9 @@ not create placeholder specifications.
 | G11 | [Runner shutdown](../g_workflow_engine/g11_runner_shutdown.md)                                | Implemented and Linux-verified. Preserve owner cause, fence/join work, and commit intentional cancellation before SQLite closes; owner loss/failure retains D6 fallback. Windows cross-build passes; native Windows/live Android stop acceptance remain unverified. |
 | G12 | [Admission coordination](../g_workflow_engine/g12_admission_coordination.md) | Internal service implemented and Linux-verified. Replay, G1/G10/E6, fenced D2 admission, CREATED-only handoff, concurrency/shutdown/fault tests, and SQLite smoke pass. Windows cross-compilation passes; no scheduler/API is introduced. |
 | G13 | [Run snapshot APIs](../g_workflow_engine/g13_run_snapshot_apis.md) | Implemented and Linux-verified. Both authenticated GET routes reuse consistent D2 reads; DTO/errors, real SQLite, concurrent cursors, built agent, ownership regression, and client guides verified. Windows agent/API tests cross-compile; native Windows remains unverified. |
-| G14 | [Start-run API](../g_workflow_engine/g14_start_run_api.md) | Implemented and Linux-verified. POST /runs uses G12.AdmitSingleDevice and G11 ownership; 201 new/200 replay. Real SQLite, live Waydroid, and stop/recovery checks pass. Phase H expands scheduling; Windows cross-build passes, native Windows unverified. |
+| G14 | [Start-run API](../g_workflow_engine/g14_start_run_api.md) | Implemented and Linux-verified. Originally one device; H4 now uses G12.Admit and H1–H3 group ownership; 201 new/200 replay. Real SQLite, live Waydroid, and stop/recovery checks pass. Phase H expands scheduling; Windows cross-build passes, native Windows unverified. |
 | G15 | [Switch execution](../g_workflow_engine/g15_switch_execution.md) | Implemented and Linux-verified. Resolve the left once, lazily evaluate ordered typed rules, and checkpoint UUID/default/error continuation. Compile/start/snapshot/replay and error-branch integration pass with real SQLite; Windows agent/test cross-compilation passes, native Windows unverified. |
-| G16 | [Scoped variable storage](../g_workflow_engine/g16_scoped_variable_storage.md) | Implemented and Linux-verified. RAM scopes, codec, quotas, synchronized publication, cancellation/fencing, and cleanup; full/race tests, vet, Linux build, and local demo pass. Windows cross-compilation passes, native Windows unverified. No SQLite change; G18 live ownership/writes are implemented; Phase H controls remain pending. |
+| G16 | [Scoped variable storage](../g_workflow_engine/g16_scoped_variable_storage.md) | Implemented and Linux-verified. RAM scopes, codec, quotas, synchronized publication, cancellation/fencing, and cleanup; full/race tests, vet, Linux build, and local demo pass. Windows cross-compilation passes, native Windows unverified. No SQLite change; G18 live ownership/writes are implemented; H9–H13 controls are implemented; H6–H8 variable waiting remains deferred. |
 | G17 | [Variable input bindings](../g_workflow_engine/g17_variable_input_bindings.md) | Implemented and Linux-verified. Flow/Global reads, destination validation, optional view identity/transport, and lazy Switch semantics; full/race tests, vet, build, real-SQLite checkpoint integration, and local demo pass. Windows cross-compiles; native execution unverified. G18 live ownership and writes are implemented. |
 | G18 | [Set Variable execution](../g_workflow_engine/g18_set_variable_execution.md) | Implemented and Linux-verified: pure handler, checkpoint-confirmed RAM assignments, CREATED-only store/views, joined cleanup, and actual compile/start/poll/replay. Full/race tests, SQLite faults, managed stop/crash/restart, vet, Linux build, and Windows agent/test cross-builds pass with controlled ADB readiness; native Windows/live Android unverified. No variable SQL or Phase H scheduling. |
 | G19 | [Screenshot execution integration](../g_workflow_engine/g19_screenshot_execution.md) | Implemented and Linux-verified: attempt-bound staging, metadata/output pairing, D4/D5 settlement, safe cleanup, and actual registry/API flows. Full/race tests, SQLite faults, managed stop/crash/restart, vet, Linux build, and Windows cross-builds pass with controlled ADB PNG output. Native Windows/live Android unverified; G20 now separately implements retrieval. |
@@ -468,7 +468,7 @@ assignment and releasing readers/continuation. Live Pause/Resume retains maps;
 run completion releases them after workers join. Exit/crash loses variables,
 and restart never continues an old run. Phase H verifies shared RunGroup
 visibility and last-committed-write-wins
-across device workers and owns Wait Variable scheduling. G15 and G18 advertise
+across device workers. Wait Variable scheduling remains deferred under H6–H8. G15 and G18 advertise
 their exact executable pairs only after runner integration is usable. G19 does
 the same for Screenshot after its staging and checkpoint path is verified.
 
@@ -479,26 +479,21 @@ after restart during an uncertain action without redispatch. G11 verifies
 **Stop and exit** through B3/B5 before desktop integration; H14 extends that
 acceptance to scheduler states.
 
-**Public run milestone — G12–G14, single-device MVP.** G12 coordinates
-admission; G13 exposes committed snapshots. G14 accepts exactly one device per
-new POST and returns 201 after confirmed admission and G11 worker ownership.
-Request-ID replay returns 200 without another handoff. The execution lifetime
-belongs to Runtime, independently of the HTTP connection.
+**Public run milestone — G12–G14, expanded by H4.** G12 coordinates
+admission; G13 exposes committed snapshots. H4 now admits a non-empty ordered
+selection through POST /runs, with separate inputs for each device and no fixed
+count ceiling. It returns 201 after confirmed admission and owned group handoff;
+request-ID replay returns 200 without another dispatch. Execution belongs to
+Runtime independently of the HTTP connection.
 
-G14 uses AdmitSingleDevice's limit after replay lookup, retaining G12.Admit's
-internal 1–32-device capacity. G11's outer start lease covers the gap between
-admission return and asynchronous worker registration. Intentional shutdown
+The temporary AdmitSingleDevice wrapper and one-member dispatch guard are removed.
+H1–H3 supply group ownership, membership-derived capacity and failure isolation.
+G11's start lease covers admission through registration. Intentional shutdown
 settles accepted work; uncertain admission/handoff failure fences dispatch and
-uses the existing supervised failure path. G20 separately exposes committed
-Screenshot retrieval.
-
-**Phase H follow-up.** H1–H3 add group ownership, the bounded queue, configured
-concurrency, and completion/failure handling. H4 then replaces the G14
-single-device admission/dispatch policy with an all-device handoff. Preserve
-replay, shutdown, and failure
-fencing. Update A7 cardinality, G12/G14 specs, device picker/client guides,
-and tests together. The [G14 expansion checklist](../g_workflow_engine/g14_start_run_api.md#15-phase-h-expansion-checklist)
-records these changes; no Phase H scheduling is implemented as part of G14.
+uses the existing supervised failure path. H4 aligns A7, G12/G14, client guides
+and tests. See the [H4 contract and evidence](../h_multi_device_execution/h4_public_multi_device_start.md).
+G20 separately exposes committed Screenshot retrieval. Waits, lifecycle actions,
+disconnect monitoring and combined real-device acceptance remain later Phase H.
 
 **Full Phase G gate — G21–G22.** Verify existing terminal calculation first,
 including a handled node failure followed by a successful End. Then exercise
@@ -527,7 +522,7 @@ or keeping parallel old/new implementation sequences.
 
 | Phase           | Responsibility                                       | Delivery gate and owner                                                                                                      |
 | --------------- | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| [H](phase_h.md) | Multi-device scheduling and execution controls       | Runtime: bounded multiple-device execution, waits, pause/resume/cancel, and shutdown/recovery.                               |
+| [H](phase_h.md) | Multi-device scheduling and execution controls       | Runtime: bounded multiple-device execution, pause/resume/cancel and shutdown/recovery; H6–H8 waits deferred.                               |
 | [I](phase_i.md) | Observability APIs and Studio integration            | Runtime APIs, followed by explicit Studio-owner integration/acceptance. Current G14/G13 polling integration can proceed now. |
 | [J](phase_j.md) | Protected package execution and Launcher integration | Runtime protection/authorization APIs, real Backend counterpart, then Launcher-owner acceptance.                             |
 | [K](phase_k.md) | Distribution and release acceptance                  | Installed Linux/Windows bundles, consolidated evidence, and final client/release handoff.                                    |
@@ -539,7 +534,7 @@ flowchart LR
     I --> J[J protected products and Launcher]
     B[Backend package and authorization counterparts] --> J
     J --> K[K installed release acceptance]
-    N[Current G14/G13 single-device APIs] --> S[Studio polling integration now]
+    N[Current H4/G13 multi-device APIs] --> S[Studio polling integration now]
 ```
 
 **Review scope.** One step delivers one functional responsibility. Target 3–6
@@ -567,37 +562,53 @@ already calculates authoritative results. H extends those foundations.
 | Step | One responsibility                      | Observable checkout                                                                                                                  |
 | ---- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | H1   | [Group execution ownership](../h_multi_device_execution/h1_group_execution_ownership.md) | Implemented and Linux-verified: group-owned contexts/work/RAM, joined cleanup and consecutive starts. Full/race and process checks pass; Windows cross-compiles, native execution unverified. |
-| H2   | Bounded queue and worker slots          | Three admitted devices with two slots produce two running executions and one queued execution.                                       |
-| H3   | Worker completion and failure isolation | Completion releases capacity; ordinary device failure leaves siblings running; infrastructure uncertainty fences dispatch.           |
-| H4   | Public multi-device start               | POST /runs accepts 1–32 ordered serial/input pairs with one admission/handoff and correct request-ID replay.                         |
-| H5   | Device-disconnect handling              | Disconnecting one endpoint fails only its execution with the approved device error and no unsafe action replay.                      |
-| H6   | Variable-wait registration              | Existence checking and waiter registration cannot miss a concurrent committed write; false, zero, and empty string count as present. |
-| H7   | Release and reacquire worker capacity   | A waiting execution frees its slot, remains supervised, and reacquires capacity before continuing.                                   |
-| H8   | Wait Variable node integration          | With one slot, A waits, B commits the key, and A continues; timeout/error routing and cancellation are verified.                     |
-| H9   | Pause checkpoint transitions            | Persist valid group/device pause transitions while preserving next position, attempt evidence, and atomic events.                    |
-| H10  | Pause coordination                      | Fence new node dispatch, settle active work at the approved boundary, then acknowledge PAUSED.                                       |
-| H11  | Resume coordination                     | Requeue paused devices under the current slot limit without repeating completed actions or losing execution inputs/outputs.          |
-| H12  | Run cancellation                        | Cancel active/queued/waiting work while Runtime stays alive; a later new run starts normally.                                        |
-| H13  | Lifecycle-action API                    | Expose group PAUSE/RESUME/CANCEL with exact 200/202/409 bodies, idempotency, and guide examples.                                     |
-| H14  | Scheduler shutdown and recovery         | Queued, waiting, paused, and active work settle on owner stop or become INTERRUPTED after crash, without redispatch.                 |
-| H15  | Combined multi-device acceptance        | Verify bounds, isolation, committed global-variable visibility, derived summaries, and two independent real Android targets.         |
+| H2   | [Bounded queue and worker slots](../h_multi_device_execution/h2_bounded_queue_and_worker_slots.md) | Implemented; membership-derived capacity with no separate setting or fixed count ceiling. Existing 1/64/128-member, race and managed-process checks pass; evidence in H2. G22 fixture missing; H4 now exposes public multi-device starts. |
+| H3   | [Worker completion and failure isolation](../h_multi_device_execution/h3_worker_completion_and_failure_isolation.md) | Implemented and Linux-verified: private complete-group coordination, ordinary failure isolation, fatal fencing and all-worker RAM retirement. SQLite 64-member, race and managed-process checks pass; Windows cross-build passes, native unverified. G22 fixture missing; H4 now exposes public multi-device starts.           |
+| H4   | [Public multi-device start](../h_multi_device_execution/h4_public_multi_device_start.md)               | Implemented and Linux-verified: complete ordered selection, isolated inputs, indexed availability diagnostics and replay. Actual-agent HTTP/SQLite 2/33-member and managed shutdown checks pass; see H4 evidence.                         |
+| H5   | [Device-disconnect handling](../h_multi_device_execution/h5_device_disconnect_handling.md) | Code implemented; existing regressions/race and Windows cross-build pass. Failure-only transport diagnosis; no replay/watcher. H15 now verifies focused transport/context tests and controlled two-device disconnect isolation; live targets/native Windows remain pending. See H5 section 13. |
+| H6 | Variable-wait registration | **Deferred.** Keep atomic existence-check/registration and committed-publication notification requirements; no waiter code is required before H9. |
+| H7 | Release and reacquire worker capacity | **Deferred; design review required.** Membership-derived capacity means waiting does not block siblings. Do not build slot release/reacquisition solely for the old limited-worker model. |
+| H8 | Wait Variable node integration | **Deferred.** No executable Wait Variable capability is claimed; resume catalog/handler integration and wait acceptance together later. |
+| H9 | [Pause checkpoint transitions](../h_multi_device_execution/h9_h11_pause_resume.md) | Implemented and Linux-verified: atomic pause/resume checkpoints, unchanged history, 128-member batched events, rollback/idempotence and commit read-back tests pass. |
+| H10 | [Pause coordination](../h_multi_device_execution/h9_h11_pause_resume.md) | Implemented and Linux-verified: dispatch fence, safe-boundary pause, retained worker/RAM ownership and shutdown joining. Pending work settles before PAUSED; public actions are delivered by H13. |
+| H11  | [Resume coordination](../h_multi_device_execution/h9_h11_pause_resume.md) | Implemented and Linux-verified: confirmed Resume releases the same workers; outputs, Flow/Global RAM and retry identity survive. Controlled smoke finishes with 10 attempts/2 Home actions; Windows cross-build only. |
+| H12 | [Run cancellation](../h_multi_device_execution/h12_run_cancellation.md) | Implemented and Linux-verified: exact-group settlement, joined controls/RAM retirement, duplicate/rollback/deadline guards and same-process fresh run pass focused/race/smoke checks. Windows cross-build only; public actions remain H13 and waiter cleanup deferred. |
+| H13 | [Lifecycle-action API](../h_multi_device_execution/h13_lifecycle_action_api.md) | Implemented and Linux-verified: authenticated PAUSE/RESUME/CANCEL, strict 1,024-byte DTO, exact 200/202/409 mappings, real lifecycle/SQLite and built-agent acceptance, shared/app-specific guides. Windows cross-build only; wider H15/native acceptance pending. |
+| H14 | [Scheduler shutdown and recovery](../h_multi_device_execution/h14_scheduler_shutdown_and_recovery.md) | Implemented; Linux controlled S1–S15 acceptance mapped and verified. Twelve actual-agent scenarios, joined controls, 128-member recovery, retained artifacts/history and no redispatch pass; no production fix needed. Native Windows/live targets remain separate; waits deferred. |
+| H15 | [Combined multi-device acceptance](../h_multi_device_execution/h15_combined_multi_device_acceptance.md) | Acceptance pack implemented; eight Linux controlled actual-agent scenarios and focused SQLite publication/transport checks pass. A01–A14 evidence mapped; independent Android/native Windows and the missing G22 regression harness remain pending. Full H15 acceptance is not complete; waits deferred. |
 
-H4 is an early usable multi-device milestone. H6–H8 depend on G16–G18 and the
-[Wait Variable contract](../contracts/workflow_bindings.md#wait-for-variable).
-H9's spec approves pause behavior for queued work, retry delay, and waits before
-implementation; H10/H11 coordinate pause and resume. H12 cancels a group while
-Runtime stays alive, distinct from G11 process shutdown verified further by H14.
+H4 is an early usable multi-device milestone. **H6–H8 are deferred as of
+2026-11-22. H9–H14 are implemented for their stated verified scope; H15 controlled acceptance now passes, while live targets and the G22 regression gate remain pending.** See the [deferral and return checklist](phase_h.md#wait-variable-deferral--approved-2026-11-22).
+H7 must be reassessed under membership-derived capacity, not implemented for an
+obsolete limited-worker model. The [planned Wait Variable contract](../contracts/workflow_bindings.md#wait-for-variable)
+is not executable support. The [combined H9–H11 spec](../h_multi_device_execution/h9_h11_pause_resume.md)
+defines checkpoint, boundary and retained-worker continuation behavior for
+current nodes, Delay and retry delay. H9, H10 and H11 were implemented with layer-specific checks; none depends on
+deferred H6/H7. Linux and controlled smoke evidence is recorded in the spec;
+public action routing remains H13.
+H12–H15 cover supported work now and record waiter-specific control, shutdown
+and acceptance as deferred follow-up. H12 cancels a group while Runtime stays
+alive, distinct from G11 process shutdown verified further by H14.
 Reuse D2/D4 summaries and final-state calculation, including concurrent finishes.
 
 Context ownership remains Runtime → RunGroup → DeviceExecution → attempt.
 Keep per-device fresh percentage display measurements; cache invalidation is
 future optimization. Real multi-device acceptance requires independent targets.
 
+The capacity policy has no fixed device-count ceiling or separate maximum-device
+setting. Capacity equals admitted membership; users control resource usage through
+device selection. H2 removed the startup throttle and its constructor/wiring;
+complete G1/E6/G12/variable membership and D2/D4/D6 reads/settlement remain aligned. No new
+selection may truncate or invalidate an older group. Large event sets remain
+batched inside one transaction. H2 owns this simplification; H3 coordinates worker
+completion; implemented H4 removes the public one-device guard and dispatches the full group.
+The missing G22 harness remains a regression gap.
+
 ### Phase I — Observability APIs and Studio integration
 
 See the [I index](phase_i.md). I1–I4 are Runtime deliveries; I5–I8 are explicit
-Studio-owner work with focused Runtime fixes. Initial authoring and single-device
-Test Run integration using G14/G13 is available before these remaining steps.
+Studio-owner work with focused Runtime fixes. Initial authoring and multi-device
+Test Run integration using H4/G13 is available before these remaining steps.
 
 | Step | One responsibility                     | Observable checkout                                                                                                             |
 | ---- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
@@ -692,9 +703,9 @@ Automatic updating and catalog synchronization remain separately approved work.
 | M2 — Validation ready           | Studio receives bounded diagnostics and exact compilation results without execution.                   | C; Studio initial integration.                               |
 | M3 — Device ready               | Runtime discovers, selects, and freshly checks generic ADB endpoints.                                  | E.                                                           |
 | M4 — Command ready              | Declared Android handler operations execute on real devices with supported targeting modes.            | F and the declared device/platform matrix.                   |
-| M5 — Single-device engine ready | Approved single-device features run with durable checkpoints/events and advertised executable pairs.   | G22; Wait Variable follows in H8 and Log remains deferred.   |
-| M6 — Multi-device ready         | Bounded, isolated execution, waits, controls, shutdown, and derived results verified.                  | Early start milestone H4; complete Phase H gate H15.         |
-| M7 — Studio MVP                 | Draft workflows are tested, observed, inspected, and controlled end to end from Studio.                | I8; initial single-device polling integration can start now. |
+| M5 — Single-device engine ready | Approved single-device features run with durable checkpoints/events and advertised executable pairs.   | G22; Wait Variable (H6–H8) and Log remain deferred.   |
+| M6 — Multi-device ready         | Customer-controlled, isolated execution, controls, shutdown and derived results verified; variable waits deferred.                  | Early start H4; H15 gates the current supported scope, with H6–H8 tracked as deferred.         |
+| M7 — Studio MVP                 | Draft workflows are tested, observed, inspected, and controlled end to end from Studio.                | I8; initial multi-device polling integration can start now. |
 | M8 — Production MVP             | Launcher runs an authorized installed Release with renewal, expiry, and safe resume.                   | J15 with real Backend integration.                           |
 | M9 — Release ready              | Distributed builds pass the declared installed platform/security/resource gates and have final guides. | K7; remaining gaps are explicit.                             |
 | M10 — Post-release evolution    | Separately approved advanced nodes, graph semantics, updating, and catalog rollout.                    | Future work, not an implicit MVP promise.                    |
@@ -714,7 +725,7 @@ That pass changes references only; approved business behavior and historical
 verification evidence are not silently rewritten.
 
 Reference owners are now: multi-device public start H4; disconnect H5; waits
-H6–H8; pause/resume H9–H11; run cancellation H12; action API H13; owner-stop
+H6–H8 (deferred); pause/resume H9–H11; run cancellation H12; action API H13; owner-stop
 acceptance H14; attempts I1; SSE observation/continuity/transport I2–I4; Studio
 handoff I5–I8; Production J1–J15; installed release gates K1–K7. It must also
 update the Production authorization contract's phase label and A8's consumer

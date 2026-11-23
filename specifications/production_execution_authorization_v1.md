@@ -8,8 +8,12 @@ workflow key.
 
 The MVP authorizes the customer and exact Product Release only. It does not
 limit installations, machines, Android devices, active leases, or concurrent
-executions. Runtime may still bound local parallel work for resource safety;
-that is scheduling, not commercial authorization.
+executions. Runtime also has no fixed device-count ceiling or separate maximum
+setting. Capacity equals admitted device membership: the customer controls
+resource usage through device selection. No capacity preference is passed at
+process launch or as authorization. Practical capacity depends on hardware;
+this policy does not guarantee unlimited hardware resources. H4 still owns
+public multi-device dispatch.
 
 This contract owns Production authorization. The Studio authoring API remains
 defined by `components/a2matex-runtime/contracts/local_api_v1.md`. Runtime may

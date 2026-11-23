@@ -76,6 +76,16 @@ event types in the first slice. A later projection requires explicit
 review. Never expose variable values, workflow inputs, protected IR,
 raw process output, filesystem paths, or stack traces as event data.
 
+## Device-capacity revision — implemented; H2 owns configuration removal
+
+A run has no fixed device-count ceiling, so admission, cancellation and recovery
+can produce more events than one append batch. The append-batch limit is a
+buffer/operation bound, not a group/device limit. Append successive bounded
+batches using the same state write transaction, preserving event order and
+cursor allocation; commit once and notify only afterward. A failure in a later
+batch rolls back all earlier batches and related state in that transaction.
+Retention/replay page sizes do not cap the devices a run may contain.
+
 ## 3. Cursor semantics
 
 Use a positive SQLite-compatible integer internally and encode it as a

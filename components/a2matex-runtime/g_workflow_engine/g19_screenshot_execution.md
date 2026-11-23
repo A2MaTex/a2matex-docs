@@ -469,7 +469,7 @@ their own copy.
 Use the successful compiler response's exact runtimeIr object in the existing
 POST /api/v1/runs envelope: fresh canonical UUIDv4 requestId, one exact READY
 adbSerial, and `inputs: {}`. The
-[start API guide](../integration/managed_runtime.md#single-device-start-api)
+[start API guide](../integration/managed_runtime.md#workflow-start-api)
 defines the full envelope and authentication.
 
 Expect HTTP 201 for the new run. Retain runGroup.id and poll

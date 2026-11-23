@@ -173,7 +173,7 @@ Reference:
 
 - [B6 — Minimal Local API](../runtime_process_foundation/b6_minimal_local_api.md)
 
-Database, artifact, ADB, SSE, and execution-concurrency settings stay with
+Database, artifact, ADB and SSE settings stay with
 their later owning phases instead of becoming unused Phase B fields.
 
 ## Phase B gate

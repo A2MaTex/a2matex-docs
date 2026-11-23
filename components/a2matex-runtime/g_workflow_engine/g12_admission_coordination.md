@@ -56,15 +56,16 @@ and [G11 admission fence](g11_runner_shutdown.md#4-work-gate-and-admission-fence
 | E6 | Fresh discovery and readiness for the entire selected device list; bounded probes and ordered unavailable reasons. |
 | D2/D3 | Atomic admission, final request-ID/active-run concurrency guards, initial state/events, and consistent snapshots. |
 | G11 | Close admission during stop and join acquired admission leases before cancellation settlement. |
-| G14 start use case / later H1/H2 | G14 hands one committed device to process-owned G11 execution. H1/H2 later add the bounded queue and configured concurrency. |
+| G14 start use case / later H1/H2 | G14 hands one committed device to process-owned G11 execution. H1/H2 add group ownership and a queue with capacity derived from admitted membership. |
 | G13/G14 | HTTP parsing, authentication, response projection, snapshot/start routes, and integration-guide examples. |
 
-Keep the existing internal 1–32-device Admit contract. G14 uses the additional
-AdmitSingleDevice entry point, which shares the admission implementation and
-applies constants.MaxStartDevices only after request-ID lookup. It creates no
-worker pool. This is the explicit public MVP limit; H1/H2 later switch the start
-policy to multi-device admission and bounded scheduling. See the
-[G14 expansion checklist](g14_start_run_api.md#15-phase-h-expansion-checklist).
+The implemented Admit contract accepts a non-empty ordered device list
+without a fixed count ceiling. H4 uses this same entry point for public starts,
+then hands the complete prepared group to the H1–H3 coordinator under the G11
+start lease. Request-ID replay precedes new-selection validation and never
+creates another handoff. The temporary AdmitSingleDevice entry point and
+MaxStartDevices constant have been removed. See the
+[H4 contract](../h_multi_device_execution/h4_public_multi_device_start.md).
 There is one non-terminal RunGroup under D2; do not add a waiting queue of groups.
 
 No new node validation rules, workflow compiler, SQLite schema, migration,
@@ -217,9 +218,10 @@ The deferred release remains a safety net on every return.
 ## 5. Shape, replay precedence, and bounds
 
 For every call require an active context and a lowercase canonical UUID v4
-RequestID. For a new ID only, require 1–32 device entries, unique valid exact
-ADB serials, and bounded IR/input bytes. Reuse `adb.ValidSerial` and shared
-constants, including `MaxAdmissionDevices`, `RuntimeIRMaxContentBytes` (1 MiB),
+RequestID. For a new ID only, require a non-empty ordered device list without
+a fixed count ceiling, unique valid exact ADB serials, and bounded IR/input
+bytes. Retire the count maximum; retain `adb.ValidSerial` and byte constants,
+including `RuntimeIRMaxContentBytes` (1 MiB),
 and `RunRequestMaxContentBytes` (4 MiB). Bound the sum of raw IR and raw input
 bytes before copying or decoding them. G1 owns JSON/input-schema semantics;
 G12 does not implement a second input validator.
@@ -455,7 +457,7 @@ test-only HTTP endpoint is needed for this phase.
 
 | Scenario | Required observable result |
 | --- | --- |
-| Valid one-device and 32-device requests | Confirmed CREATED, one group, the exact ordered queued devices, admission events, and matching Work; zero workflow-handler calls. |
+| Valid one-device and larger requests, including groups above 32 | Confirmed CREATED, one group, the exact ordered queued devices, admission events, and matching Work; zero workflow-handler calls. |
 | Existing ID with changed/invalid IR, different inputs/devices, or no replacement content | EXISTING and saved current snapshot; zero G1, runner preparation, E6, admission, or scheduling calls. |
 | Known terminal ID while another group is active | Return that terminal snapshot instead of BUSY. |
 | Malformed ID, serial, duplicate serial, count, or byte limits | Classified failure at the owning check with no writes/work; valid boundaries accepted. |
@@ -495,7 +497,7 @@ Native Windows execution and live ADB acceptance remain separate evidence.
 | --- | --- |
 | Ordering and result guards | Replay bypasses fresh checks. Confirmed CREATED alone returns Work. Race-loser replay releases its lease before snapshot read. Invalid identities, broken trusted results, and missing dependencies fail with contextual classified errors. |
 | Existing G1 acceptance | VALID and VALID_WITH_WARNINGS retain G1's accepted-content behavior; invalid results preserve their bounded diagnostics and FailureCode. Byte-boundary and over-limit checks pass. |
-| Real SQLite admission | One- and 32-device requests preserve serial/input/UUID order even with reversed discovery. Replay/busy/rejected requests add no work. A terminal request replays while a different run remains active; new runs receive fresh identities. |
+| Real SQLite admission | Existing one- and 128-device fixtures preserve serial/input/UUID order even with reversed discovery. Replay/busy/rejected requests add no work. A terminal request replays while a different run remains active; new runs receive fresh identities. |
 | Concurrent calls | Barrier-controlled real D2 calls with the same ID produce one CREATED handoff and one EXISTING snapshot. Different IDs produce one CREATED and one BUSY while the first run remains active. |
 | Context and shutdown | Cancellation before commit leaves no records and releases the lease. Cancellation immediately after confirmed commit preserves Work. G11 waits for a held lease, includes its committed queued device in cancellation, and refuses later worker registration. Stop during preflight prevents admission. |
 | Persistence faults | Child/event insertion faults roll back all admission rows/events. Committed and rolled-back uncertain outcomes produce no Work and no internal retry. Reopening the same store lets D6 interrupt actual unfinished committed evidence without node dispatch; replay never reconstructs Work. |
@@ -520,9 +522,9 @@ G11's settlement snapshot.
 
 G13 adds snapshot routes. G14 adds single-device start DTOs/authentication, response
 snapshots, the trusted G11 handoff, and API integration-guide sections for the
-exactly-one-device public MVP. H1/H2 later enforce configured device concurrency
-and consume G11 registrations. H5/H6 retain later
-Pause/Resume and run-level cancellation controls. G15–G19 add the remaining
+exactly-one-device public MVP. H1/H2 own group membership, selection-derived reservations
+and G11 registrations. H9-H13 own later Pause/Resume and run-level cancellation
+controls. G15–G19 add the remaining
 engine features under their existing contracts.
 
 Keep the MVP small: one replay lookup, existing validators, one prepared runner,

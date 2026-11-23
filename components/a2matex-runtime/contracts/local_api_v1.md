@@ -384,11 +384,10 @@ Rules:
   snapshot with HTTP `200` and never starts another execution. Runtime does not
   reinterpret the replacement body.
 - `runtimeIr` is the exact A2 document and remains subject to its 1 MiB limit.
-- For the G14 single-device MVP, `devices` contains exactly one serial/input
-  object. New requests with zero or multiple devices are rejected before
-  admission. Existing request-ID replay does not reinterpret replacement
-  device cardinality. Phase H expands new requests to 1–32 unique devices
-  after bounded scheduling is implemented; the array envelope is unchanged.
+- `devices` contains a non-empty ordered selection with unique exact serials
+  for a new request. There is no fixed count ceiling. Existing request-ID replay
+  does not reinterpret replacement selection semantics after strict transport
+  checks. Hardware determines practical capacity; the array envelope is unchanged.
 - Each `inputs` object must satisfy the admitted A2 workflow input schema.
 - The complete request is limited to 4 MiB.
 - Runtime revalidates all devices and all G1 admission rules before creating
@@ -396,8 +395,11 @@ Rules:
 
 Mode, concurrency, failure policy, run name, handler versions, credential
 values, artifact paths, and Production authorization are not client-selected
-MVP fields. Runtime configuration owns concurrency; A5 owns the fixed device
-failure-isolation rule.
+MVP fields. Execution capacity equals the admitted device count. Customers
+control resource usage through device selection; there is no separate maximum
+in YAML, environment, CLI, client settings or this request. No fixed count ceiling,
+silent deduplication/filtering or automatic CPU/RAM-based reduction is permitted.
+H4 transfers the complete admitted list to H3 in one owned handoff. A5 owns device failure isolation.
 
 Admission success returns an `ExecutionSnapshot`. Semantic rejection returns
 an A6 top-level error and, when validation produced actionable diagnostics, a
@@ -524,6 +526,16 @@ snapshot and has no additional effect. An ineligible transition returns
 Pause, resume, and cancel apply to the complete RunGroup. The MVP exposes no
 per-device lifecycle endpoint.
 
+The [H13 implementation specification](../h_multi_device_execution/h13_lifecycle_action_api.md)
+defines strict decoding, controller dependencies, complete examples and response
+ordering. H13 is implemented and Linux-verified; the [shared action guide](../integration/run_actions.md)
+provides the current client reference. Pending/achieved classification comes from the
+live lifecycle result, not a snapshot-only status check. An accepted submission
+returns 202 even if its subsequent snapshot already reflects completion or a
+later action. A cancellation remains pending until H12 joins cleanup, including
+when SQLite already shows CANCELLED. After that group retires, repeated CANCEL
+against its saved CANCELLED record returns 200 without changing it.
+
 ## 10. SSE replay and live delivery
 
 `GET /events` requires `Accept: text/event-stream` and the bearer header.
@@ -608,3 +620,14 @@ to a local path.
 
 A8 provides the [portable Local API and SSE cases](./contract_fixtures_v1.md)
 used by later Runtime and client contract tests.
+
+## H4 selection-availability diagnostics
+
+A 422 readiness rejection preserves the existing top-level first availability
+code and adds optional `unavailableDevices`, ordered by submitted index. Each
+entry is `{index, adbSerial, reason: {code, message, retryable}}`; index is
+zero-based, reason is the checked E6 safe diagnostic, and retryable is true.
+Return every unavailable selected entry, no accepted subset or arbitrary inventory.
+Other responses omit this field; IR/input errors retain the existing validation
+envelope. See [H4](../h_multi_device_execution/h4_public_multi_device_start.md)
+for the full request/response and replay/whole-selection contract.

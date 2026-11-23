@@ -182,6 +182,16 @@ safely if they originate in protected inputs. Public snapshots and events
 remain limited to their approved projections. Do not add provisional
 tables or emit value-bearing events before settling these rules.
 
+## Device-capacity revision — implemented; H2 owns configuration removal
+
+Sibling-state queries and group aggregation must cover all admitted members,
+without a fixed device maximum or LIMIT derived from current concurrency.
+A large group and an older group created under different settings remain valid.
+Use every relevant persisted device state when deriving the final group result.
+Cancellation/recovery event sets may span bounded append batches within their
+single state/event transaction. Retain commit-before-publication, expected-row
+checks and deadlines; no early subset commit or side-effect replay is allowed.
+
 ## 6. Efficiency and implementation mapping
 
 Use one internal checkpoint service with two explicit operations, begin

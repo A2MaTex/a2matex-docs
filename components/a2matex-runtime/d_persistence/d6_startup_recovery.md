@@ -59,9 +59,14 @@ establish whether the Android operation completed, failed, or never began.
 
 Recovery must not overlap a live writer from a different Runtime process.
 An intentional UI shutdown settles and commits terminal execution state through
-H6 before closing SQLite. The next D6 startup check has no recovery writes for
+G11 before closing SQLite. The next D6 startup check has no recovery writes for
 that run. Owner loss, a forced exit, or an expired shutdown deadline can leave
 unfinished rows. D6 handles those rows using the same interruption rules.
+
+The [H14 shutdown/recovery acceptance spec](../h_multi_device_execution/h14_scheduler_shutdown_and_recovery.md)
+extends G11/D6 verification to groups and lifecycle controls. Its Linux controlled
+process/recovery acceptance is now verified; native Windows and live independent
+Android acceptance remain separately identified in H14/H15 and K4.
 
 Exclusive store ownership is a prerequisite, not a retry strategy.
 If recovery fails, close the storage component under the supervisor's
@@ -87,6 +92,17 @@ An impossible ownership or lifecycle combination is a storage integrity
 failure. Use a classified startup error and preserve evidence. A broad
 repair routine that overwrites contradictory terminal history is outside
 the first slice.
+
+## Device-capacity revision — implemented; H2 owns configuration removal
+
+Read all unfinished stored devices and RUNNING attempts in the affected group,
+without a fixed count guard or query LIMIT based on current concurrency. A
+customer lowering a setting or selecting All selected must not hide old work
+from startup recovery. Check ownership/state consistency, not whether membership
+exceeds the retired count limit. Derive expected update counts from the complete
+stored membership. Preserve one recovery transaction and after-commit publication,
+using bounded event append batches when needed. Large-group fixtures above 32
+must be interrupted completely without resuming or replaying any old action.
 
 ## 4. Transaction and ordering
 

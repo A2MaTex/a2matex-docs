@@ -82,6 +82,17 @@ their own bounded read transactions. A known device with no attempts
 returns an empty page. An unknown device returns Missing. Attempt paging
 uses `sequence > afterSequence` and fetches at most `limit + 1` rows.
 
+## Device-capacity revision — implemented; H2 owns configuration removal
+
+Admission requires a non-empty unique selection, without a fixed device-count
+ceiling. Snapshots read every stored member in admission order; neither a
+retired constant nor current concurrency is a query LIMIT or record-validity
+bound. Lowering concurrency cannot truncate or reject an older larger group.
+Keep paginated attempt-history limits separate from group membership.
+Admission/state/event changes remain atomic. Process larger event sets in
+bounded append batches within one transaction, never partial admission commits.
+Large-group reads/writes remain context-aware and byte/operation bounded.
+
 ## 2. Admission and idempotency
 
 1. A7 validates enough of the request envelope to identify the request ID.

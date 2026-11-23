@@ -4,8 +4,8 @@
 
 Launcher starts Runtime as a native child when a product operation needs it.
 The implemented lifecycle covers startup, authenticated readiness, conflicting
-ownership, and idle shutdown. Production package execution remains pending. G14 provides a Development
-single-device start API; its owned run can be cancelled by process shutdown.
+ownership, and idle shutdown. Production package execution remains pending. H4 provides a Development
+multi-device start API; its owned run can be cancelled by process shutdown.
 
 ```mermaid
 flowchart LR
@@ -37,7 +37,7 @@ closes, stop the owned child as part of app shutdown.
 
 The production run example depends on the verified package admission API.
 Add the exact package request, run status, and **Stop and exit / Stay open**
-flow once production execution and H6 are verified. The Studio plaintext
+flow once production execution is verified. H6–H8 variable waiting remains deferred. The Studio plaintext
 authoring endpoints remain scoped to authoring.
 
 ## Current API inventory
@@ -50,6 +50,7 @@ authoring endpoints remain scoped to authoring.
 | `POST /api/v1/devices/refresh` | Scan ADB and return the updated device inventory. |
 | `GET /api/v1/runs/active` | Read the saved non-terminal RunGroup or receive 404 when idle. |
 | `GET /api/v1/runs/{runGroupId}` | Read the requested saved progress or terminal result. |
+| `POST /api/v1/runs/{runGroupId}/actions` | Pause, Resume or Cancel an existing group; use the [shared action guide](run_actions.md). This does not supply Production package admission. |
 
 Use the [shared API reference](managed_runtime.md#shared-api-reference) for
 request headers, response examples, and error codes. A Launcher smoke test
@@ -59,8 +60,9 @@ A competing-launch test should show **Runtime already in use** and leave the
 first owner's process running.
 
 Launcher has snapshot read routes. The current build also has a Development
-[POST /runs route](managed_runtime.md#single-device-start-api), but no Production
-package admission/start or HTTP run-control route. Do not send customer product
+[POST /runs route](managed_runtime.md#workflow-start-api), but no Production
+package admission/start route. H13 group controls are documented in the
+[shared action guide](run_actions.md). Do not send customer product
 content through the plaintext Development API. Document those remaining
 calls here as they become available, including package
 input, authorization and compatibility, run identity, status and event
@@ -75,8 +77,8 @@ redisplaying the last successful result in that session. Provide a
 **Refresh devices** action and keep Launcher ownership handling in the
 native client. See the [shared E7 requests and responses](managed_runtime.md#device-inventory-api).
 
-Use `adbSerial` as the selection key. G14 Development tests select exactly one
-device; Production selection follows its later I2/H contract. Enable selection for `READY` entries,
+Use `adbSerial` as the selection key. Development tests can select one or more
+READY devices; Production selection follows its later package-admission contract. Enable selection for `READY` entries,
 show reasons for unavailable entries, and flag any selection lost after a
 successful refresh. If refresh fails, show the failure even when the previous
 result is still visible. Inventory calls require the local session token.
@@ -108,26 +110,56 @@ cancels that read; it does not stop the workflow or the owned Runtime process.
 
 Run controls and owner-process shutdown remain distinct. Use the existing
 private owner channel for shutting down Runtime, not these GET endpoints.
-G14 owns the current single-device Development start flow; I2 owns
-Production package authorization and its future Launcher start endpoint. Snapshot API/router and built-agent checks
+H4 owns the current multi-device Development start flow; Production package
+authorization and its future Launcher start endpoint remain separate work. Snapshot API/router and built-agent checks
 pass on Linux and cross-compile for Windows; native Windows execution remains
 unverified.
 
 
-## G14 Development API and Phase H boundary
+## Development API and Production boundary
 
 The Studio developer owns the current plaintext Test Run request. The
-[shared start reference](managed_runtime.md#single-device-start-api) documents
+[shared start reference](managed_runtime.md#workflow-start-api) documents
 its exact DTO, auth, 201/200 responses, identity replay, errors, and manual
 examples for both client developers. The Launcher Production API will accept
-an authorized package/path under I2; G14 does not supply that authorization.
+an authorized package/path under Phase J; G14 does not supply that authorization.
 
-For lifecycle integration, a single-device run belongs to the Runtime owner,
+For lifecycle integration, the whole admitted run group belongs to the Runtime owner,
 not its HTTP connection. Private shutdown fences dispatch and commits G11
 cancellation before storage closes; owner loss uses D6 recovery. Expose
 **Stop and exit / Stay open** for any active execution owned by Launcher once
-its Production start path is delivered. HTTP Pause/Resume/Cancel remains later.
+its Production start path is delivered. H13 HTTP Pause/Resume/Cancel is now
+implemented; follow the [shared guide](run_actions.md) for bearer, body, 200/202/409
+responses, polling and lost-response handling. A Cancel button keeps Runtime
+alive; Shut down Runtime and app exit still use the private owner channel.
 
-Phase H must add the bounded multi-device queue and configured concurrency,
-expand the accepted device count, and update both client guides/pickers and
-acceptance checks together. Follow the [G14 expansion checklist](../g_workflow_engine/g14_start_run_api.md#15-phase-h-expansion-checklist).
+H4 exposes the H1–H3 coordinator through the existing Development route.
+Use exact ordered serial/input pairs and highlight indexed unavailableDevices
+diagnostics. This route does not authorize a customer Product package. Follow the [G14 expansion checklist](../g_workflow_engine/g14_start_run_api.md#15-phase-h-expansion-checklist).
+
+## Device selection and execution capacity
+
+Customers control resource usage by selecting devices for each run. There is no
+separate **Maximum simultaneous devices** setting. Send the exact selected ADB
+serials and corresponding inputs; Runtime validates syntax, uniqueness and fresh
+readiness, then admits or rejects the complete selection. Do not silently filter
+unavailable entries or deduplicate entries carrying different inputs.
+
+Capacity equals admitted membership. The owner does not write capacity YAML,
+inject a capacity environment variable or restart Runtime when the next run's
+selection changes. There is no per-request concurrency field or settings API.
+Hardware determines practical capacity; actual byte/schema/deadline failures
+still apply independently of device count.
+
+H4 public multi-device Development starts are implemented. Use the
+[H4 walkthrough](../../../../a2matex-runtime/examples/h4/README.md) for developer
+integration tests, while keeping customer Product execution disabled until the
+Production package/authorization API is delivered. The
+[shared API reference](managed_runtime.md#workflow-start-api) documents exact
+requests, availability diagnostics, replay and complete snapshots.
+
+The [combined H15 acceptance pack](../../../../a2matex-runtime/examples/h15/README.md)
+verifies the existing Development routes, complete per-device results, artifacts
+and group controls under Linux controlled ADB. Use it for developer integration
+checks; live independent Android/native Windows acceptance remains pending. This
+does not introduce or authorize the Phase J protected Product-package API.

@@ -2,6 +2,12 @@
 
 ## Overview
 
+**Current public policy:** [H4](../h_multi_device_execution/h4_public_multi_device_start.md)
+now exposes the complete non-empty selection through POST /runs. Any one-device
+public gate described below records this step’s original delivery boundary;
+that gate and AdmitSingleDevice are removed. Earlier test evidence remains scoped
+to the step that produced it.
+
 H1 gives each newly admitted RunGroup one in-memory owner for its checked
 workflow, ordered device work, cancellation context, and shared variable store.
 It is the lifetime boundary on which H2 will build scheduling. It does not run
@@ -45,8 +51,13 @@ ownership/SQLite/API checks, full Go and race suites, vet, Linux build, and
 Windows amd64 agent/affected-test cross-compilation pass. The existing built-agent
 G22 process scenarios pass with controlled ADB. Native Windows and real Android
 execution were not performed for H1; no multi-device scheduling is enabled.
-The public API still accepts exactly one device. Construction tests may prepare
-an internal group with up to 32 members, but no H1 path may dispatch that list
+The public API still accepts exactly one device. The revised constructor
+policy has no fixed membership ceiling. H2 aligned that code on 2026-11-22;
+the existing larger ownership fixture now verifies 128 members. Earlier
+1/32-member fixtures remain historical evidence, not a supported maximum.
+Current available race/API/process checks pass; the unfiltered full suite is
+blocked by the missing G22 Python harness documented in H2.
+No H1-only path may dispatch a multi-member list
 as unbounded parallel work or leave its extra members silently unexecuted.
 
 ## 1. Scope and direct dependencies
@@ -109,7 +120,7 @@ Validate the complete list before publishing ownership or starting a worker:
 | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | RunGroup ID       | Use the existing UUID validation; every member matches the admitted group.                                                                            |
 | Runner            | Non-nil checked G10 runner supplied by G12; do not parse or compile IR again.                                                                         |
-| Member count      | Internal construction supports `1..constants.MaxAdmissionDevices`; current live handoff additionally requires `constants.MaxStartDevices`, still one. |
+| Member count      | Non-empty complete admitted membership, without a fixed count ceiling. H2 aligned the constructor; current public/live handoff remains one until H4. |
 | Device identity   | Valid, unique DeviceExecution IDs and unique accepted ADB serials; preserve their input order. Reuse existing validators.                             |
 | Workflow inputs   | Non-nil checked per-device objects. Do not merge inputs between devices or add defaults here.                                                         |
 | Runtime authority | Prepared requests contain no preinstalled `Control`, variable store, variable lookup, or variable-view identity. The owner supplies these.            |
@@ -147,8 +158,9 @@ no new public constructor dependency or import from `executionlifecycle` back
 to `runadmission`; use runner types to avoid a package cycle.
 
 In H1, `DispatchGroup` rejects live lists other than one **before dispatch**.
-The internal group constructor supports 1-32 members for ownership tests and
-H2's future queue. Do not implement a temporary multi-device serial loop,
+The revised constructor contract accepts every admitted member without a
+fixed count ceiling. H2 policy alignment removes the old constructor guard;
+H3 supplies multi-member execution before H4 opens the public path. Do not implement a temporary multi-device serial loop,
 launch a goroutine for each member, or acknowledge unscheduled extra members.
 H2-H4 will enable complete-list scheduling and public expansion together.
 
@@ -290,7 +302,7 @@ do not invent public error codes or inline enums for private bookkeeping.
   lifecycle mutex; retain G16's own gate for RAM access. Avoid nested locks.
 - Never perform SQLite I/O, wait on completion, invoke cleanup/cancel callbacks,
   or execute a runner while holding the lifecycle mutex.
-- Keep O(device count) construction with the existing 32-member bound. Allocate
+- Keep O(device count) construction over the complete admitted membership. Allocate
   one store; scope maps remain lazy and retain G16's existing quotas.
 - H1 adds no scheduling goroutine, per-member idle goroutine, polling ticker,
   periodic database check, semaphore, or worker-limit configuration.
@@ -330,7 +342,7 @@ approved before implementation; the execution evidence is recorded below.
 
 | Check                                                                              | Expected evidence                                                                                                                                                                                    |
 | ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Constructor with 1 and 32 members                                                  | Ordered, independent input copies; one shared store; correctly bound device views; zero worker starts.                                                                                               |
+| Constructor with 1 and 128 members                                                  | Ordered, independent input copies; one shared store; correctly bound device views; zero worker starts.                                                                                               |
 | Invalid later member / duplicate IDs or serials / mixed group / prebound authority | Zero published owners and handlers; no leaked resources or mutation of prepared work.                                                                                                                |
 | Store identity/isolation                                                           | Flow values stay device-local, Global is shared only within this group, and the last member's closure does not replace earlier view identities. Reuse existing trusted variable checkpoint fixtures. |
 | Live one-device handoff                                                            | Group and worker ownership precede acknowledgement; compiled workflow completes through real SQLite checkpoints.                                                                                     |
@@ -353,7 +365,7 @@ caller-owned-store regression.
 
 | Evidence                                                       | Result                                                                                                                                                                                                         |
 | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `TestNewGroupOwnsOrderedInputsAndIsolatedViews`                | PASS for 1 and 32 members: owned map/byte copies, preserved order, shared Global and device-local Flow views. No workers dispatched.                                                                           |
+| `TestNewGroupOwnsOrderedInputsAndIsolatedViews`                | Historical PASS for 1 and 32 members; H2 now verifies the adapted existing fixture with 1 and 128: owned map/byte copies, preserved order, shared Global and device-local Flow views. No workers dispatched.                                                                           |
 | `TestNewGroupRejectsInvalidWorkBeforeOwnership`                | PASS for 14 invalid-work cases, including duplicate/mixed identities, late invalid members and injected authority.                                                                                             |
 | `TestDispatchGroupWaitsForPriorCleanupAndRetainsFreshRAM`      | PASS: duplicate handoff preserves the current group, next handoff waits for cleanup, and the next run has fresh RAM.                                                                                           |
 | `TestDispatchGroupKnownStopAndSingleDeviceGuard`               | PASS: zero partial multi-device dispatch, known-stop cleanup, and start lease retained through acknowledgement.                                                                                                |
@@ -405,7 +417,7 @@ Specification delivery alone is not code completion.
 | Later owner | Deferred responsibility                                                                                 |
 | ----------- | ------------------------------------------------------------------------------------------------------- |
 | H2-H3       | Queue membership, bounded worker slots, slot release and device completion scheduling/isolation.        |
-| H4-H5       | Public 1-32-device starts and explicit disconnected-device behavior.                                    |
+| H4-H5       | Public multi-device starts without a fixed count ceiling, and disconnect behavior.                                    |
 | H6-H8       | Atomic waiter registration, releasing/reacquiring worker capacity and Wait Variable handler enablement. |
 | H9-H13      | Pause checkpoints, pause/resume/cancel coordination and action APIs.                                    |
 | H14-H15     | Full scheduler shutdown/recovery and independent real-device acceptance.                                |

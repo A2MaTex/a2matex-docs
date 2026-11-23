@@ -98,6 +98,13 @@ is no longer relevant to the app, such as validation of an older draft.
 
 ## Failure and shutdown
 
+H14 now verifies the Linux controlled shutdown/recovery path using the actual
+agent, H13 actions and persistent dispatch journals: clean stop cancels unfinished
+work; owner loss/forced exit leaves remaining work to become INTERRUPTED before
+the next readiness handoff; neither restart nor replay dispatches old actions.
+See the [inspectable H14 walkthrough](../../../../a2matex-runtime/examples/h14/README.md).
+Native Windows and independent real Android acceptance remain separate gates.
+
 | Signal | Parent behavior |
 |---|---|
 | Child exits with code `2` before readiness | Show **Runtime already in use**. Leave waiting requests unsent. |
@@ -124,7 +131,8 @@ integration examples.
 
 Build request URLs from the ready message. For example, an `apiBaseUrl`
 ending in `/api/v1` becomes `{apiBaseUrl}/runtime-info`. Append the route
-suffix once. Local responses carry `Cache-Control: no-store`.
+suffix once. Local responses carry `Cache-Control: no-store`. The [shared lifecycle-action guide](run_actions.md)
+documents implemented group controls for both client developers.
 
 ### GET /api/v1/health
 
@@ -171,6 +179,7 @@ version is a compatibility result to display, independent of child readiness.
 | 401 | `UNAUTHORIZED` | Missing or invalid bearer credential |
 | 404 | `RESOURCE_NOT_FOUND` | Unknown route/method, missing saved run/artifact, or no active run |
 | 409 | `RUNTIME_BUSY` | Another workflow group is active; no new run admitted |
+| 409 | `INVALID_EXECUTION_STATE` | Lifecycle action conflicts; response includes the current snapshot |
 | 422 | `VALIDATION_FAILED`, `RUNTIME_INCOMPATIBLE`, or a device availability code | New run rejected before admission; see start API |
 | 413 | `PAYLOAD_TOO_LARGE` | A documented request size limit was exceeded |
 | 500 | `INTERNAL_ERROR` | Unexpected Runtime failure with a generic response |
@@ -284,7 +293,7 @@ RUNNING is already the group's status before its first device starts.
 |---|---|
 | `cursor` | Decimal string containing the Runtime-wide event watermark read with this snapshot. Preserve it as a string; it is not progress percentage or this run's attempt count. SSE integration is still pending. |
 | `runGroup` | Saved identity, originating request ID, status, UTC millisecond timestamps, and device counts. All summary fields remain present even when zero. |
-| `deviceExecutions` | One through 32 selected devices in admission order, with status, saved next-node position, timestamps, and terminal error. Optional fields are explicitly null. |
+| `deviceExecutions` | All admitted devices in admission order, with status, saved position, timestamps and terminal error. Reads include the complete stored membership, without a fixed device-count guard. Optional fields are explicitly null. |
 | `nextNodeId` | Saved A5 execution position; it may be an active node, retry node, or pending successor. It is not a separate live-handler measurement. |
 | `terminalError` | Null or the existing safe `{code,message,retryable}` error. It contains no raw ADB output or workflow values. |
 
@@ -384,7 +393,7 @@ Expected checks: active/saved state returns 200, idle active returns 404,
 
 ### Optional saved-result fixture without Android
 
-G14 now provides the [public start route](#single-device-start-api). To inspect
+G14 now provides the [public start route](#workflow-start-api). To inspect
 only saved cancellation data without an Android device,
 reuse the Git-ignored G12 smoke from the repository root. Stop any other owner
 of that demo store first. It prints a group ID and cancels its queued run before
@@ -426,26 +435,27 @@ that build. Active-to-terminal reads and concurrent checkpoint/cursor consistenc
 are covered by real-SQLite authenticated router tests; native Windows acceptance
 remains pending.
 
-## Single-device start API
+## Workflow start API
 
 ### POST /api/v1/runs — Start a Development workflow
 
 Use this endpoint when the publisher presses **Test Run** in Studio. It accepts
-compiled Runtime IR and one device's inputs, persists admission, hands the
+compiled Runtime IR and an ordered array of selected devices with per-device inputs, persists admission, hands the
 execution to the Runtime owner, and returns a snapshot. The HTTP response waits
 for admission/handoff, not workflow completion. Execution continues after the
-request disconnects. This endpoint is available now for one device per new run.
-Production package/path admission remains I2.
+request disconnects. H4 admits the complete non-empty selection, with no fixed device-count ceiling.
+Production package/path admission remains Phase J.
 
 Set Variable is executable through this same API. A newly created run receives
 empty Flow/Global RAM scopes; Studio sends no variable seed map or persistence
 fields. `config.scope` selects `FLOW` or `RUN_GROUP`, `config.name` is the key,
 and `bindings.value` supplies the scalar before compilation. Assignment becomes
 visible after its successful node checkpoint; its node output is `{}`. Missing
-reads follow STOP/ERROR_BRANCH, and variables are released after the worker
-joins. Replay neither creates scopes nor executes again. Runtime restart
-interrupts unfinished work and restores no variables. Multi-device scheduling
-and Pause/Resume/Wait Variable remain Phase H. Use the
+reads follow STOP/ERROR_BRANCH, and variables are released after all group workers and callbacks
+join. Replay neither creates scopes nor executes again. Runtime restart
+interrupts unfinished work and restores no variables. Multi-device scheduling is implemented in H4;
+HTTP Pause/Resume/Cancel is implemented; use the [action guide](run_actions.md).
+Wait Variable remains deferred. Use the
 [G18 manual example](../../../../a2matex-runtime/examples/g18/README.md)
 for the complete compile/start/poll scenario and SQLite evidence.
 
@@ -484,7 +494,7 @@ sequenceDiagram
     participant Worker as Owned device execution
     Studio->>Compile: Editor Graph + Input Schema
     Compile-->>Studio: validation + runtimeIr
-    Studio->>Runs: New requestId + runtimeIr + one device/input object
+    Studio->>Runs: New requestId + runtimeIr + ordered device/input pairs
     alt New request passes admission
         Runs->>Worker: Persist and register owned work
         Runs-->>Studio: 201 + snapshot and runGroup.id
@@ -501,7 +511,7 @@ sequenceDiagram
 ### Prerequisites
 
 Before starting, the owned Runtime must pass authenticated readiness, support
-the compiled workflow's version/handlers, and see the selected device READY.
+the compiled workflow's version/handlers, and see every selected device READY.
 Studio first compiles the captured graph/schema and refreshes device selection;
 admission still performs its own fresh E6 check.
 
@@ -535,9 +545,9 @@ this example. Check the actual `runtimeVersion` from Runtime Info.
 |---|---|---|
 | `requestId` | String | Generate one canonical lowercase UUID v4 for a new Test Run intent. Retain it and the request through submission/retry. |
 | `runtimeIr` | Object | Use `compilationResponse.runtimeIr` from a successful `POST /workflow-compilation` for the captured graph/schema revision. Require VALID or VALID_WITH_WARNINGS and non-null IR. |
-| `devices` | Array | Exactly one device object for a new run. Do not send several selected devices yet. |
-| `devices[0].adbSerial` | String | Copy the exact selected READY serial from `POST /devices/refresh`, including `:5555` when present. |
-| `devices[0].inputs` | Object | Values from Studio's workflow-input form matching the compiled `runtimeIr.inputSchema`. Use `{}` for an empty schema. |
+| `devices` | Array | Non-empty ordered selection for a new run, with unique exact READY serials and no fixed count ceiling. |
+| `devices[i].adbSerial` | String | Copy the exact selected READY serial from `POST /devices/refresh`, including `:5555` when present. |
+| `devices[i].inputs` | Object | Values from Studio's workflow-input form matching the compiled `runtimeIr.inputSchema`. Use `{}` for an empty schema. |
 
 Send the value of `runtimeIr`, not the entire compilation response containing
 `validation`. It stays a JSON object, not a JSON-encoded string. Editor Graph
@@ -549,10 +559,10 @@ or product-package fields at the root of this start request.
 Limits are 1 MiB for the raw IR object and 4 MiB for the full UTF-8 body,
 including envelope/whitespace. Unknown public fields, null/wrong types,
 duplicate keys at any depth, invalid UTF-8, trailing JSON, unsupported
-headers/query, and invalid request IDs are rejected. The current MVP only
-accepts one device on a new ID; zero or multiple devices produce 400.
+headers/query, and invalid request IDs are rejected. A fresh request requires at least one device; empty, duplicate or malformed
+selections produce 400. A failed later member rejects the whole run.
 
-### Complete request example
+### Complete single-device request example
 
 This is a valid Start → Delay ten seconds → End request, also available as
 [a readable JSON file](../../../../a2matex-runtime/examples/g14/start-delay-end.json).
@@ -648,7 +658,7 @@ its delay makes polling observable and device preflight still requires READY.
 }
 ```
 
-For a workflow with declared inputs, only `devices[0].inputs` contains their
+For a workflow with declared inputs, only `devices[i].inputs` contains their
 runtime values. For example, a required integer input named `duration` receives
 `{"duration": 1000}`. Its binding must already exist in the compiled IR; adding
 arbitrary input properties to the empty schema above is a validation failure.
@@ -795,7 +805,8 @@ intent until a response resolves it; never silently replace it on a timeout.
 ### Error responses and Studio actions
 
 Failure bodies contain the A6 error and optionally G1 validation diagnostics.
-They do not contain a partial successful snapshot or an arbitrary devices list.
+They do not contain a partial successful snapshot or arbitrary inventory.
+Readiness rejection includes the typed unavailableDevices array described below.
 For example, HTTP 409 is:
 
 ```json
@@ -837,7 +848,7 @@ An incompatible build returns HTTP 422 with:
 
 | HTTP / code | Studio action |
 |---|---|
-| 400 INVALID_REQUEST | Fix request transport/DTO or require exactly one selected device. Do not relaunch a healthy Runtime. |
+| 400 INVALID_REQUEST | Fix request transport/DTO or fix an empty, duplicate or malformed selection. Do not relaunch a healthy Runtime. |
 | 401 UNAUTHORIZED | Check the owned child's actual readiness and current credential handoff; a token changes on restart. Do not put it in a query/body. Preserve pending run identity. |
 | 409 RUNTIME_BUSY | Display the active run or wait; no new admission from this request. |
 | 413 PAYLOAD_TOO_LARGE | Reduce the IR/body size. |
@@ -872,7 +883,7 @@ when the graph is validated/compiled.
 
 ### Persistence, lifetime, and acceptance
 
-The example settles with one group, one device, three SUCCEEDED attempts, and
+The single-device example settles with one group, one device, three SUCCEEDED attempts, and
 13 events attributable to that group. Outputs are {}, {"durationMs":10000},
 and {}. GET/replay cause no additional writes; an active worker can independently
 advance while a request is served. Use the [G14 SQL queries](../g_workflow_engine/g14_start_run_api.md#13-manual-acceptance-scenario)
@@ -881,8 +892,9 @@ and the actual running Runtime's SQLite store, not another smoke database.
 Closing the HTTP connection does not cancel owned execution. Intentional owner
 shutdown settles unfinished work through G11 before SQLite closes. Crash/forced
 exit uses D6 INTERRUPTED recovery on restart, without automatic action replay.
-Cancelling a run through HTTP, Pause/Resume, SSE, and attempt history remain
-later features. The app's Stop and exit action uses the private owner channel.
+HTTP Pause/Resume/Cancel is implemented; see the [action guide](run_actions.md).
+SSE and attempt history remain later features. The app's Stop and exit action
+uses the private owner channel.
 
 Built-agent Linux checks with live Waydroid already passed 201/200/409/400/422
 behavior, three successful attempts/13 events, replay with no writes, intentional
@@ -890,10 +902,95 @@ cancellation, and crash/restart interruption without redispatch. Existing
 managed-process ownership checks also pass. Native Windows has cross-build
 evidence only; Windows examples still require native acceptance.
 
-Phase H later expands devices to 1–32 through a bounded queue and configured
-concurrency. Its [expansion checklist](../g_workflow_engine/g14_start_run_api.md#15-phase-h-expansion-checklist)
-records changes to admission policy, handoff, client pickers, guides, and tests.
-The current client permits exactly one selected device.
+### Multi-device request and observations
+
+H4 is implemented. Use the complete readable
+[two-device start file](../../../../a2matex-runtime/examples/h4/start-run.json)
+and [compile graph](../../../../a2matex-runtime/examples/h4/compile-workflow.json),
+with the [Postman/SQLite walkthrough](../../../../a2matex-runtime/examples/h4/README.md).
+Replace serials and generate a fresh requestId; no Postman environment script
+is needed. Each entry supplies its own `inputs.delayMs` (1000 and 3000 in the file).
+All selected workers may execute concurrently; the example contains no Android
+UI action and only uses ADB for admission readiness.
+
+A two-device success has total=2, eventually succeeded=2, two device UUIDs in
+request order, six attempts and 24 events scoped to the group. GET snapshots can
+show one SUCCEEDED member alongside another RUNNING member. There is no separate
+maximum-device preference, YAML/environment setting or restart for a new selection.
+For a normal single Waydroid instance, keep one request entry; do not invent a
+second serial. The unchanged one-device example above remains valid.
+
+A missing/offline/unready selection returns 422 without partial admission:
+
+```json
+{
+  "error": {"code":"DEVICE_OFFLINE","message":"run admission failed","retryable":true},
+  "unavailableDevices": [
+    {"index":1,"adbSerial":"emulator-5556","reason":{"code":"DEVICE_OFFLINE","message":"device is offline","retryable":true}}
+  ]
+}
+```
+
+Indices refer to the captured request array. Highlight every returned entry,
+refresh and let the user correct the selection. Never automatically drop a
+failed member, deduplicate different input objects or replay a corrected body
+under an already-admitted ID expecting a different run. The first availability
+code remains at the top level; all failing entries are returned in request order.
+Input-schema failures identify `devices[i].inputs` in validation paths instead.
+Duplicate/empty selection is 400; body/IR byte bounds remain 413.
+
+Built-agent Linux acceptance verifies authenticated compile/start/GET, 2/33
+selected devices, lost-response replay, whole-selection rejection, indexed
+readiness errors, intentional shutdown and restart without redispatch, using
+controlled ADB and isolated SQLite. This is not independent real-Android or
+native Windows acceptance. Production encrypted-package start remains pending.
+
+### Device disconnect after admission — H5
+
+Runtime now makes one bounded transport observation after a nonzero ADB command
+result. A missing selected serial becomes `DEVICE_DISCONNECTED`; observed offline,
+unauthorized or other unavailable states retain their corresponding device codes.
+These execution errors are non-retryable. Only that device stops; siblings keep
+running, and the normal GET snapshot includes its saved `terminalError`.
+
+For a disconnected member, the error object is:
+
+```json
+{"code":"DEVICE_DISCONNECTED","message":"device disconnected during command execution","retryable":false}
+```
+
+The group can remain RUNNING with one FAILED member until its siblings finish,
+then derive FAILED. This is different from H4's pre-admission 422 rejection:
+the run already exists, so inspect its saved snapshot rather than expect a new
+HTTP error from the original POST. Do not automatically resubmit under a fresh
+requestId, repeat the failed action or resume a reconnected member.
+
+Successful commands add no observation. There is no background watcher: loss
+during Delay/RAM-only work is noticed only by a later failing ADB operation.
+An unsuccessful diagnosis preserves the original command failure; an expired
+attempt follows timeout rules. See the [H5 manual scenario and evidence](../h_multi_device_execution/h5_device_disconnect_handling.md).
+H15 adds approved focused transport classification/context tests and actual-agent
+two-device disconnect isolation; Linux controlled checks pass. Independent real
+Android/native Windows disconnect observations remain pending. The
+[combined H15 pack](../../../../a2matex-runtime/examples/h15/README.md) provides
+readable graphs, commands, snapshots, SQLite/journal/PNG inspection and live steps.
+It also verifies existing start/poll/artifact and Pause/Resume/Cancel APIs together;
+this adds no new API. Required live acceptance and the named G22 regression gate
+remain open; see the [H15 criterion report](../h_multi_device_execution/h15_combined_multi_device_acceptance.md#14-implementation-and-verification-evidence--2026-11-23).
+
+## Group lifecycle-action API — H13
+
+`POST {apiBaseUrl}/runs/{runGroupId}/actions` now supports PAUSE, RESUME and
+CANCEL with the current bearer token. See the shared [action API guide](run_actions.md)
+for exact DTOs, complete 200/202/409 responses, errors, Linux curl, Windows
+PowerShell, Postman and polling/reconnect rules. This route is Linux-verified
+with controlled devices and the actual built agent; native Windows/live Android
+control acceptance remains separate.
+
+Pause/Resume retains live workers and Flow/Global RAM. Cancel interrupts the
+current group, joins cleanup and leaves Runtime alive for another run. Stop and
+exit still uses the private owner pipe and awaits process exit. Runtime restart
+never resumes the old execution. Wait Variable remains deferred under H6–H8.
 
 ## Screenshot artifact download API
 

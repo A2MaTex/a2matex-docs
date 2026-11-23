@@ -5,8 +5,8 @@
 One native Runtime client serves Studio validation and compilation. The first
 authoring request can start Runtime. Subsequent requests reuse the owned
 process and check readiness before sending HTTP. This guide covers the current
-authoring, single-device Test Run, and saved-run snapshot APIs. Multi-device
-selection and scheduling remain Phase H.
+authoring, multi-device Test Run, saved-run snapshots and H13 lifecycle-action APIs.
+Wait Variable remains deferred under H6–H8.
 
 ```mermaid
 flowchart LR
@@ -16,7 +16,7 @@ flowchart LR
     R -->|Ready| A[Authenticated authoring API]
     R -->|Startup fails| X[Display startup error]
     A --> D[Show diagnostics or cache current IR]
-    D --> T[POST /runs with one READY device]
+    D --> T[POST /runs with selected READY devices]
     T --> P[G13 poll committed progress/result]
 ```
 
@@ -41,10 +41,10 @@ the run API and let admission validate it. Studio owns the draft and cache.
 
 Keep **Shut down Runtime** available while Studio owns the process. Suspend
 automatic validation after explicit shutdown. The user can explicitly request
-a Runtime operation to start it again. During an active single-device run, closing
+a Runtime operation to start it again. During an active run group, closing
 Studio should offer **Stop and exit** or **Stay open**. Stop and exit sends the
 private shutdown command and waits for G11 cancellation/child exit; it does not
-require the later HTTP run-action API.
+use the HTTP run-action API. Group Cancel keeps Runtime alive; Stop and exit does not.
 
 ## Current API inventory and examples
 
@@ -159,15 +159,16 @@ show the reason for unavailable ones. After a successful refresh, retain
 selections that are still ready and flag any that disappeared or became
 unavailable. If refresh fails, an already displayed list can remain visible
 with its refresh failure. The draft run API invokes E6 to recheck live readiness at admission.
-Allow exactly one selected device for the current MVP.
+Allow one or more selected READY devices. Capture each exact serial with its
+own workflow input object; do not silently deduplicate or filter the selection.
 
-## Start a single-device Test Run
+## Start a workflow Test Run
 
 ### POST /api/v1/runs
 
 This is the implemented Development execution endpoint for Studio's **Test Run**
 button. Send an authenticated JSON POST to `{apiBaseUrl}/runs` after compiling
-and selecting one READY device. The shared [POST /runs reference](managed_runtime.md#single-device-start-api)
+and selecting READY devices. The shared [POST /runs reference](managed_runtime.md#workflow-start-api)
 contains the complete runnable request, full responses, limits, errors, and
 Postman steps together in one section. The request mapping is:
 
@@ -175,9 +176,9 @@ Postman steps together in one section. The request mapping is:
 |---|---|
 | requestId | A fresh lowercase UUID v4 for this new Run button intent. Keep it outside any retry function. |
 | runtimeIr | The successful compilation response's runtimeIr object for the captured graph/schema revision. |
-| devices | One-item array; the picker currently permits exactly one READY device. |
-| devices[0].adbSerial | The exact selected serial returned by device refresh. |
-| devices[0].inputs | Captured workflow-input form values matching that compiled input schema; {} when empty. |
+| devices | Non-empty ordered array of selected READY serials with their own input objects; no fixed count ceiling. |
+| devices[i].adbSerial | The exact selected serial returned by device refresh. |
+| devices[i].inputs | Captured workflow-input form values matching that compiled input schema; {} when empty. |
 
 Send the compiled object itself, without stringifying it separately or wrapping
 it in the compilation response. Use `Content-Type: application/json`, the
@@ -192,8 +193,9 @@ store DTO. Its output is `{}`, so it offers no Set Variable output field to
 later nodes. Flow/Global bindings read current named values; absent values fail
 through the node's error policy. These values disappear when the run finishes
 or Runtime exits. Follow the [G18 example](../../../../a2matex-runtime/examples/g18/README.md)
-to test Set Variable → Switch through the existing APIs. Scheduling and live
-Pause/Resume/Wait Variable remain Phase H.
+to test Set Variable → Switch through the existing APIs. Multi-device scheduling is implemented; live
+HTTP Pause/Resume/Cancel is implemented; [integrate the action route](run_actions.md).
+Wait Variable remains deferred.
 
 Screenshot Test Run is now supported when the exact Screenshot pair appears
 in Runtime Info. Render its selected mode from the catalog: FULL_SCREEN has
@@ -223,12 +225,12 @@ requires relaunching Runtime. Repeated reads do not recapture the screen.
 ### Expected native/UI sequence
 
 1. Guard against duplicate Run clicks before the first asynchronous operation.
-   Capture graph, Input Schema, workflow-input values, and selected serial as
+   Capture graph, Input Schema, per-device workflow-input values, and all selected serials as
    one intended test. Debounced authoring responses must not replace this capture.
 2. Through the native readiness/auth gate, compile that graph/schema. Accept
    VALID or VALID_WITH_WARNINGS with non-null IR; show diagnostics otherwise.
-3. Refresh devices and require the captured serial to be READY. Runtime still
-   rechecks it at admission.
+3. Refresh devices and require every captured serial to be READY. Runtime still
+   rechecks the whole selection at admission.
 4. Create the requestId once and retain the prepared body in Studio state
    **before** calling POST. Keep the Run button disabled during preparation,
    submission, and while an unresolved/active run exists.
@@ -284,7 +286,7 @@ type InventoryReply = {
 type StartRequest = {
   requestId: string;
   runtimeIr: JsonObject;
-  devices: [{ adbSerial: string; inputs: JsonObject }];
+  devices: Array<{ adbSerial: string; inputs: JsonObject }>;
 };
 type RunSnapshot = {
   cursor: string;
@@ -299,10 +301,9 @@ async function prepareTestRun(
   runtime: NativeRuntime,
   editorGraph: JsonObject,
   inputSchema: JsonObject,
-  adbSerial: string,
-  inputs: JsonObject,
+  devices: Array<{ adbSerial: string; inputs: JsonObject }>,
 ): Promise<StartRequest> {
-  const captured = structuredClone({ editorGraph, inputSchema, inputs });
+  const captured = structuredClone({ editorGraph, inputSchema, devices });
   const compiled = await runtime.request<CompilationReply>(
     "POST", "/workflow-compilation",
     { editorGraph: captured.editorGraph, inputSchema: captured.inputSchema },
@@ -319,16 +320,21 @@ async function prepareTestRun(
     "POST", "/devices/refresh",
   );
   if (inventory.status !== 200) throw inventory;
-  if (!inventory.body.devices.some(
-    (device) => device.adbSerial === adbSerial && device.status === "READY",
-  )) {
-    throw new Error("Select one READY Android device");
+  const ready = new Set(inventory.body.devices.filter(
+    (device) => device.status === "READY",
+  ).map((device) => device.adbSerial));
+  const serials = captured.devices.map((device) => device.adbSerial);
+  if (serials.length === 0 || new Set(serials).size !== serials.length) {
+    throw new Error("Select one or more distinct READY Android devices");
+  }
+  if (!serials.every((serial) => ready.has(serial))) {
+    throw new Error("A selected device is unavailable; correct the selection");
   }
 
   return {
     requestId: crypto.randomUUID(),
     runtimeIr: compiled.body.runtimeIr,
-    devices: [{ adbSerial, inputs: captured.inputs }],
+    devices: captured.devices,
   };
 }
 
@@ -392,7 +398,7 @@ pending, Editor Graph, Runtime IR, persisted draft data, or UI logs.
 | 401 | Refresh actual owner/session readiness and credentials; retain pending run identity. |
 | 409 RUNTIME_BUSY | Show the active run or wait for it to settle before retrying the same pending intent. |
 | 422 with validation | Render diagnostic message/path/node fields. Fix/recompile or use a compatible Runtime build. |
-| 422 device-availability code | Refresh selection and explain the unavailable device. No run was admitted. |
+| 422 device-availability code | Refresh selection and highlight every unavailableDevices index/serial and safe reason. No run was admitted. |
 | 503 ADB_UNAVAILABLE | Show device-subsystem failure; retry after ADB is fixed. |
 | 503 INTERNAL_ERROR | Runtime is stopping. Follow owner replacement rules and obtain fresh credentials. |
 | 500 or lost response | Keep pending. Restore actual readiness and resolve with the original ID; do not automatically create another run. |
@@ -409,9 +415,13 @@ RunGroup ID; a deliberate new intent after completion gets a new UUID/group.
 Include intentional owner shutdown during a delay and reopening the saved
 terminal result in Studio's integration acceptance.
 
-SSE/log streaming, attempt history, run-control APIs, and multiple selected
-devices remain later work. Phase H's [expansion checklist](../g_workflow_engine/g14_start_run_api.md#15-phase-h-expansion-checklist)
-records the later picker/admission/scheduling changes.
+SSE/log streaming and attempt history remain later work. H13 now exposes
+[Pause/Resume/Cancel over HTTP](run_actions.md). Studio uses the existing group ID,
+current bearer and exact action body; keep accepted actions pending locally,
+poll the by-ID snapshot, and reconcile 409/lost responses without automatic
+mutation retries. The shared guide provides complete examples for its developer.
+Multi-device Test Run is implemented in H4. Phase H's [expansion checklist](../g_workflow_engine/g14_start_run_api.md#15-phase-h-expansion-checklist)
+records the delivered picker/admission/scheduling changes.
 
 ## Run progress and saved results
 
@@ -426,7 +436,7 @@ Keep the RunGroup ID separate from the request ID, graph node IDs, and selected
 device IDs. Use one native per-request readiness check and current bearer token
 for each read. No body or query is accepted. Use the shared Linux/Windows/Postman
 examples and [saved-result demo](managed_runtime.md#optional-saved-result-fixture-without-android).
-Use G14 POST /runs for the single-device start; do not send a workflow to
+Use POST /runs for the complete selected group; do not send a workflow to
 either GET.
 
 Render group status and summary counts, then per-device status, saved next-node
@@ -442,6 +452,47 @@ A snapshot 404 after successful readiness is a data result and does not request
 Runtime relaunch. Handle read failures separately from the last displayed run
 state; a 500 or broken connection is not evidence that the workflow succeeded,
 failed, or disappeared. Use the shared owner/session replacement policy for an
-actual readiness failure. SSE/logs, attempt history, and run-control requests
-remain separate integration work. Shared snapshot tests and built-agent checks
+actual readiness failure. SSE/logs and attempt history remain later integration
+work; group controls use the [implemented H13 action API](run_actions.md). Shared snapshot tests and built-agent checks
 pass on Linux; native Windows usage is documented but not executed here.
+
+## Device selection and execution capacity
+
+Customers control resource usage by selecting devices for each run. There is no
+separate **Maximum simultaneous devices** setting. Send the exact selected ADB
+serials and corresponding inputs; Runtime validates syntax, uniqueness and fresh
+readiness, then admits or rejects the complete selection. Do not silently filter
+unavailable entries or deduplicate entries carrying different inputs.
+
+Capacity equals admitted membership. The owner does not write capacity YAML,
+inject a capacity environment variable or restart Runtime when the next run's
+selection changes. There is no per-request concurrency field or settings API.
+Hardware determines practical capacity; actual byte/schema/deadline failures
+still apply independently of device count.
+
+H4 public multi-device dispatch is implemented. Use the
+[readable H4 example](../../../../a2matex-runtime/examples/h4/README.md) to test
+201 admission, 200 replay, ordered per-device snapshots and whole-selection
+rejection. Show the group summary and every device's state; do not render only
+deviceExecutions[0]. Production package execution remains separate; group controls use
+[H13](run_actions.md). See the [H4 spec](../h_multi_device_execution/h4_public_multi_device_start.md).
+
+## Device loss during a Test Run
+
+H5 diagnoses transport after a nonzero ADB process result. Render the affected
+member's FAILED status and `terminalError` from the usual GET snapshot, including
+`DEVICE_DISCONNECTED`, `DEVICE_OFFLINE` or `DEVICE_UNAUTHORIZED`. Other members
+may still be RUNNING; preserve the complete list and derived group summary.
+Do not treat a device execution failure as a local HTTP-server readiness failure
+or restart Runtime because of that saved error.
+
+There is no immediate disconnect notification during Delay/RAM-only nodes and no
+automatic resume on reconnect. Keep the original requestId for uncertain POST
+recovery; a replay never starts another execution. A deliberate new run after
+the active group finishes uses a fresh requestId and refreshed selection.
+
+See the [shared H5 behavior](managed_runtime.md#device-disconnect-after-admission--h5)
+and [manual acceptance scenario](../h_multi_device_execution/h5_device_disconnect_handling.md#11-manual-acceptance-after-implementation).
+H15 verifies Linux controlled two-device disconnect isolation and focused
+transport classification/deadline/cancellation checks. Live target acceptance
+remains pending; see the [combined acceptance pack](../../../../a2matex-runtime/examples/h15/README.md).

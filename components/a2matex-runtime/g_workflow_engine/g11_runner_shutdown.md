@@ -365,9 +365,14 @@ Append the corresponding A6 events before the same commit:
 - One RUN_GROUP_STATE_CHANGED for the newly cancelled group.
 
 Use deterministic ID ordering as in D6, and validate complete envelopes using
-the existing event validator. With MaxAdmissionDevices 32, this is at most
-65 events, within the existing MaxEventBatchSize. Do not split one cancellation
-across commits. Publication/wakeup occurs only after commit through WithWriteTx.
+the existing event validator. The revised no-ceiling policy requires all
+stored members, regardless of current concurrency. For A newly cancelled
+attempts and D devices, cancellation emits A + D + 1 events when the group
+changes; do not assume they fit one append batch. Append bounded batches under
+the same state transaction, preserving deterministic order. Do not split one
+cancellation across commits. Publish/wake only after WithWriteTx commits.
+H2 verifies the aligned path with an existing 128-member fixture; earlier
+32-device/65-event checks are historical examples, not a device ceiling.
 Return Changed true and the last committed cursor only after confirmation.
 
 A retry-scheduled event remains valid history when the retry never occurs.
@@ -520,7 +525,7 @@ smoke tool only as needed to demonstrate stop; do not build another test framewo
 
 | Check                            | Observed result                                                                                                                                                                                                                                                                                                                                                   |
 | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Repository cancellation tests    | Preserve queued, between-node, retry-gap, active, and completed sibling history; repeated settlement is a no-op. All 32 active devices settle in one 65-event batch, with clock rollback protection.                                                                                                                                                              |
+| Repository cancellation tests    | Preserve queued, between-node, retry-gap, active, and completed sibling history; repeated settlement is a no-op. The existing large-group fixture now settles 128 active devices with 257 events across bounded batches in one transaction, with clock rollback protection.                                                                                                                                                              |
 | Fault and uncertain-commit tests | Failure at each state-update/event stage rolls back completely. Both committed and rolled-back unknown outcomes stop the writer without retry; D6 uses actual persisted state. Corruption and expired completion fail closed.                                                                                                                                     |
 | Lifecycle integration tests      | Real G1/G9/G10 and SQLite verify active stop, root cancellation before authority, duplicate registration, admission fence, retry-gap stop, deadline expiry, terminal success/failure preservation, and observable unexpected worker failure.                                                                                                                      |
 | Managed child-process tests      | Test-only composition uses real B5 pipes/publisher and supervisor, with a controlled handler and HTTP lifecycle stub. Exact shutdown commits cancellation before process exit; EOF/protocol preserve unfinished state. Reopening the same store proves cancellation survives, or D6 interrupts once without replay. The gate is checked closed during HTTP drain. |

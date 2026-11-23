@@ -127,8 +127,10 @@ definition requires an explicit mode for every invocation.
 F7 never makes a separate `wm size` call. Dimensions and orientation come
 from the PNG captured by this attempt, including for devices of different
 sizes in one run group. The full frame stays in memory for a region capture.
-The existing per-device execution and group concurrency limits bound how
-many captures can be active. Release capture and decoded image references
+Each device remains sequential. All admitted devices may capture concurrently;
+users reduce concurrent work by selecting fewer devices, without a separate setting.
+No fixed device-count ceiling or total-RAM guarantee is implied. Retain
+per-image byte/dimension checks and classify real resource failures safely. Release capture and decoded image references
 after staging or failure. See [E1 process boundaries](../e_device_subsystem/e1_process_runner.md)
 and [D5 PNG validation](../d_persistence/d5_artifact_store.md#3-validation-and-publication).
 

@@ -13,7 +13,7 @@ flowchart TD
     A[G14 start API] --> B[G12 replay and admission with G1, E6, and D2]
     B -->|Rejected| X[Return error without creating work]
     B -->|Replayed| Y[Return existing snapshot without dispatch]
-    B -->|New single-device admission and G11 handoff| R[G10 sequential device runner]
+    B -->|New admission and G11-owned group handoff| R[G10 sequential device runner]
     R --> N[G9 checkpointed attempt using G2-G8]
     N --> C[D4 checkpoint commit; G19 artifact metadata when applicable]
     C -->|Confirmed| P[G18 publish RAM variable candidate if present]
@@ -93,7 +93,7 @@ sub-phase numbers.
 | G13  | Run snapshot APIs                      | [G13 specification](../g_workflow_engine/g13_run_snapshot_apis.md). Implemented and Linux-verified: authenticated snapshot routes, real-SQLite/cursor/read-only tests, built-agent checks, and client guides. Windows cross-compilation passes; native Windows remains unverified. |
 | G14  | Start-run API                          | [G14 specification](../g_workflow_engine/g14_start_run_api.md). Implemented and Linux-verified: strict POST DTOs, 201/200 replay, tracked G11 handoff, real SQLite, live Waydroid, and managed stop/crash recovery. Exactly one device per new start; Phase H expands scheduling. Windows cross-build passes; native Windows unverified. |
 | G15  | Switch execution                       | [G15 specification](../g_workflow_engine/g15_switch_execution.md). Implemented and Linux-verified: strict comparisons, lazy ordered operands, UUID/default/error routing, deadlines, checkpoints, registry capability, and compile/start/snapshot/replay integration with real SQLite. Windows agent/test cross-compilation passes; native Windows unverified. |
-| G16  | Scoped variable storage                | [G16 specification](../g_workflow_engine/g16_scoped_variable_storage.md). Implemented and Linux-verified: RAM scopes, scalar codec, quotas, synchronized publication, cancellation/fencing, and cleanup. Full/race tests, vet, build, and local demo pass; Windows cross-compilation passes, native Windows unverified. G18 live ownership/writes are implemented; Phase H controls remain pending. |
+| G16  | Scoped variable storage                | [G16 specification](../g_workflow_engine/g16_scoped_variable_storage.md). Implemented and Linux-verified: RAM scopes, scalar codec, quotas, synchronized publication, cancellation/fencing, and cleanup. Full/race tests, vet, build, and local demo pass; Windows cross-compilation passes, native Windows unverified. G18 live ownership/writes are implemented; H9–H13 controls are implemented; H6–H8 variable waiting remains deferred. |
 | G17  | Variable input bindings                | [G17 specification](../g_workflow_engine/g17_variable_input_bindings.md). Implemented and Linux-verified: Flow/Global resolution, view identity, destination checks, cancellation/fencing, runner/attempt transport, and lazy Switch reads. Full/race tests, vet, build, real-SQLite integration, and local demo pass; Windows cross-compiles, native execution unverified. G18 live ownership and Set Variable are implemented. |
 | G18  | Set Variable execution                 | [G18 specification](../g_workflow_engine/g18_set_variable_execution.md). Implemented and Linux-verified: pure handler, checkpoint-confirmed RAM assignments, CREATED-only store/views, joined cleanup, and actual compile/start/poll/replay. Full/race tests, SQLite faults, managed stop/crash/restart, vet, Linux build, and Windows agent/test cross-builds pass with controlled ADB readiness; native Windows/live Android unverified. No variable SQL or Phase H scheduling. |
 | G19  | Screenshot execution integration       | [G19 specification](../g_workflow_engine/g19_screenshot_execution.md). Implemented and Linux-verified: attempt-bound staging, metadata/output pairing, D4/D5 settlement, safe cleanup, and actual registry/API flows. Full/race tests, SQLite faults, managed stop/crash/restart, vet, Linux build, and Windows cross-builds pass with controlled ADB PNG output. Native Windows/live Android unverified; G20 now separately implements retrieval. |
@@ -107,7 +107,7 @@ sub-phase numbers.
 | ------------ | ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
 | G10          | Internal single-device workflow with durable attempts, routing, and safe retries; implemented and verified. | JSON smoke/SQLite checks pass; real-ADB and native Windows acceptance remain pending. No new run API. |
 | G11          | Intentional owner shutdown settles execution before SQLite closes.                                          | Bring forward required H6 behavior before integrating a desktop client.                               |
-| G14          | Authenticated start and snapshot APIs.                                                                      | Exactly one device per new start; Phase H expands admission and bounded scheduling to 1–32.                            |
+| G14          | Authenticated start and snapshot APIs.                                                                      | Original one-device milestone; implemented H4 now accepts the complete non-empty selected list without a fixed count ceiling.                            |
 | G18 | Switch, scoped variable reads, and checkpoint-confirmed RAM Set Variable execution; implemented and Linux-verified. | Cross-device wait scheduling and controls remain Phase H. |
 | G20          | Screenshot execution and authenticated committed PNG retrieval.                                             | Reuse F7 and D4/D5.                                                                                   |
 | G22 | Combined single-device engine automation passes; real-device acceptance remains open. | G21 verifies terminal results; G22 verifies feature interactions and process failures. Native Windows/live Android acceptance is pending. |
@@ -128,12 +128,11 @@ G12 preserves request replay order, G1/E6 preflight, and G11-fenced D2 atomic
 admission. Only confirmed CREATED returns prepared executable work. The later
 process-owned start use case transfers that work to scheduling before reading
 or sending its response snapshot; replay never schedules work.
-G14 accepts exactly one selected device for a new public start and hands it to
-G11-owned asynchronous execution. The array shape and internal G12/D2 capacity
-remain multi-device capable. The [G14 ownership contract](../g_workflow_engine/g14_start_run_api.md#5-single-device-execution-ownership)
-tracks admission through worker registration. H1/H2 later add the group queue,
-configured concurrency, and public 1–32-device admission; follow the
-[expansion checklist](../g_workflow_engine/g14_start_run_api.md#15-phase-h-expansion-checklist).
+G14 originally exposed one-device starts. Implemented H4 now accepts the complete
+non-empty selected list and hands it to H1–H3 group coordination with capacity
+derived from membership. The G11 start lease and replay behavior are preserved;
+no maximum-device setting is required. See the
+[H4 contract and evidence](../h_multi_device_execution/h4_public_multi_device_start.md).
 HTTP disconnection after admission does not cancel a run. G11 handles owner
 shutdown through the managed process lifecycle.
 

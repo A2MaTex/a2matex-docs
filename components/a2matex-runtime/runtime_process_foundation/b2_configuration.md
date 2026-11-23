@@ -12,7 +12,7 @@ foundation components implemented in B3–B6. Invalid configuration stops the
 process before any listener, worker, or connection file is created.
 
 B2 does not collect settings for unimplemented subsystems. ADB, persistence,
-artifacts, event retention, and execution concurrency add their settings in
+artifacts and event retention add their settings in
 their owning phases when those settings have consumers.
 
 ## 2. Configuration shape
@@ -64,6 +64,20 @@ heartbeat-aware write deadlines as required by A7.
 There is no `mode` configuration or fixed mode response field. The current API
 is Development-only. I2 may introduce a mode only when Production behavior has
 an approved contract and implementation.
+
+### Device capacity is selected per run
+
+H2 derives execution capacity directly from admitted device membership. Runtime
+has no execution-concurrency setting, default or capacity environment variable.
+Studio and Launcher select devices and send their exact serial/input pairs; no
+maximum-device UI preference or launch-time capacity injection is required.
+Changing the next run's selection does not restart Runtime.
+
+Remove the former `execution.max_concurrent_devices` section from local YAML:
+strict unknown-key rejection remains in force. The former
+`A2MATEX_RUNTIME_EXECUTION_MAX_CONCURRENT_DEVICES` is unregistered and has no
+effect. Other B2 settings and precedence are unchanged. See the
+[H2 contract](../h_multi_device_execution/h2_bounded_queue_and_worker_slots.md).
 
 ## 4. Sources and precedence
 

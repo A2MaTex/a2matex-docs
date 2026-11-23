@@ -98,8 +98,10 @@ func (v *Validator) Validate(
 
 `deviceInputs[i]` corresponds to the original request's `devices[i].inputs`.
 The caller retains serial ownership and pairs checked maps by that same index.
-G1 accepts 1–32 input objects for the current A7 request shape. Shape or count
-misuse in a direct call is a contract rejection at `devices`.
+The approved capacity revision accepts a non-empty ordered input list without
+a fixed count ceiling. Shape/empty-list misuse is a contract rejection at
+`devices`; byte-budget errors retain their payload classification. Count-policy
+code is aligned; no configurable concurrency maximum is required.
 
 An expected content rejection returns a result with `err == nil`. Cancellation,
 deadline expiry, oversized byte input, and broken trusted dependencies return
@@ -173,7 +175,7 @@ loops. A cancelled call returns the context outcome with no accepted data.
 | Raw IR content                      | At most 1,048,576 UTF-8 bytes, including its supplied whitespace.                                                                 |
 | Complete later run request          | A7 enforces 4 MiB before request decoding. A direct G1 call bounds the combined IR and supplied input bytes to that same ceiling. |
 | Nodes and edges                     | 2–500 nodes and 1–1,000 edges.                                                                                                    |
-| Selected input objects              | 1–32, preserving request order.                                                                                                   |
+| Selected input objects              | Non-empty ordered list; no fixed device-count ceiling.                                                                                                   |
 | Node config and input maps          | At most 100 properties each.                                                                                                      |
 | Workflow input schema               | At most 100 flat scalar properties.                                                                                               |
 | Node and edge IDs                   | Exact A2 identifier pattern, at most 128 ASCII characters.                                                                        |
@@ -704,7 +706,7 @@ nil accepted data fields. Keep the standard safe message for that code.
 | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | Valid minimal workflow and current compiler output using enabled nodes                       | `VALID`, complete decoded IR, owned checked input maps, and no side effects.                                   |
 | 1 MiB raw IR boundary and one byte over                                                      | Boundary reaches content validation. Over-limit input fails before decoding. Include whitespace in the count.  |
-| Aggregate input byte limit and 32 input objects                                              | Bounded acceptance/rejection using the A7 budgets.                                                             |
+| Aggregate byte limit and input lists above 32 devices                                              | Accept valid lists above 32; byte-budget overflow uses A7 payload errors, not count errors.                                                             |
 | Invalid UTF-8, missing/null/unknown field, wrong container, trailing JSON                    | Structural rejection with no partial executable document.                                                      |
 | Duplicate JSON properties                                                                    | Final property wins consistently with existing transport behavior.                                             |
 | 500/501 nodes, 1,000/1,001 edges, 100/101 fields                                             | Correct boundary findings. Excessive graph sizes skip indexing and traversal.                                  |

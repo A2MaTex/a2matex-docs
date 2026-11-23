@@ -194,10 +194,13 @@ ExecutionSnapshot and `Cache-Control: no-store`:
 Preserve the exact property names and explicit nullable fields. Do not add a
 `data` wrapper, attempt history, node outputs, workflow inputs, protected IR,
 package content, internal SQLite fields, or filesystem paths. No successful
-snapshot has an empty device list: D2 verifies a known run has 1–32 devices.
+snapshot has an empty device list: D2 verifies non-empty ordered membership
+without a fixed device-count ceiling.
 An empty store produces not found, not a fabricated zero-valued snapshot.
 
-The whole read is bounded by one group and at most 32 devices. The event
+Read every member of the stored group independently of current concurrency
+settings. Do not truncate using the retired 32-device guard or reject an older
+larger group after settings change. This revision requires code alignment. The event
 watermark may advance because of another retained run's events; clients must
 not interpret its value as this run's percentage complete or attempt count.
 

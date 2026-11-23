@@ -31,8 +31,9 @@ The internal operation accepts a caller context and the requested ADB serials.
 A7 owns parsing of the run request, while G1 owns workflow and per-device
 input validation. E6 operates on serials only.
 
-- Accept **1 through 32** serials, matching the A7 run limit. Check the
-  caller context, count, serial shape, and duplicates before calling ADB.
+- Accept a non-empty selection with no fixed device-count ceiling. Check the
+  caller context, serial shape and duplicates before ADB. Keep payload byte
+  checks at A7/G12. This revised capacity policy requires code alignment.
 - A serial is an opaque, case-sensitive value from E3. Apply the same
   token rules as discovery. Reject empty values, invalid UTF-8, whitespace,
   and control characters. Preserve punctuation such as `:5555` and IPv6
@@ -78,7 +79,7 @@ operation failure, cancel outstanding probes and wait for their cleanup.
 | Observation | Internal outcome |
 |---|---|
 | All selected serials pass | Accepted serials in request order. |
-| Duplicate, invalid serial, or count outside 1–32 | Invalid selection before ADB. |
+| Empty selection, duplicate or invalid serial | Invalid selection before ADB. |
 | Serial absent from fresh discovery or confirmed missing by E4 | Unavailable selection with `DEVICE_NOT_FOUND`. |
 | E4 reports offline, unauthorized, or not ready | Unavailable selection with the E4 reason. Other selected endpoints can still be assessed for feedback. |
 | E3 discovery or an E4 probe operation fails | Return the operation failure. Later admission maps ADB failures to `ADB_UNAVAILABLE`. Return no partial selection outcome. |
@@ -87,6 +88,12 @@ operation failure, cancel outstanding probes and wait for their cleanup.
 Keep raw ADB output and serials out of routine logs. The later client
 boundary owns HTTP status, diagnostic projection, and Development versus
 Production disclosure.
+
+Large selections remain subject to operation/caller deadlines and readiness
+probe concurrency. Neither is a supported-device count maximum. Expiry is a
+timeout with no partial accepted subset, never a too-many-devices error. H4
+must test larger selections under appropriate operation budgets without
+silently dropping or replacing members.
 
 ## 4. Run admission boundary
 
@@ -110,7 +117,7 @@ before the run API exists.
 
 | Check | Expected observation |
 |---|---|
-| Empty selection, 33 serials, duplicate, or malformed serial | Reject with zero discovery or probe calls. Accept the count boundaries of 1 and 32 with valid selections. |
+| Empty selection, duplicate or malformed serial | Reject with zero discovery/probe calls. Accept controlled valid selections above 32, such as 33 and 64, preserving every serial; these are samples, not maxima. |
 | Two selected devices pass with an unselected device present | One initial discovery and one readiness evaluation per selected endpoint. Return serials in request order even when discovery order differs. |
 | E5 held a ready serial that is now absent or offline | Reject the selection using the fresh reason and leave E5 unchanged. |
 | Device disappears during E4 | Preserve `DEVICE_NOT_FOUND` and reject the whole selection. |

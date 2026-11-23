@@ -82,12 +82,13 @@ with explicit `config.scope` and `config.name`.
 
 Names are case-sensitive and match the existing
 `^[A-Za-z_][A-Za-z0-9_]{0,99}$` rule. Reuse `ir.ValidVariableName`, existing
-UUID/node-ID validation, and `MaxAdmissionDevices`. Do not trim, lowercase,
+UUID/node-ID validation; no fixed device-count maximum. Do not trim, lowercase,
 reserve publisher names, or require predeclaration. `score` and `Score` are
 separate keys.
 
-Construct one store with a RunGroup ID and one to 32 unique admitted
-DeviceExecution IDs. Copy the identity list and keep membership immutable.
+Construct one store with a RunGroup ID and every unique admitted
+DeviceExecution ID, without a fixed count ceiling. Capacity-policy code
+is aligned; do not restore a count cap inside variable storage. Copy the identity list and keep membership immutable.
 Both Flow and Global access must identify a registered device in this store;
 a write's AttemptRef must match its group and device. IDs are trusted engine
 identities, not ownership overrides accepted from a node binding.
@@ -131,13 +132,13 @@ one remaining name or byte allowance. Maintain counts and totals in RAM.
 | Execution configuration   | Maximum variable name/value payload           |
 | ------------------------- | --------------------------------------------- |
 | Current single-device run | 2 MiB: one Flow scope plus one Global scope.  |
-| Future 32-device run      | 33 MiB: 32 Flow scopes plus one Global scope. |
+| N-device run | `(N + 1) MiB`: N Flow scopes plus one Global scope. |
 
 These are payload bounds, not a cap on process RSS. Map overhead, encoding
 buffers, and read copies add memory. Workflow IR, workflow inputs, committed
 node outputs, and artifacts have their own ownership/limits. Allocate actual
 entries as needed; do not reserve 1 MiB for every empty scope. Supporting the
-32-device capacity does not enable Phase H scheduling in G16.
+complete-group membership alone does not enable Phase H scheduling in G16.
 
 ## 4. Internal contract and architecture
 
