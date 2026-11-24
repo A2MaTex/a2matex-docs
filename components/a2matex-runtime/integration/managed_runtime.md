@@ -132,7 +132,10 @@ integration examples.
 Build request URLs from the ready message. For example, an `apiBaseUrl`
 ending in `/api/v1` becomes `{apiBaseUrl}/runtime-info`. Append the route
 suffix once. Local responses carry `Cache-Control: no-store`. The [shared lifecycle-action guide](run_actions.md)
-documents implemented group controls for both client developers.
+documents implemented group controls for both client developers. The
+[I1 history reference](#node-attempt-history-api--i1) supplies committed node outputs.
+[I4 event streaming](#execution-event-stream--i4) supplies continuous committed
+state changes and cursor-based reconnect through the same native client.
 
 ### GET /api/v1/health
 
@@ -291,7 +294,7 @@ RUNNING is already the group's status before its first device starts.
 
 | Field | Client interpretation |
 |---|---|
-| `cursor` | Decimal string containing the Runtime-wide event watermark read with this snapshot. Preserve it as a string; it is not progress percentage or this run's attempt count. SSE integration is still pending. |
+| `cursor` | Decimal string containing the Runtime-wide event watermark read with this snapshot. Preserve it as a string; it is not progress percentage or this run's attempt count. Use it when subscribing after an authoritative snapshot through [I4](#execution-event-stream--i4). |
 | `runGroup` | Saved identity, originating request ID, status, UTC millisecond timestamps, and device counts. All summary fields remain present even when zero. |
 | `deviceExecutions` | All admitted devices in admission order, with status, saved position, timestamps and terminal error. Reads include the complete stored membership, without a fixed device-count guard. Optional fields are explicitly null. |
 | `nextNodeId` | Saved A5 execution position; it may be an active node, retry node, or pending successor. It is not a separate live-handler measurement. |
@@ -466,9 +469,10 @@ Successful output is only the committed artifactId; the PNG file and metadata
 are stored by the Runtime. Run snapshots remain status-only and do not gain
 image bytes or node-output fields. A replay takes no new capture. G20 now
 provides [authenticated PNG downloads](#screenshot-artifact-download-api)
-when the artifactId is known. Automatic committed-output delivery remains
-A7/I1. The [G19/G20 walkthrough](../../../../a2matex-runtime/examples/g19/README.md)
-uses read-only SQL solely as a manual test aid, not a client dependency.
+when the artifactId is known. [I1 history](#node-attempt-history-api--i1) now
+exposes committed attempt outputs and Screenshot IDs without SQL. The older
+[G19/G20 walkthrough](../../../../a2matex-runtime/examples/g19/README.md) retains
+its optional developer-only SQL inspection; use the I1 API for client integration.
 
 | Request setting | Exact value |
 |---|---|
@@ -772,7 +776,8 @@ The ten-second example eventually returns HTTP 200 with:
 Use the by-ID route to retain this result. `GET /runs/active` returns 404 when
 there is no active group; that does not delete the completed run. A broken GET
 or 500 response is a read failure, not proof of a terminal workflow outcome.
-SSE and paginated attempt history remain later integration work.
+[Paged attempt history](#node-attempt-history-api--i1) and the
+[I4 event stream](#execution-event-stream--i4) are implemented.
 
 ### Replay response: HTTP 200 OK
 
@@ -893,7 +898,8 @@ Closing the HTTP connection does not cancel owned execution. Intentional owner
 shutdown settles unfinished work through G11 before SQLite closes. Crash/forced
 exit uses D6 INTERRUPTED recovery on restart, without automatic action replay.
 HTTP Pause/Resume/Cancel is implemented; see the [action guide](run_actions.md).
-SSE and attempt history remain later features. The app's Stop and exit action
+Attempt history is implemented under [I1](#node-attempt-history-api--i1) and SSE
+under [I4](#execution-event-stream--i4). The app's Stop and exit action
 uses the private owner channel.
 
 Built-agent Linux checks with live Waydroid already passed 201/200/409/400/422
@@ -992,6 +998,155 @@ current group, joins cleanup and leaves Runtime alive for another run. Stop and
 exit still uses the private owner pipe and awaits process exit. Runtime restart
 never resumes the old execution. Wait Variable remains deferred under H6–H8.
 
+## Node-attempt history API — I1
+
+I1 exposes the committed steps of one device execution. It is implemented and
+Linux-verified on 2026-11-24 using real router/SQLite workflow tests, Screenshot
+retrieval and a built agent serving retained synthetic history across two
+sessions. The latter requires no Android device. Windows cross-build and native
+Windows execution are separate evidence; native execution remains unverified.
+
+```http
+GET {apiBaseUrl}/device-executions/{deviceExecutionId}/attempts?afterSequence=0&limit=100
+Authorization: Bearer <current sessionToken>
+Accept: application/json
+```
+
+Obtain `deviceExecutionId` from `deviceExecutions[i].id` in the POST/GET run
+snapshot. It is not a runGroupId, requestId, nodeId or ADB serial. The path uses
+the canonical lowercase UUIDv4 spelling. The request has no body and needs no
+Content-Type. Existing local authentication, actual-readiness checks and
+`Cache-Control: no-store` apply. Reading retained history needs no live Android
+endpoint and never starts or repeats a command.
+
+| Parameter | Meaning / validation |
+| --- | --- |
+| `afterSequence` omitted | Start at 0. Return attempts with a greater sequence. |
+| `afterSequence` supplied | Decimal ASCII digits, 0 through signed-int64 maximum. |
+| `limit` omitted | 100. |
+| `limit` supplied | Decimal ASCII digits, 1–100 inclusive. Explicit zero is invalid. |
+
+Leading zeros are allowed. Reject empty values, signs, whitespace, fractions,
+exponents, overflow, unknown parameters, duplicate/escaped-equivalent duplicate
+keys and malformed query encoding. No filters, sort, offset or event cursor are
+supported. Use a bounded page per selected device; this is unrelated to the
+number of devices admitted to a run.
+
+### Response, paging and live refresh
+
+HTTP 200 returns exactly `attempts` and `nextAfterSequence`. Each attempt has
+id/deviceExecutionId, sequence/nodeId/attemptNumber, status, startedAt,
+finishedAt, output and error. Timestamps use A1 UTC millisecond strings; null
+fields remain explicit. Status is RUNNING, SUCCEEDED, FAILED, TIMED_OUT,
+CANCELLED or INTERRUPTED. A retry is a distinct attempt with its own ID and
+sequence; keep its attemptNumber and do not collapse by nodeId.
+
+For example, reading a completed H15 run with `afterSequence=7&limit=1` can return:
+
+```json
+{
+  "attempts": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440003",
+      "deviceExecutionId": "550e8400-e29b-41d4-a716-446655440002",
+      "sequence": 8,
+      "nodeId": "capture",
+      "attemptNumber": 1,
+      "status": "SUCCEEDED",
+      "startedAt": "2026-11-24T01:00:00.000Z",
+      "finishedAt": "2026-11-24T01:00:00.100Z",
+      "output": {"artifactId":"550e8400-e29b-41d4-a716-446655440004"},
+      "error": null
+    }
+  ],
+  "nextAfterSequence": 8
+}
+```
+
+The IDs/timestamps are illustrative. Pass the returned continuation as the next
+request's `afterSequence`, keeping the same device ID. The continuation is the
+last returned sequence only when another row existed in that read transaction;
+otherwise it is null, including an exactly-full final page. A known device with
+no attempts or a boundary at/beyond its last attempt returns:
+
+```json
+{"attempts":[],"nextAfterSequence":null}
+```
+
+Every page is a committed read; separate pages may observe newer state. Null
+continuation means no additional rows at that read, not a completed workflow.
+Use the run snapshot to determine workflow completion.
+
+**For active runs, refresh a window containing observed RUNNING attempts.** An
+attempt can change from RUNNING to SUCCEEDED at the same sequence. Reading only
+after that sequence will omit its update. Keep the current page's original
+afterSequence while refreshing, and upsert by attempt ID. A short-run inspector
+can refresh from zero; page through long history without an unbounded full-history
+loop. Stop polling when the view closes or the terminal run's displayed history
+has been refreshed. Cancelled HTTP reads do not cancel the workflow. Continuous
+event delivery is available through [I4](#execution-event-stream--i4), with
+Studio reconciliation owned by I5. This attempt page has no event watermark.
+
+### Errors and Screenshot discovery
+
+| Response | Meaning |
+| --- | --- |
+| 400 INVALID_REQUEST | Invalid device ID/query or a nonempty body. Fix the request. |
+| 401 UNAUTHORIZED | Missing/invalid local bearer; reload the current owned session. |
+| 404 RESOURCE_NOT_FOUND | No DeviceExecution with that ID in this Runtime store. A known empty history is 200. |
+| 500 PERSISTENCE_FAILED | Committed history could not be read; message is `unable to read node attempt history`. |
+| 500 INTERNAL_ERROR | Unexpected read/configuration failure. Preserve the last displayed data and surface the failed read. |
+
+Errors use the ordinary `{"error":{"code":"...","message":"...","retryable":false}}`
+envelope, without a snapshot/validation or partial page. A failed read is not a
+node execution failure. No new 408/499 contract or automatic operation retry is
+introduced. The server emits contextual ERROR metadata without payloads/tokens.
+
+For each SUCCEEDED `capture` attempt, take `output.artifactId` and request the
+[existing PNG endpoint](#screenshot-artifact-download-api) with the current
+bearer. Set Variable has output `{}`; its assigned value/Flow/Global RAM is not
+exposed. Node outputs contain no screenshot file key/path or image bytes. Studio
+and Launcher must not query SQLite for ID discovery.
+
+### Postman, Linux and Windows examples
+
+In Postman, set DEVICE_EXECUTION_ID manually from your actual run snapshot.
+Create GET `{{API_BASE_URL}}/device-executions/{{DEVICE_EXECUTION_ID}}/attempts`
+with Params afterSequence=0 and limit=1, Body none and Bearer SESSION_TOKEN.
+For the completed H4 Start/Delay/End graph, expect sequences1,2,3 over three
+pages with continuation1,2,null. Increasing afterSequence to3 gives empty200.
+Use the [complete I1 walkthrough](../../../../a2matex-runtime/examples/i1/README.md)
+for compilation/start, active refresh, negative cases and Screenshot preview.
+
+On Linux, using the `runtime_connection` array loaded by the
+[authentication guide](local_authentication.md#linux-terminal), substitute the
+actual device execution ID and confirm current readiness before the operation:
+
+```bash
+DEVICE_EXECUTION_ID='550e8400-e29b-41d4-a716-446655440002'
+printf 'header = "Authorization: Bearer %s"\n' "${runtime_connection[1]}" |
+  curl --config - --noproxy '*' --max-time 5 --get \
+  --data-urlencode 'afterSequence=0' --data-urlencode 'limit=100' \
+  "${runtime_connection[0]}/device-executions/$DEVICE_EXECUTION_ID/attempts"
+```
+
+On Windows PowerShell, use the current connection-file path from the same guide:
+
+```powershell
+$Connection = Get-Content -LiteralPath $ConnectionFile -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+$Headers = @{ Authorization = "Bearer $($Connection.sessionToken)" }
+$DeviceExecutionId = '550e8400-e29b-41d4-a716-446655440002'
+Invoke-RestMethod -Uri "$($Connection.apiBaseUrl)/runtime-info" -Headers $Headers -NoProxy -MaximumRedirection 0 -TimeoutSec 5 -ErrorAction Stop | Out-Null
+Invoke-RestMethod -Uri "$($Connection.apiBaseUrl)/device-executions/$DeviceExecutionId/attempts?afterSequence=0&limit=100" -Headers $Headers -NoProxy -MaximumRedirection 0 -TimeoutSec 5 -ErrorAction Stop
+```
+
+The PowerShell example is a client reference, not native Windows acceptance.
+I1 has focused handler, compiled two-device SQLite/API, retained built-agent,
+retry/recovery and G20 bridge evidence. The known missing G22/H14/H15 Python
+harnesses still fail the full regression suite; I1 does not repair those packs
+or close Phase H/live-device gates. See the
+[I1 evidence record](../i_observability_apis/i1_node_attempt_history_api.md#12-implementation-and-verification-evidence--2026-11-24).
+
 ## Screenshot artifact download API
 
 ### GET /api/v1/artifacts/{artifactId}
@@ -1015,12 +1170,10 @@ new session token; the same historical artifact ID remains valid if its stored
 row/file survive. Runtime Info's supportedNodes list advertises executable
 nodes, not API routes. Use a build containing G20 for downloads.
 
-**ID discovery boundary:** current POST/GET run snapshots do not return node
-outputs. A7/I1 still owns the committed attempt/event output transport used by
-Studio to discover artifactId automatically. Do not add a SQLite dependency to
-Studio or Launcher. The [G19/G20 example](../../../../a2matex-runtime/examples/g19/README.md)
-provides a read-only SQL lookup solely for manual testing with today's API.
-A known ID is sufficient for this endpoint; no file path is accepted.
+**ID discovery:** POST/GET run snapshots remain status-only. Read the selected
+device's [I1 attempt history](#node-attempt-history-api--i1), then take the
+SUCCEEDED Screenshot output.artifactId. Studio/Launcher need no SQLite lookup.
+A known ID is sufficient for G20; no file path is accepted.
 
 ### Response and failure handling
 
@@ -1075,8 +1228,162 @@ preview never changes the committed Screenshot result or run status.
 
 The native client owns readiness/authentication and binary fetching. Pass
 bytes or a managed asset handle/object URL to the UI; keep the token native.
-A bare image URL cannot attach the required Bearer header. Automatic Studio
-preview awaits the output-discovery bridge above; this route supplies retrieval.
+A bare image URL cannot attach the required Bearer header. I1 now supplies
+committed output IDs; the Studio inspector/automatic preview UI remains I6.
+
+## Execution event stream — I4
+
+**Implemented and Linux-verified.** Use `GET {apiBaseUrl}/events` to receive
+committed execution-state changes continuously. This is one Runtime-wide stream,
+not a request to run a workflow, a per-device feed or operational log output.
+Keep the same connection across run completion when the app still needs updates.
+I5 owns the actual Studio reconnect/view implementation; this section defines
+the available Runtime API for both native client developers.
+
+### Request and response contract
+
+```http
+GET /api/v1/events
+Authorization: Bearer <current sessionToken>
+Accept: text/event-stream
+Last-Event-ID: 42
+```
+
+| Input | Required client behavior |
+| --- | --- |
+| Readiness | Before opening/reconnecting, use the native owner client's actual readiness gate and current URL/token. One native connection can supply multiple views. |
+| Authorization | Current Bearer header only. Never put credentials in the URL, cookies, event data or renderer state. Use a native streaming client that supports headers. |
+| Accept | Send exactly one `text/event-stream` value. Lists, wildcards, parameters and duplicate values are rejected. Matching ignores case/surrounding HTTP whitespace. |
+| Last-Event-ID | Omit to follow only events after the connection-time watermark. To resume, send exactly one positive decimal cursor string from the last event the client processed. Zero, empty, signs, commas, spaces, decimals, overflow and duplicates are invalid. Leading zeros are accepted numerically. |
+| Query and body | None. No `cursor` query, run/device filters, JSON body or token parameter. |
+
+Successful headers are flushed immediately, including when no event is available:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: text/event-stream; charset=utf-8
+Cache-Control: no-store
+X-Accel-Buffering: no
+```
+
+There is no Content-Length or compression. The request stays open and carries
+zero or more frames. Keep connect/header waits bounded, but do not reuse a
+regular whole-request timeout for the open SSE body. Cancel it through the
+view/app's lifetime instead. Read incrementally with a UTF-8 decoder and retain
+partial lines/frames across network chunks; one TCP chunk is not one event.
+Do not wait for the whole response body or parse it as one JSON document.
+Each frame has exactly these fields and an empty final line:
+
+```text
+id: 42
+event: NODE_ATTEMPT_STATE_CHANGED
+data: {"cursor":"42","type":"NODE_ATTEMPT_STATE_CHANGED","occurredAt":"2026-11-24T03:00:00.000Z","runGroupId":"550e8400-e29b-41d4-a716-446655440001","deviceExecutionId":"550e8400-e29b-41d4-a716-446655440002","nodeAttemptId":"550e8400-e29b-41d4-a716-446655440003","nodeId":"wait","payload":{"status":"RUNNING","attemptNumber":1}}
+
+```
+
+`data` is complete single-line A6 JSON. `id` equals `data.cursor` and `event`
+equals `data.type`. Possible types are `RUN_GROUP_STATE_CHANGED`,
+`DEVICE_EXECUTION_STATE_CHANGED`, `NODE_ATTEMPT_STATE_CHANGED` and
+`NODE_RETRY_SCHEDULED`; see [A6 payloads](../contracts/event_error_v1.md).
+Optional correlation fields remain absent on events that do not require them.
+Filter by run/device/attempt IDs in the native client, then update the correct
+graph node. A device's nextNodeId is a candidate position, not proof that its
+attempt has started; an attempt RUNNING event supplies that evidence. Snapshot
+and I1 history remain the authoritative ways to repair/inspect a view.
+
+After about 15 seconds without successful output, an idle connection receives:
+
+```text
+: heartbeat
+
+```
+
+This comment has no cursor or JSON and is not workflow progress. Event activity
+resets the idle interval. Healthy SSE outlives ordinary HTTP WriteTimeout;
+individual writes/flushes have a five-second limit. A slow reader is disconnected
+without silently dropping events. Do not treat a single missing heartbeat as a
+workflow failure or launch a second Runtime beside an owner that is still alive.
+
+### Errors, reconnect and process ownership
+
+| Response/signal | Meaning and next step |
+| --- | --- |
+| 400 `INVALID_REQUEST` | Fix Accept, cursor, query/body or an ahead-of-history cursor. Do not retry unchanged input or relaunch a healthy process. |
+| 401 `UNAUTHORIZED` | Use the owned current session and actual readiness flow. Never reuse an old process's token after replacement. |
+| 410 `EVENT_CURSOR_EXPIRED` | Before streaming, the requested history is no longer retained. Get authoritative snapshots for the monitored views and reconnect after the repaired watermarked cursor. |
+| 500 `PERSISTENCE_FAILED` / `INTERNAL_ERROR` | Preparation failed before streaming; surface the safe error separately from the last displayed execution state. |
+| EOF/error after HTTP 200 | Delivery ended after headers. There is no appended JSON/error event or retroactive 500. Restore readiness and resume from the client's processed cursor; if the cursor expired, the next request returns410. |
+| Local monitor cancellation or explicit owner shutdown | Stop reading and suppress reconnect/relaunch. Stream cancellation does not cancel a workflow; owner shutdown uses the existing private command. |
+
+The pre-stream failure body is the usual envelope, for example:
+
+```json
+{"error":{"code":"EVENT_CURSOR_EXPIRED","message":"event history has expired; refresh the execution snapshot","retryable":false}}
+```
+
+Apply each complete event before saving its cursor. Store it as a string, not a
+JavaScript Number; int64 values may exceed exact Number precision. Heartbeats
+never move it. A reconnect can repeat an ambiguously delivered event, so update
+existing run/device/attempt records by identity rather than treating every frame
+as another execution. Do not increment progress or redispatch commands from an
+event. Cursors can have gaps and are not progress percentages.
+
+To bootstrap a known run view, read its authoritative snapshot and subscribe
+with that snapshot's cursor. Events committed between the GET and subscription
+are replayed. For a fresh stream with no snapshot/cursor, omission intentionally
+skips historical rows. When several views are monitored, I5 owns reconciliation
+of all relevant views after expiry; do not repair one view while assuming the
+global cursor makes every other cached view current.
+
+After an unexpected stream closure, probe the owned process/session. If healthy,
+reconnect with the same current credentials and processed cursor using bounded
+backoff. On actual readiness failure, use the shared single-replacement policy
+and obtain fresh credentials. A successful readiness probe plus an endpoint404
+indicates a route/build mismatch, not permission to relaunch repeatedly. Before
+explicit Stop and exit, cancel client reconnect work and suppress automatic
+launch. Runtime independently cancels its stream handlers before HTTP drain.
+Final shutdown events may be persisted without reaching this connection; read
+saved results after the next intentional launch. Restart never resumes old runs.
+
+### Linux, Windows and Postman check
+
+Obtain credentials through the [authentication guide](local_authentication.md).
+Managed apps read the owner pipe, while standalone development reads the file.
+Populate shell/Postman variables yourself for manual testing; Runtime does not
+export them into another process. API_BASE_URL already ends in `/api/v1`.
+
+Linux:
+
+```bash
+curl -N --http1.1 "$API_BASE_URL/events" \
+  -H "Authorization: Bearer $SESSION_TOKEN" \
+  -H "Accept: text/event-stream"
+```
+
+Windows PowerShell:
+
+```powershell
+curl.exe -N --http1.1 "${env:API_BASE_URL}/events" `
+  -H "Authorization: Bearer $env:SESSION_TOKEN" `
+  -H "Accept: text/event-stream"
+```
+
+For reconnect, add `-H "Last-Event-ID: 42"` using your real processed cursor.
+In Postman send GET `{{API_BASE_URL}}/events`, Bearer `{{SESSION_TOKEN}}`, one
+Accept header `text/event-stream`, no body/query and initially no Last-Event-ID.
+The request remains open. No Android target is needed to observe idle heartbeats.
+Leave it open over 40 seconds, then run the existing compile/start flow in a
+second tab to observe correlated node/device/group events. Disconnecting this
+GET leaves the run active. Use [the readable I4 walkthrough](../../../../a2matex-runtime/examples/i4/README.md)
+for the complete sequence and expected checks.
+
+Linux evidence includes real HTTP/SQLite replay of more than 100 events, live
+commits, expiry, frame/error/deadline races, direct shutdown with blocked output,
+and an actual managed agent with three real heartbeats over 45 seconds, fresh
+sessions and owner shutdown/loss. Native Windows and Studio/Launcher UI remain
+unverified. Known missing G22/H14/H15 scripts remain a full-suite gate; they are
+not repaired by this endpoint. Operational logs and Phase J package admission
+remain outside this stream.
 
 ## Adding an API in later phases
 

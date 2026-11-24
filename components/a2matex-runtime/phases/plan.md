@@ -612,21 +612,36 @@ Test Run integration using H4/G13 is available before these remaining steps.
 
 | Step | One responsibility                     | Observable checkout                                                                                                             |
 | ---- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| I1   | Node-attempt history API               | Read ordered attempts with bounded pagination through the existing repository and publish exact client examples.                |
-| I2   | Committed-event observation            | Reuse EventWakeup for bounded observer lifetime; commit wakes observers, rollback does not, and coalesced signals lose no data. |
-| I3   | Replay-to-live continuity              | Replay retained events and continue live without a gap; bound buffering and terminate slow consumers safely.                    |
-| I4   | Authenticated SSE endpoint             | Verify framing, cursor errors, expiry, heartbeats, stream write deadlines, disconnect cleanup, and shutdown.                    |
-| I5   | Studio event and reconnect integration | Studio resumes from its processed cursor and repairs expiry using a watermarked authoritative snapshot.                         |
-| I6   | Studio execution inspector             | Display attempts, outputs, failures, and committed screenshots for the correct run/device/node identity.                        |
-| I7   | Studio lifecycle controls              | Connect pause/resume/cancel and owner shutdown to clear pending, achieved, conflict, and failure UI states.                     |
-| I8   | Studio end-to-end acceptance           | Exercise editing, compilation, run, observation, controls, reconnect, and app exit with explicit platform evidence.             |
+| I1   | [Node-attempt history API](../i_observability_apis/i1_node_attempt_history_api.md) | Implemented and Linux-verified: strict authenticated paging, real SQLite/device isolation/active refresh, retry/recovery projections, Screenshot-ID discovery and retained built-agent reads. Guides updated; Windows cross-build only. Known full-suite missing harnesses remain open. |
+| I2   | [Committed-event observation](../i_observability_apis/i2_committed_event_observation.md) | Implemented and Linux-verified: register-before-read, cancellable waits, one-second fallback and real SQLite commit/rollback/coalescing checks pass focused/repeated race tests. Windows cross-builds pass; I3/I4 own delivery and actual stream shutdown. Known full-suite missing harnesses remain open. |
+| I3   | [Replay-to-live continuity](../i_observability_apis/i3_replay_to_live_continuity.md) | Implemented and Linux-verified: first-page preparation, one-page ordered replay/live delivery, sink failure/cancellation, retention and independent consumers pass focused/repeated race checks. Windows cross-builds pass. I4 owns the HTTP stream and actual socket/shutdown guarantees; missing full-suite harnesses remain open. |
+| I4   | [Authenticated SSE endpoint](../i_observability_apis/i4_authenticated_sse_endpoint.md) | Implemented and Linux-verified: strict authenticated GET /events, replay/live frames, heartbeat/deadline control, error-aware flush, disconnect and blocked-write shutdown pass. Built agent passes replay, real 45-second heartbeats, fresh sessions and owner stop/loss. Guides updated; Windows cross-build only. Missing full-suite harnesses remain open. |
+| I5   | [Studio event and reconnect integration](../i_observability_apis/i5_studio_event_reconnect_integration.md) | Spec ready for Studio implementation: one native stream, processed cursor, selected-run reconciliation, expiry repair and owner-aware reconnect. Client/UI implementation and host acceptance remain pending. |
+| I6   | [Studio execution inspector](../i_observability_apis/i6_studio_execution_inspector.md) | Spec and source-mapped handoff ready: selected-device attempt paging, saved details, live refresh and bounded authenticated PNG preview. Studio implementation and host acceptance remain pending. |
+| I7   | [Studio lifecycle controls](../i_observability_apis/i7_studio_lifecycle_controls.md) | Spec and consolidated I5–I7 handoff ready: action disposition/uncertainty, conflict snapshots, full-group controls and explicit shutdown/exit. Studio implementation and host acceptance remain pending. |
+| I8   | [Studio gateway review and end-to-end acceptance](../i_observability_apis/i8_studio_end_to_end_acceptance.md) | Spec ready; all 22 criteria NOT RUN. Review the freshly pulled Studio gateway and verify the full business flow only when the user requests it, with separate native-host evidence. |
 
 D2 already provides attempt reads and D3 already provides replay and EventWakeup.
 I2 integrates those after-commit signals; no second broker/notifier is added.
+I2 implements registration, cancellable waiting and the D3 fallback; no daemon
+or production route is added. I3/I4 compose the helper, and I4 explicitly
+connects stream cancellation to Runtime shutdown before HTTP drain.
+I3 now implements first-page preparation and single-use ordered delivery through
+synchronous Deliver/Idle callbacks with one bounded page and no event queue.
+The I4 adapter supplies heartbeat policy and bounded network writes.
+I4 now provides strict transport decoding, Gin-aware error reporting, owned
+request cancellation and interruption of blocked writes before HTTP drain.
+The production route, Linux HTTP/agent checks and client guides are delivered;
+native Windows, actual UI integration and named missing harnesses remain open.
 I3/I4 deliver A7 SSE as a combined correctness gate: no replay/live gap, bounded
 slow consumers, heartbeats/write deadlines, expiry recovery, and cleanup.
 G20 remains the artifact API owner. Test-one-node, arbitrary run-from-node, and
 publisher-authored utility.log remain deferred under their existing contracts.
+
+Use the [single I5–I7 Studio handoff](../integration/studio_observability.md)
+for client integration. I8 review and end-to-end acceptance will be performed
+after the user pulls the implementation and requests that review; this
+documentation delivery does not execute or complete I8.
 
 The shared native client preserves the accepted B3/B5 launch, actual readiness
 before each operation, shared startup/replacement, current credentials, and

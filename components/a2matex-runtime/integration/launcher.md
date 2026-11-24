@@ -50,6 +50,8 @@ authoring endpoints remain scoped to authoring.
 | `POST /api/v1/devices/refresh` | Scan ADB and return the updated device inventory. |
 | `GET /api/v1/runs/active` | Read the saved non-terminal RunGroup or receive 404 when idle. |
 | `GET /api/v1/runs/{runGroupId}` | Read the requested saved progress or terminal result. |
+| `GET /api/v1/device-executions/{deviceExecutionId}/attempts` | Read paged saved node attempts and committed outputs through [I1](managed_runtime.md#node-attempt-history-api--i1). |
+| `GET /api/v1/events` | Follow committed Runtime-wide state events through [I4](managed_runtime.md#execution-event-stream--i4), with Bearer, Accept and optional Last-Event-ID. This does not add Production package admission. |
 | `POST /api/v1/runs/{runGroupId}/actions` | Pause, Resume or Cancel an existing group; use the [shared action guide](run_actions.md). This does not supply Production package admission. |
 
 Use the [shared API reference](managed_runtime.md#shared-api-reference) for
@@ -163,3 +165,37 @@ verifies the existing Development routes, complete per-device results, artifacts
 and group controls under Linux controlled ADB. Use it for developer integration
 checks; live independent Android/native Windows acceptance remains pending. This
 does not introduce or authorize the Phase J protected Product-package API.
+
+## Saved node-attempt history — I1
+
+The [shared history reference](managed_runtime.md#node-attempt-history-api--i1)
+defines exact JSON, pagination, errors, Linux/Windows requests and active refresh.
+Use the DeviceExecution ID from the selected run snapshot, the current native-owned
+session and actual readiness gate. This read needs no connected Android target.
+I1 supplies screenshot IDs for the existing artifact-download API; do not query
+SQLite. Same-sequence status updates require refreshing an overlapping window,
+not treating attempt pagination as an event cursor. Runtime history is
+Linux-verified; native Windows and Launcher UI acceptance remain separate.
+This adds no protected `.a2m` admission or authorization; those remain Phase J.
+
+## Continuous execution events — I4
+
+Use the [shared SSE reference](managed_runtime.md#execution-event-stream--i4)
+for exact headers, framing, errors, Linux/Windows/Postman requests and verified
+limits. Open one connection through the native owner client after actual
+readiness. Send the current Bearer and `Accept: text/event-stream`; no query or
+body is accepted. Keep credentials in native memory and forward only safe
+decoded event data to the UI.
+
+Filter by the selected run/device correlation IDs. Save the event cursor as a
+string only after applying its data. Heartbeats are comments, not progress.
+Reconnect after that processed cursor; on initial410 repair the relevant views
+from authoritative snapshots and reconnect after the repaired cursor. A broken
+stream is not proof that a workflow failed or that Runtime died: probe the
+owned session and use the existing replacement policy only on actual readiness
+failure. Explicit owner shutdown suppresses automatic reconnect/relaunch.
+
+I4 is implemented and Linux-verified with HTTP/SQLite and managed-agent checks.
+Native Windows and Launcher UI acceptance remain separate. This event API can
+observe retained/admitted runs but does not authorize decrypting or starting a
+customer `.a2m` package through Development endpoints.

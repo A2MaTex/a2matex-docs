@@ -3,15 +3,18 @@
 ## Overview
 
 Launch App asks Android to open the launcher entry for a package on the
-selected device. The handler validates the package name, then F1 runs one
-package-scoped Activity Manager command. The adapter checks Android's launch
-result before returning an empty node output.
+selected device. The handler validates the package name, then F1 resolves its
+launcher activity and launches that exact component. Both commands share the
+original attempt deadline. The adapter checks Android's launch result before
+returning an empty node output.
 
 ```mermaid
 flowchart LR
     I[F9 invocation with package, serial, and deadline] --> V[F2 validates the package input]
     V -->|Invalid| E[Return classified failure]
-    V -->|Valid| A[F1 runs one package-scoped launcher intent]
+    V -->|Valid| R[F1 resolves and validates the package launcher activity]
+    R -->|Missing, invalid, or deadline| E
+    R -->|Resolved| A[F1 launches the exact component once]
     A -->|Process failure or deadline| E
     A -->|Process completed| P[F2 checks the Android launch result]
     P -->|Accepted and complete| O[Return empty output]
@@ -56,24 +59,34 @@ and [A4 field rules](../contracts/typed_device_command_v1.md#3-field-rules).
 | 4 | F2 tests and local `test_demo/f-smoke` | Register the exact F9 pair in a test registry, cover the result parser and real argument dispatch with a controlled executable, and add `launch_app.json` for Android acceptance. |
 | 5 | `cmd/agent/handlers.go` and composition wiring | Enable the shipped pair after native and live acceptance. Reuse the existing resolver and regenerate Wire if provider inputs change. |
 
-## 3. Dispatch one launcher intent
+## 3. Resolve the launcher and dispatch one launch
 
 Validate the execution context, serial, and input before device I/O.
 Pass the typed command, selected serial, and original context to F1. F1
 resolves the verified ADB executable, supplies `-s <serial>`, checks the
-remaining budget, and sends this fixed argument vector to E1.
+remaining budget, and sends these fixed argument vectors to E1 in order.
 
 ```text
-adb -s <serial> shell -T am start -W --user current -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p <packageName>
+adb -s <serial> shell -T cmd package resolve-activity --brief --user current -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p <packageName>
+adb -s <serial> shell -T am start -W --user current -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n '<resolvedComponent>'
 ```
 
-The adapter supplies all tokens except the validated package name. It sends
-separate host arguments. The restricted package alphabet also keeps the
-workflow value safe at the Android shell boundary. Android chooses the
-launcher activity in the requested package for the current Android user.
-Use the selected execution serial throughout. F2 performs no package scan,
-activity pre-resolution call, screen read, device readiness probe, or
-force-stop. A cold ADB resolver can still run its existing version probe.
+Resolution accepts one `package/class` component for the requested package,
+with an optional preceding Android `priority=...` metadata line. The class must
+match the existing activity-class grammar. Reject missing, foreign, duplicate,
+malformed, truncated, or rejected resolution results before any launch. Do not
+accept components from workflow input or interpolate raw Android output into a
+shell command. The adapter supplies separate host arguments.
+Single-quote the validated component at the Android shell boundary so Java
+class names containing `$` are passed literally.
+
+This avoids a reproduced Waydroid case where Jelly resolves to
+`org.lineageos.jelly/.MainActivity` but Android rejects the package-only implicit
+launch. Do not hardcode that component; resolve each requested package.
+Use the selected serial and original context throughout. Resolution consumes
+the same attempt budget, and its failure prevents the launch. F2 performs no
+package scan, screen read, device readiness probe, or force-stop. A cold ADB
+resolver can still run its existing version probe.
 See the [Android ADB reference](https://developer.android.com/tools/adb#am)
 and [F1 dispatch sequence](f1_command_dispatcher.md#3-dispatch-sequence).
 
@@ -123,7 +136,8 @@ rejections. [AOSP Activity Manager shell implementation](https://android.googles
 Use one attempt budget, including resolution, process startup, Android's
 wait, and interpreting its bounded output. F2 sends at most one launch and
 does not restart, force-stop, or replay an action whose result is uncertain.
-Use contextual operations such as `validate_inputs` and `parse_launch_result`.
+Use contextual operations such as `validate_inputs`, `resolve_launcher_activity`,
+`launch_app`, and `parse_launch_result`.
 Preserve more specific F1 errors. Return fixed messages without including the
 input package, serial, activity name, raw stdout, or raw stderr. The caller
 logs the result once. See [F1 failure mapping](f1_command_dispatcher.md#4-results-and-failure-mapping).
@@ -133,7 +147,7 @@ logs the result once. See [F1 failure mapping](f1_command_dispatcher.md#4-result
 | Check | Expected evidence |
 |---|---|
 | Contract and exact F9 pair | The exact pair resolves to the handler. Accept valid package names at the 3 and 255 character limits and preserve case. Reject extra fields, component names, shell punctuation, and invalid package shapes before dispatch. |
-| Typed dispatch | Verify one process invocation with the exact serial and argument vector. Check resolver failure, start failure, exit failure, pre-cancellation, and attempt expiry with no second launch. |
+| Typed dispatch | Verify one activity-resolution call followed by one explicit launch with the exact serial and argument vectors. Check missing/foreign/malformed/truncated resolution output, resolver/process failure, cancellation between commands, and shared attempt expiry. Resolution failure must not launch; an uncertain launch must not be sent again. |
 | Output parser | Cover cold and warm outputs, missing optional activity, CRLF, zero-exit error, blocked warning with `Status: ok`, timeout, missing and conflicting markers, unrelated activities, and truncated stdout or stderr. Verify that the exact Android permission prompt still requires the normal success markers. Check that diagnostics exclude input and raw output. |
 | Emulator and physical Android | From the launcher, start a known test app and observe it open. Put the existing task in the background and repeat. Verify a syntactically valid absent package fails. Include an installed package without a launcher activity when the test environment provides one. |
 | Native adapter and Runtime Info | Run adapter checks on Linux and Windows. After live and native acceptance, register the verified `android.launch_app` pair. The existing Runtime Info response advertises that pair without starting ADB. |

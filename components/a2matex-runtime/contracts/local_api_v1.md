@@ -501,6 +501,13 @@ and contain exact A5 NodeAttempt projections:
 `nextAfterSequence` is the last returned sequence when another page exists and
 is null otherwise. Unknown query parameters are rejected.
 
+I1 is implemented and Linux-verified. Its [shared client reference](../integration/managed_runtime.md#node-attempt-history-api--i1)
+defines strict query decoding, active-attempt refresh, errors and Screenshot-ID
+discovery. The [I1 spec/evidence](../i_observability_apis/i1_node_attempt_history_api.md)
+records implementation scope and platform/regression limits. Attempt sequence
+pagination is not an event cursor: refreshing an observed RUNNING attempt must
+include its existing sequence to see a later terminal update.
+
 ### `POST /runs/{runGroupId}/actions`
 
 The strict body is one of:
