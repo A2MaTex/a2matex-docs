@@ -18,6 +18,122 @@ flowchart LR
 
 ## Start and check the session
 
+### Planned Phase J handoff
+
+The exact future Product API agreement is
+[J1 — Production contracts](../j_protected_execution/j1_production_contracts.md).
+Follow [the ordered Runtime/Backend/Launcher/manual plan](../../../phase_j_implementation.md)
+and the replacement [J1–J16 index](../phases/phase_j.md). J1 is a specification
+and public test-vector delivery, not a runnable Production build.
+
+The planned order is installed package download/hash verification → J4 public
+schema read/form → customer Run → J10 session preparation → Backend authorization
+→ J11 protected start → J12 renewal/J13 Product state and SSE → J14 fresh-session
+reauthorization if needed. Do not generate keys or start a lease merely to show
+the form. Reuse the exact package identity when submitting its input values.
+
+Runtime local Bearer, Backend customer Bearer and signed execution leases have
+different recipients. Backend successes have `data/statusCode`; Runtime bodies
+are direct DTOs. Preserve operation IDs on uncertain responses. J1 fixes these
+types and the separate `/product-runs/*` / `/product-events` summary-only surfaces;
+Development history/events/artifact routes must not disclose Product internals.
+Production package/schema/API examples become integration instructions only
+after their owning Runtime and Backend tasks are implemented and verified.
+
+### Planned package installation and location contract
+
+**Handoff requirement, not an implemented package API.** Follow
+[J1 section 3](../j_protected_execution/j1_production_contracts.md#3-installed-package-identity-and-public-schema)
+when implementing the installation/form and Production client tasks.
+
+Launcher owns the selected package root. Default to the host's actual Documents
+folder plus `A2MaTeX/launcher/product-packages`, allowing a user-selected absolute
+folder later. Resolve relocated/localized Documents through OS APIs. Do not use
+Runtime's SQLite state directory or assume the executable's folder.
+
+```text
+<selected package root>/
+└── <productId>/
+    └── <installedReleaseId>/
+        └── <productSlug>-<releaseVersion>.a2m
+```
+
+The Backend customer download response must include `fileName`, sourced from
+`Static.originalFileName`, alongside package identity/hash, size, URL and expiry.
+Save that exact filename; never reconstruct it from a product's current slug or
+extract it from the R2 URL. R2 storage naming is unchanged. Invalid/nonportable
+server filenames fail installation rather than being silently renamed.
+
+Keep one installation record per Product in the Launcher's existing local storage:
+`productId`, `installedReleaseId`, `fileName`, verified `packageHash`. Store the
+selected root in Launcher settings. No new Runtime installation table is needed.
+The record chooses the package to run; filenames and UUID ordering do not choose it.
+
+For schema reading and preparation, send the root as a header and selection as
+JSON. This Linux example is illustrative until J4/J10 are implemented:
+
+```http
+Authorization: Bearer <current local Runtime token>
+Content-Type: application/json
+X-A2MaTeX-Package-Directory: %2Fhome%2Fdino%2FDocuments%2FA2MaTeX%2Flauncher%2Fproduct-packages
+```
+
+```json
+{
+  "packageRef": "11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222/auto-farming-1.0.0.a2m",
+  "productId": "11111111-1111-4111-8111-111111111111",
+  "releaseId": "22222222-2222-4222-8222-222222222222",
+  "packageHash": "<verified SHA-256 from Backend download metadata>",
+  "launcherVersion": "0.1.0"
+}
+```
+
+The schema request uses this body directly; preparation wraps it in `package`
+with its own `requestId` and `purpose`. Preserve the header for protected start
+and fresh-session reauthorization; those bodies reference the prepared session,
+not another package path. Other Product requests may receive the same header
+through the common native adapter without using it to reload or redirect a run.
+Never send it to Backend/R2 or add it to Studio's Development requests.
+
+Encode the absolute native root once as RFC 3986 UTF-8 percent encoding (4 KiB
+encoded maximum). Encode spaces as `%20`; `+` is not a space escape. For Windows,
+`C:\Users\Dino\Documents\A2MaTeX\launcher\product-packages` becomes
+`C%3A%5CUsers%5CDino%5CDocuments%5CA2MaTeX%5Clauncher%5Cproduct-packages`.
+Keep `/` between the three JSON `packageRef` segments on both hosts; do not
+percent-encode that JSON field. Runtime decodes the header once and rejects
+malformed/repeated headers and unsafe paths. See the fixture bundle for both
+host examples. This is not a generic local-file read API.
+
+### Planned update flow: one installed Release per Product
+
+Compare `installedReleaseId` with Backend's selected `currentRelease.id` when
+checking for updates. Publishing alone does not change that pointer. Use eligible
+customer product metadata; Publisher/Admin management APIs are not customer APIs.
+The customer-download task must return trusted selected identity/hash/filename.
+For owned products outside Marketplace discovery, its customer-facing projection
+must also supply eligible current-release metadata rather than relying on discovery.
+
+1. Request an eligible replacement download and stage it without deleting the
+   installed package. Verify the expected hash and identity.
+2. Wait until this Product has no preparing session or active/paused execution.
+   Disable replacement while it is in use; an expired paused run still needs the
+   same package for reauthorization.
+3. Install the exact server filename in the replacement Release folder, switch
+   the installation record, and discard the old package-bound input form/session.
+   If switching fails, retain the old selected installation.
+4. Remove the old Release folder after switching. Retry cleanup failures without
+   reverting the installation record or deleting unrelated files.
+
+Temporary staging/old files during replacement are expected; permanent local
+multi-version retention, rollback and a customer version picker are outside MVP.
+Backend immutable Release history and existing Runtime result retention remain
+independent of package cleanup. A settings change affects future package
+operations, not a pending session or live run. Do not move/remove its files until
+that use ends. Directory changes require rebuilding the next package-bound form
+and preparation, rather than changing a frozen root on a start retry.
+
+### Existing native process integration
+
 Browsing installed products can leave Runtime stopped. When an operation
 requires it, call the native Runtime client described in the
 [managed lifecycle guide](managed_runtime.md). The currently available

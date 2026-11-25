@@ -304,6 +304,26 @@ release content key for `runtimeKeyThumbprint`. Runtime verifies locally;
 Launcher never receives plaintext workflow key. Contract đầy đủ:
 [Production Execution Authorization v1](../../../specifications/production_execution_authorization_v1.md).
 
+### J1 transport and same-family persistence clarification
+
+[Runtime J1](../../a2matex-runtime/j_protected_execution/j1_production_contracts.md)
+defines the exact shared wire contract. `executionId` is allocated by Runtime
+preparation before admission and equals the eventual RunGroup ID. The unique
+ExecutionLease row remains the same family across fresh-session reauthorization:
+advance sequence and replace session/key bindings and current grant timestamps
+(`issuedAt`, `notBefore`, `refreshAfter`, `expiresAt`) atomically after current
+eligibility checks; do not create a second row for the same executionId.
+
+The separate Backend persistence task must also create bounded request receipts
+unique by `(customerId, requestId)` for issue/renew/reauthorize. A receipt stores
+operation, normalized request fingerprint, family/claims/signing-key metadata,
+reservation ownership and retention deadline, never a token, envelope or key.
+Replay cannot extend authorization or return a superseded grant; crypto runs
+outside row-lock transactions. J1 section 5.4 specifies the lifecycle. This is
+planned schema, not an applied migration. Only the user applies the reviewed
+SQL migration at the ordered manual database step. No ExecutionReport or
+installation/device-limit implementation is required for Runtime Phase J.
+
 ## 6. Execution Report
 
 ### Trách nhiệm

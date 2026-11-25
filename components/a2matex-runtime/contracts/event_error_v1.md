@@ -4,6 +4,12 @@
 
 **Phase:** A6 — Event and error schemas
 
+**Planned Product extension:** [J1](../j_protected_execution/j1_production_contracts.md#8-production-projections-events-and-existing-api-compatibility)
+defines summary-only Product snapshots/events, cross-family privacy fences,
+two additional persisted authorization event types and their Product-only SSE
+projection. These are implemented in J11/J13, not delivered by this document
+change. The existing Development stream retains its four event types.
+
 ## 1. Purpose
 
 A6 defines durable notifications for committed A5 state changes and one safe
@@ -166,8 +172,13 @@ Validation diagnostics remain the bounded C1/A7 diagnostic list;
 `VALIDATION_FAILED` is only its top-level error code. Cancellation normally
 uses the A5 `CANCELLED` state and is not an error.
 
-Connector, observation, OCR, selector, Production authorization, license, and
-other deferred feature codes are not reserved in v1.
+Connector, observation, OCR, selector, license and other deferred feature codes
+are not reserved in v1. The separately planned J1 Product extension reserves
+`IDEMPOTENCY_CONFLICT`, `AUTHORIZATION_SESSION_UNAVAILABLE`,
+`AUTHORIZATION_EXPIRED` and `AUTHORIZATION_INVALID` with the exact HTTP/retry
+semantics in [J1 section 9](../j_protected_execution/j1_production_contracts.md#9-runtime-failures-retry-and-lifecycle-response-semantics).
+These are not implemented codes in the current Runtime. Product projections
+must never expose internal NodeAttempt errors through a Development route.
 
 The four API transport codes are produced only by the A7 boundary before or
 while resolving a request. They do not become execution events or persisted

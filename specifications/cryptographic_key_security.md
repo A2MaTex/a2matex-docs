@@ -17,7 +17,7 @@ flowchart LR
     B[Product Release builder]
     KS[Key Service]
     PR[(ProductRelease<br/>wrappedKey + keyNonce)]
-    R2[Private R2<br/>product.a2m]
+    R2[Private R2<br/>encrypted .a2m package]
     API[Execution Authorization]
     LA[Launcher]
     RT[Runtime]
@@ -36,8 +36,19 @@ flowchart LR
 ```
 
 The Product package remains encrypted in R2, during Launcher transport, and on Launcher disk.
+The R2 object key is independent of the server's `Static.originalFileName`.
+Launcher preserves that filename under `<productId>/<installedReleaseId>/` in
+its selected directory. The local directory header/reference are location only;
+authorization still binds the verified Product/Release/hash and Runtime session.
 Backend unwraps the Release content key only inside Key Service; Runtime receives that key only in
 an envelope encrypted for its ephemeral session public key.
+
+The exact session key size, SPKI/Base64/hex encodings, OAEP parameters, compact
+JWS signing bytes, timestamp units and Product API disclosure are fixed by
+[Runtime J1](../components/a2matex-runtime/j_protected_execution/j1_production_contracts.md).
+They remain planned implementation. In the current Backend, conceptual
+`keyNonce` maps to `contentKeyNonce`; workflow `nonce` is a different field.
+Do not rename existing columns or substitute one nonce for the other.
 
 ## 1. Product cryptographic material
 

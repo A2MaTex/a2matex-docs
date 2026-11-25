@@ -2,6 +2,13 @@
 
 ## 1. Overview and scope
 
+The exact Production wire/lifecycle agreement is now
+[J1 — Production contracts](../components/a2matex-runtime/j_protected_execution/j1_production_contracts.md).
+Its APIs, encodings, family/retry rules and public projections are specified but
+not implemented by this documentation change. Follow the separate Runtime,
+Backend, Launcher and manual tasks in
+[phase_j_implementation.md](../phase_j_implementation.md); Runtime uses J1–J16.
+
 This contract defines how an entitled customer runs an encrypted Product
 Release through Launcher and Runtime without giving Launcher the plaintext
 workflow key.
@@ -34,12 +41,15 @@ sequenceDiagram
     Launcher->>Backend: Request package download
     Backend->>DB: Verify Entitlement and ProductRelease
     Backend-->>Launcher: Presigned URL + packageHash
-    Launcher->>R2: Download product.a2m
+    Launcher->>R2: Download server-named .a2m package
     Launcher->>Launcher: Verify packageHash
 
-    Launcher->>Runtime: Start with encrypted package
+    Launcher->>Runtime: Read verified public input schema (J4)
+    Runtime-->>Launcher: Package identity and public input schema
+    Launcher->>Launcher: Collect inputs and device selection
+    Launcher->>Runtime: Prepare authorization session after user confirms Run (J10)
     Runtime->>Runtime: Generate ephemeral RSA key pair
-    Runtime-->>Launcher: Session ID + public key + thumbprint
+    Runtime-->>Launcher: executionId + session ID + public key + thumbprint
     Launcher->>Backend: Request execution authorization
 
     Backend->>DB: Recheck Entitlement and ProductRelease
@@ -49,7 +59,7 @@ sequenceDiagram
     Backend->>Backend: Wrap K with Runtime public key
     Backend->>Backend: Sign execution lease
     Backend-->>Launcher: Lease + encrypted key envelope
-    Launcher-->>Runtime: Forward unchanged
+    Launcher-->>Runtime: J11 start with authorization, inputs and selected devices
 
     Runtime->>Runtime: Verify lease and envelope bindings
     Runtime->>Runtime: Decrypt K with ephemeral private key
@@ -105,20 +115,34 @@ For every immutable Product Release, Backend:
 
 1. loads the approved immutable Workflow Revision Runtime IR;
 2. asks Key Service to unwrap the Release's random 256-bit content key using the ProductRelease ID,
-   `wrappedKey`, and `keyNonce`;
+   `wrappedKey`, and the key-wrapping nonce (called `contentKeyNonce` in the current Backend);
 3. encrypts Runtime IR with AES-256-GCM and stores required nonce/tag metadata;
-4. builds the immutable standard ZIP package using the `product.a2m` filename and calculates its
+4. builds the immutable standard ZIP package, records the download filename
+   `<buildSnapshotSlug>-<releaseVersion>.a2m` in `Static.originalFileName`, and calculates its
    package hash;
-5. stores only protected `wrappedKey` and non-secret `keyNonce` on ProductRelease;
+5. keeps protected `wrappedKey` and its non-secret wrapping nonce on ProductRelease;
+   the existing Backend workflow `nonce` is distinct from `contentKeyNonce`;
 6. uploads the encrypted package to object storage.
 
 Launcher downloads the encrypted package after entitlement-based download
-authorization and verifies `packageHash`. The package remains encrypted on
-disk.
+authorization and verifies `packageHash`. The planned customer download response
+includes `fileName` from `Static.originalFileName`; Launcher preserves that name.
+R2 still uses its private UUID-sharded object key. Launcher installs under its
+selected root as `<productId>/<installedReleaseId>/<productSlug>-<releaseVersion>.a2m`.
+The default root is the OS Documents folder plus `A2MaTeX/launcher/product-packages`;
+Launcher may offer a different user-selected directory. The package remains encrypted on disk.
+
+For the MVP, Launcher selects one installed Release per Product through its local
+installation record, compares its ID with Backend's selected current Release,
+and downloads/verifies a replacement before switching. Do not update/move/delete
+a package used by a preparing session or active/paused run. After activation,
+delete the old Release folder; no permanent local multi-version cache is required.
+Backend Release history and retained Runtime execution records are independent
+of that local file cleanup.
 
 ## 4. Initial Product Run
 
-The initial run follows the overview sequence. Launcher transports the encrypted package and
+The initial run follows the overview sequence and exact J1 DTOs. Launcher transports the encrypted package and
 authorization material, while Runtime owns the ephemeral private key, authenticated decryption, and
 execution admission.
 
@@ -141,14 +165,24 @@ Runtime admits the run only after it verifies:
 - Runtime session ID and public-key thumbprint;
 - key-envelope algorithm and binding;
 - package integrity and Runtime compatibility;
-- decrypted Runtime IR hash and graph validity.
+- authenticated decrypted IR and graph validity; record its canonical hash for
+  same-package live reauthorization, as defined in J1.
 
-Launcher identifies the downloaded package through a Runtime-constrained
-package reference. The reference may be a package ID or a relative folder/file
-name below the Runtime-owned package root; Production APIs must not accept an
-arbitrary absolute path, traversal segment, symlink escape, or URL. The Runtime
-resolves and verifies the package before returning authorization-session
-material.
+Launcher sends the selected absolute root in `X-A2MaTeX-Package-Directory`,
+percent-encoding its UTF-8 bytes as specified by J1. In the JSON body,
+`packageRef` is `<productId>/<installedReleaseId>/<productSlug>-<releaseVersion>.a2m`;
+`installedReleaseId` equals the body's `releaseId`. Supply the expected Product/
+Release/hash and preserved filename from authenticated Backend download metadata.
+The header is required for schema, preparation, initial start and fresh-session
+reauthorization acceptance. Preparation freezes the normalized root and selection;
+start/reauthorization must match them. Other Product calls may carry it without
+reopening packages or changing session identity. Never send this local header to
+Backend/R2. Reject malformed/repeated directory headers, unsafe relative paths,
+traversal, symlink/reparse escapes, URLs or an unverified replacement file. The
+user-selected absolute root is allowed; absolute paths inside `packageRef` are not. J4 exposes only the
+verified public input schema and package identity, without decryption, Backend
+communication or authorization-session creation. J10 preparation generates
+executionId before authorization; the admitted RunGroup ID equals executionId.
 
 After successful authorization and decryption, Runtime retains the validated
 plaintext Runtime IR and required input schema only in memory for the active
@@ -157,8 +191,18 @@ node. It must never persist or return plaintext workflow content or the content
 key. Failed authorization or admission, terminal completion, cancellation,
 shutdown, and hard authorization expiry release the plaintext and key material;
 resume after hard expiry decrypts again under a new authorization session.
+The protected definition/key buffers are distinct from sensitive live execution
+state (customer inputs, variables, confirmed outputs and retry position), which
+must remain in RAM for live resume and be released at terminal/owner end. No new
+variable/input persistence or restart-resume capability is introduced.
 
 ### Production validation disclosure
+
+J1 gives Product runs separate public snapshot/control/event routes. Existing
+Development read/history/artifact/event surfaces must not disclose Product
+internals, including after restart. The Product MVP is summary-only: customer
+node history and capture export are not introduced. Its schema-only API is an
+intentional public-schema response, not permission to expose IR diagnostics.
 
 G1 may create detailed internal findings while validating the decrypted Runtime
 IR, but the Production customer response exposes only the generic A6
@@ -182,7 +226,8 @@ The lease is a compact signed token with these required claims:
 | ------------------------ | ---------------------------------------------------------------- |
 | `leaseId`                | Unique issued-token ID; also used for replay/idempotency checks  |
 | `leaseFamilyId`          | Stable ID across successful renewals of one active authorization |
-| `sequence`               | Strictly increasing renewal number, beginning at `1`             |
+| `sequence`               | Strictly increasing grant number, beginning at `1`; advances on renewal and fresh-session reauthorization |
+| `executionId`            | Runtime-prepared identity, equal to the eventual RunGroup ID |
 | `entitlementId`          | Entitlement used for the decision                                |
 | `customerId`             | Authorized customer                                              |
 | `productId`              | Authorized Product                                               |
@@ -194,23 +239,24 @@ The lease is a compact signed token with these required claims:
 | `refreshAfter`           | Time at which Launcher should begin renewal                      |
 | `expiresAt`              | Hard authorization deadline                                      |
 
-The protected signature header includes the token type, `EdDSA`, and Backend
-signing-key ID. Runtime trusts only configured active Backend verification keys.
-Signing-key rotation must overlap long enough to verify every unexpired lease.
-
-The time invariant is:
+J1 fixes compact JWS using Ed25519, unpadded base64url, the exact protected
+header `{alg:"EdDSA", kid:<configured ID>, typ:"a2matex-execution-lease+jws"}`
+and a closed claim set. Signed timestamps are integer Unix seconds; HTTP
+projections are UTC RFC 3339 millisecond strings. The time invariant is:
 
 ```text
 issuedAt <= notBefore < refreshAfter < expiresAt
 ```
 
-Backend owns lease duration and renewal-window configuration. Five minutes
-before expiry is an example, not a Runtime constant.
+Backend owns duration/renewal configuration and caps finite grants at entitlement
+expiry. J1's defaults are 1,800 seconds with a 600-second scheduled renewal lead;
+early renewal for attempt budget is permitted. Signing keys are independent of
+login JWTs, and verification keys overlap the grants/receipts they serve.
 
-The authorization response also returns `serverTime`. Runtime validates signed
-timestamps with a small configured clock-skew allowance, then derives local
-renewal and expiry deadlines from a monotonic clock so later wall-clock changes
-do not silently extend authorization.
+`serverTime` is returned for diagnostics but cannot extend a signed deadline.
+Runtime anchors effective UTC to startup plus monotonic elapsed time, converts
+accepted deadlines once, applies at most 30 seconds to future-time checks and
+adds no expiry grace. Wall-clock changes or replay cannot extend authorization.
 
 ## 6. Key envelope
 
@@ -221,10 +267,14 @@ The envelope contains:
   "releaseId": "product-release-id",
   "algorithm": "RSA-OAEP-SHA256",
   "runtimeSessionId": "runtime-session-id",
-  "runtimeKeyThumbprint": "sha256:...",
+  "runtimeKeyThumbprint": "<64-character lowercase SHA-256 hex>",
   "encryptedKey": "base64..."
 }
 ```
+
+J1 fixes RSA at 3,072 bits/exponent 65,537, canonical padded Base64 DER SPKI,
+SHA-256 SPKI thumbprints, OAEP SHA-256/MGF1 SHA-256 with an empty label, and
+exactly 384 encrypted bytes wrapping a 32-byte content key.
 
 Backend transiently obtains the content key through the key service and wraps
 it with the supplied Runtime public key. Launcher transports the envelope but
@@ -238,6 +288,10 @@ attestation and TPM-backed keys are deferred hardening.
 ## 7. Renewal and retry
 
 Launcher owns Backend communication because it owns the customer login session.
+The family/receipt model and Backend/Runtime renewal DTOs are fixed by J1. One
+family retains one unique executionId. Request receipts retain safe decision
+metadata, not signed tokens/envelopes. Changed request content conflicts;
+retries do not advance deadlines or sequence again.
 Runtime owns the authoritative local deadline and enforcement.
 
 ```mermaid
@@ -261,7 +315,8 @@ stateDiagram-v2
     Cancelled --> [*]
 ```
 
-At `refreshAfter`, Runtime emits `AUTHORIZATION_RENEWAL_REQUIRED`. Launcher
+At `refreshAfter` or an insufficient next-attempt budget, Runtime emits
+`AUTHORIZATION_RENEWAL_REQUIRED` on J13's Product-only stream. Launcher
 requests renewal while the old lease remains valid. A successful renewal must:
 
 - keep the same lease family, customer, entitlement, Product, Release, package,
@@ -289,9 +344,11 @@ at the next start. Lease enforcement remains active throughout shutdown.
 
 ## 8. Hard expiry and resume
 
-A valid lease is required before Runtime starts a node attempt. Runtime must
-not start an attempt when its declared timeout plus a safety margin exceeds the
-remaining lease duration.
+A valid lease is required before BeginAttempt and after retry delay/Resume.
+Runtime must not start an attempt when its declared timeout plus J1's 2,000 ms
+safety margin exceeds remaining lease time. Park and request renewal without
+consuming an attempt or dispatching; do not shorten the declared node timeout.
+Ordinary Resume does not bypass authorization expiry.
 
 At hard expiry Runtime:
 
@@ -311,7 +368,8 @@ Resume after hard expiry is a new authorization session:
 
 1. Runtime generates a new session key pair;
 2. Launcher requests a new lease and new key envelope;
-3. Runtime verifies the new authorization and decrypts the same package again;
+3. Backend advances the same lease family/sequence and rotates its session/key
+   binding; Runtime verifies it and decrypts the same package again;
 4. Runtime verifies the package/IR hashes against the paused run;
 5. Runtime resumes after the last confirmed checkpoint.
 
@@ -328,21 +386,13 @@ when their outcome is ambiguous.
 | Launcher  | Customer authentication, package download, authorization/renewal requests, and forwarding responses to Runtime                          |
 | Runtime   | Session key generation, signature/envelope verification, in-memory decryption, deadline enforcement, cleanup, checkpoint, and execution |
 
-Production endpoints are an I2 contract and do not alter Studio authoring API
-v1.
-They coexist with the Studio validation endpoint and never send an encrypted
-package to C5. The Production API must cover:
-The Production API must cover:
-
-- prepare Runtime authorization session;
-- start a protected Product Run;
-- submit a renewed lease;
-- reauthorize a run paused by expiry;
-- expose authorization state and renewal-required events.
-
-Exact request/response schemas and error codes must be approved before I2
-implementation. That later transport contract must preserve the generic-only
-validation disclosure rule above.
+Production transport is defined by Runtime J1 and implemented by J4/J10–J14.
+It does not alter Studio authoring DTOs or send encrypted packages to C5.
+The planned Runtime operations are schema read, session prepare, protected
+start/read/actions, renewal, authorization state/Product SSE and fresh-session
+reauthorization. J1 specifies exact paths/DTOs/errors, closed signed bytes,
+idempotency, migration requirements and shared vectors. Native integration
+instructions describe only the actually verified build as those phases land.
 
 ## 10. Acceptance rules
 

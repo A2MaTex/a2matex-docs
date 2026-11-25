@@ -21,7 +21,7 @@ Studio native process
 
 The first API is a Development-mode API. Launcher Production package,
 authorization, license, and protected-workflow endpoints are added only with
-I2 under
+Phase J under
 [Production Execution Authorization v1](../../../specifications/production_execution_authorization_v1.md).
 A successful API response never replaces G1 execution admission.
 
@@ -79,6 +79,24 @@ OS-specific application-data directory is selected by B2/B5; it is not placed
 inside a project or workflow directory.
 
 ## 3. Endpoint set
+
+The separately planned [J1 Production API family](../j_protected_execution/j1_production_contracts.md#4-runtime-production-endpoint-inventory)
+adds public package-schema inspection, authorization-session preparation and
+protected Product runs. It is not implemented by this contract update. Its
+exact routes/DTOs, Backend response differences and safe Product projections
+are defined in J1; Development request/response shapes below remain unchanged.
+J1's planned package calls use `X-A2MaTeX-Package-Directory` for a percent-encoded
+absolute Launcher-selected root and JSON `packageRef` for
+`<productId>/<installedReleaseId>/<productSlug>-<releaseVersion>.a2m`.
+The filename is preserved from Backend download metadata. See
+[J1 package location and replacement rules](../j_protected_execution/j1_production_contracts.md#3-installed-package-identity-and-public-schema)
+for required-header operations, Windows/Linux encoding, containment, frozen
+session roots and single-installed-Release updates. This adds no filesystem
+header requirement to existing Development APIs.
+Runtime J11 must fence Product data from Development reads/actions/history/
+artifacts and filter it from `/events` before enabling protected starts.
+J13 supplies `/product-events` using the existing I3/I4 machinery and global
+cursor, not another broker. The accepted API families coexist without a mode flag.
 
 The Development MVP exposes exactly:
 
@@ -576,7 +594,11 @@ data: {"cursor":"42","type":"NODE_ATTEMPT_STATE_CHANGED","occurredAt":"2026-10-2
 - SSE responses disable intermediary buffering and compression and use
   `Cache-Control: no-store`.
 
-The stream is Runtime-wide and unfiltered. The client filters using event
+The implemented Development stream is Runtime-wide and unfiltered among
+Development executions. Before Product execution is enabled, J11 filters all
+Product rows from this surface and J13 adds the separate safe `/product-events`
+projection defined by J1. Filtering preserves global cursor gaps and existing
+replay/heartbeat behavior. The client filters delivered Development events using event
 correlation fields. A7 does not add per-device cursors, log messages, command
 events, or artifact events.
 

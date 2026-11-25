@@ -40,6 +40,11 @@ so future edits to the example cannot invalidate the manifest.
 
 ## 3. Canonical package
 
+J1's separate [Production protocol fixture set](../j_protected_execution/fixtures/v1/README.md)
+pins signed lease, envelope, ZIP and API examples for future Product consumers.
+It does not mutate or renumber the accepted A8 sets below, and its generation
+self-check is not proof of consumer/backend-service conformance.
+
 The canonical package is:
 
 ```text

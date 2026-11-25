@@ -44,10 +44,12 @@ flowchart TD
         VG -->|Yes| CR[Claim one Release idempotently]
         CL -->|invalid or permanent failure| BF[ProductRelease BUILD_FAILED]
         CR --> B[Package stored Runtime IR without recompiling<br/>encrypt workflow + hash package]
-        B --> U[Reserve Static metadata<br/>and upload one private object]
+        B --> U[Reserve attempt-specific Static metadata<br/>and upload its private object]
         U --> FT{Finalize publication transaction}
-        FT -->|failure before commit| CO[Best-effort delete uploaded object]
-        CO --> BF
+        FT -->|not published or uncertain| CO[Lock Release and check candidate ownership]
+        CO -->|winner already published| PUB
+        CO -->|own unpublished candidate| BF
+        CO -->|superseded candidate| CL
         BF -->|retryable Kafka attempt| CL
         BF -->|permanent or retries exhausted| DLQ[Dead-letter topic]
         FT -->|success| PUB[ProductRelease PUBLISHED]
@@ -150,8 +152,8 @@ When approved, this specification supersedes the draft ProductRelease section in
 - An approved build source must have non-null finalized `WorkflowRevision.runtimeIr` and
   `WorkflowRevision.contentHash`. Product Release never compiles or repairs workflow content.
 - Product and Publisher mutable eligibility are checked before building and again before publishing.
-- The package is a standard ZIP named `product.a2m`; `.a2m` is the product-package extension, not a
-  custom archive codec.
+- The package is a standard ZIP downloaded as `<buildSnapshotSlug>-<releaseVersion>.a2m`;
+  `.a2m` is the product-package extension, not a custom archive codec. Static owns this filename.
 - The ZIP contains exactly `manifest.json`, `workflow.enc`, and `input-schema.json` in the asset-free
   MVP.
 - The final package has one Static record and one private R2 object.
@@ -210,7 +212,8 @@ Field responsibilities:
 - `submissionId` is the idempotency and immutable-source identity.
 - `version` is copied from immutable `Submission.releaseRequest` for uniqueness and frequent reads.
 - `packageStaticId` is null until artifact reservation. While the Release is `BUILDING`, it may point
-  to the one private reserved Static object; it is required for publication.
+  to the current attempt's private Static object and fences older attempts. It is required for
+  publication and becomes immutable with the published package hash/key.
 - `packageHash` is lowercase SHA-256 of the exact final ZIP bytes; it is required for publication.
 - `wrappedKey` is the Release's 32-byte content key protected by `MASTER_KEY`; it is exactly 48
   bytes (`ciphertext || 16-byte tag`) and is required before package encryption and publication.
@@ -347,7 +350,8 @@ The consumer performs one short transaction:
 7. Load ProductRelease by `submissionId`.
 8. If absent, reserve `(productId, version)` and insert `BUILDING` using the reviewer as
    `createdById`.
-9. If `BUILD_FAILED`, clear `buildFailureCode` and transition to `BUILDING`.
+9. If `BUILD_FAILED`, reuse the Release identity. Clear its failure and transition to `BUILDING`
+   only when this attempt reserves its fresh Static candidate under the Release row lock.
 10. If `PUBLISHED` or `DISABLED`, return success without rebuilding.
 11. Commit before encryption, ZIP creation, or R2 I/O.
 
@@ -370,11 +374,13 @@ schemas before serialization. Parsing protects the builder; it is not another bu
 
 ### 5.3 Handler result
 
-- Permanently invalid message/business input persists `BUILD_FAILED` when a Release exists and
-  returns `FAILED`.
+- Permanently invalid message/business input returns `FAILED`. An attempt may persist
+  `BUILD_FAILED` only while it owns the unpublished `packageStaticId`; no unowned failure write.
 - Missing passed-scan/finalized-revision prerequisites return `FAILED` without starting package or
-  storage work. If a Release already exists, retain a stable broken-invariant failure code.
-- Database, Key Service, or R2 transient failure persists a stable code and returns `RETRY`.
+  storage work. A pre-candidate failure leaves any existing Release/candidate untouched.
+- Transient failure returns `RETRY`; owned candidate cleanup records a stable failure code.
+  If cleanup confirms an already published Release, return `SUCCESS` instead. A superseded attempt
+  returns `RETRY` while no publication is confirmed, without changing the newer owner.
 - Successful publication or an already terminal Release returns `SUCCESS`.
 - Existing queue configuration controls bounded attempts and DLQ forwarding. No outbox or generic
   job table is introduced.
@@ -400,7 +406,7 @@ Runtime IR. Mutable Product authoring fields and Product Offers are not package 
 ### 6.2 Exact package layout
 
 ```text
-product.a2m
+<buildSnapshotSlug>-<releaseVersion>.a2m
 ├── manifest.json
 ├── workflow.enc
 └── input-schema.json
@@ -554,7 +560,7 @@ requirement after decryption. The MVP therefore accepts that an understated rele
 Launcher download a package that Runtime then rejects; this is an explicit version-contract
 limitation, not Product Release build logic.
 
-### 6.8 Assemble `product.a2m`
+### 6.8 Assemble the `.a2m` package
 
 1. Open a standard ZIP writer over one bounded output buffer or temporary file.
 2. Add exactly these regular-file entries in this order:
@@ -585,8 +591,11 @@ entries, and decompression/size-limit violations before parsing any file.
 
 ## 7. Static and private R2 storage
 
-One Release reserves one final Static record before upload. It reuses the existing Static UUID-based,
-sharded object-key generator rather than introducing a Product/Release-specific object-key layout:
+One published Release has one final Static/R2 object. Each overlapping or retried
+build reserves a **fresh** Static UUID and sharded object key before its upload.
+While unpublished, `packageStaticId` identifies the latest reservation, not a
+shared overwrite target. A new reservation supersedes older attempts without
+reusing their bytes, key or metadata. No new attempt table or migration is required.
 
 ```text
 Static
@@ -599,32 +608,67 @@ Static
 
 `PRODUCT_RELEASE_STATIC_PREFIX` is a shared constant. The R2 object key does not need an `.a2m`
 suffix; `originalFileName` and `contentType` preserve the download filename and media type.
+The planned customer-download response includes that exact name as `fileName`.
+Launcher preserves it under `<productId>/<installedReleaseId>/` inside its selected
+package directory; this local layout does not change R2 keys or archive contents.
+See [Runtime J1](../../a2matex-runtime/j_protected_execution/j1_production_contracts.md#3-installed-package-identity-and-public-schema)
+for the planned directory header, portable filename validation and local replacement policy.
 
 Artifact flow:
 
-1. Finish `packageBytes` and calculate its exact size before reservation.
-2. Start one short reservation transaction and lock the `BUILDING` ProductRelease.
-3. If `packageStaticId` is null, generate a Static UUID, generate its sharded object key with the
-   existing helper, create the private Static metadata, and set `ProductRelease.packageStaticId`.
-4. If `packageStaticId` is already present, load that Static record and reuse its object key; do not
-   allocate another Static record.
-5. Ensure the reserved Static filename, content type, and size match the package being uploaded,
-   updating only pre-publication metadata when a rebuilt unpublished package has a different size.
-6. Commit before R2 I/O.
-7. Upload the exact `packageBytes` to the reserved private object key.
-8. Verify the uploaded object metadata outside the publication transaction.
-9. Run the publication transaction and set `packageHash`, status, publication timestamp, and the
-   eligible Product current pointer.
+1. Finish `packageBytes` and calculate its hash and exact size before reservation.
+2. Lock the Release in a short reservation transaction. Return without uploading
+   if it is already `PUBLISHED` or `DISABLED`.
+3. Create a fresh Static record with the immutable candidate filename/type/size,
+   assign its ID to `packageStaticId`, set `BUILDING` and clear the old failure code.
+4. Commit before R2 I/O. Never overwrite, update or delete a prior candidate here;
+   its worker might still be uploading.
+5. Upload the exact bytes once to this candidate's private object key and verify
+   uploaded size/content type outside the database transaction.
+6. In the short Product-first publication transaction, require both `BUILDING`
+   and the same `packageStaticId`. Publish this candidate's hash, wrapped key,
+   workflow/wrapping nonces and Static reference together. Do not mutate Product
+   status or current-Release selection.
+7. A mismatching candidate is superseded, not allowed to publish or fail the new
+   owner. If another attempt has published, treat the Release as completed.
 
-No public/Publisher response exposes Static ID, object key, or private URL. Download Authorization
-later resolves `packageStaticId -> Static.objectKey` after Entitlement checks.
+### 7.1 Failure, late completion and cleanup
 
-If upload succeeds but `PUBLISHED` does not commit, best-effort delete the object before returning
-`RETRY` or `FAILED`. A retry keeps the reserved Static record and reuses its existing UUID-sharded
-object key. Cleanup failure leaves a private object that the next retry overwrites. On permanent
-failure, internal cleanup deletes the unreferenced object, clears `packageStaticId`, and removes the
-unused Static metadata; this is failed-artifact cleanup, not the development-only public Static
-deletion endpoint. Redelivery after committed `PUBLISHED` never deletes the object or Static record.
+Cleanup locks the Release and rechecks committed state. If this exact candidate
+is published or has a non-null `publishedAt` (including a subsequently disabled
+Release), preserve its Static row, object, hash and key, including after an
+uncertain publication response. Otherwise, clear the Release pointer only when
+it still equals this candidate and the Release is not `PUBLISHED` and has never been published. Only an owned
+`BUILDING` Release changes to `BUILD_FAILED`; preserve `DISABLED` and never
+change another candidate's state. Delete only this attempt's unused Static row
+inside that transaction, then delete only its object after confirmed commit.
+
+If the database cleanup/commit cannot be confirmed, retain the object and log
+cleanup deferral. A best-effort object deletion failure can leave a private orphan;
+a retry always uses a new key and does not overwrite the orphan. A process crash
+before cleanup can also leave a superseded candidate. Automatic orphan collection
+is deferred: operators must establish that no worker is still using a candidate
+before removing it. Never delete a published object's metadata to hide a failure.
+No public/Publisher response exposes an R2 object key or private storage URL.
+
+For duplicate first creation, handle the unique `submissionId` conflict by
+reloading that same Submission's Release. A conflict from a different Submission
+using the same Product/version is not permission to adopt its Release.
+
+### 7.2 Step 2 implementation and rollout
+
+The Backend build service and shared Release repository implement these guards.
+The shared Static helper's reservation/upload/delete mechanics are reused; no
+new dependency, schema migration, queue or endpoint is added. Deploy after
+draining/stopping older build workers: their old shared-object reuse policy must
+not run concurrently with the new implementation.
+
+See the [manual concurrency guide](../../../../a2matex-be/docs/product-release-build-concurrency.md)
+for a deterministic late-upload/late-failure exercise, read-only database checks
+and actual R2 download verification. Existing source tests are reused by request;
+no new race test, fixture generator or demo program is added. Real PostgreSQL/R2
+race acceptance and the actual Backend-generated package fixture remain pending
+until that guide is executed; protocol-only J1 vectors are not that evidence.
 
 ## 8. Publication transaction
 
@@ -835,8 +879,8 @@ updated rows.
   activation separately uses Product, current ProductRelease, then ProductOffer.
 - Different Products build and mutate independently.
 - Duplicate delivery after `PUBLISHED`/`DISABLED` returns success.
-- Failed retry reuses Release ID and R2 key; unpublished package bytes/hash may change because a fresh
-  nonce is allowed.
+- Failed retry reuses the Release ID but reserves a new Static/R2 key and new encryption material.
+  Only the latest reserved candidate may publish; stale failure/cleanup cannot mutate the winner.
 - Existing current Release remains usable during update build and after the new Release publishes,
   until an authorized caller explicitly selects the new Release.
 
@@ -847,15 +891,15 @@ updated rows.
 | Condition                                 | Stored result                                                     | Handler result           |
 | ----------------------------------------- | ----------------------------------------------------------------- | ------------------------ |
 | Invalid payload                           | no mutation                                                       | FAILED                   |
-| Submission missing/not approved           | no Release or BUILD_FAILED                                        | FAILED                   |
-| Submission scan is not `PASSED`           | no Release or BUILD_FAILED                                        | FAILED                   |
-| Final Runtime IR or content hash missing  | no Release or BUILD_FAILED; no key/Static/R2 work                 | FAILED                   |
+| Submission missing/not approved           | no mutation                                        | FAILED                   |
+| Submission scan is not `PASSED`           | no mutation                                        | FAILED                   |
+| Final Runtime IR or content hash missing  | no mutation; no key/Static/R2 work                 | FAILED                   |
 | Product version conflict                  | no new Release                                                    | FAILED                   |
-| Product/Publisher not eligible            | BUILD_FAILED when row exists                                      | FAILED                   |
-| Package input schema parse fails          | BUILD_FAILED                                                      | FAILED                   |
-| Encryption/ZIP construction fails         | BUILD_FAILED                                                      | FAILED or RETRY by cause |
-| Database/Key Service/R2 transient failure | BUILD_FAILED; current unchanged                                   | RETRY                    |
-| R2 succeeds but publication fails         | clean object; retain reserved Static for retry; current unchanged | RETRY                    |
+| Product/Publisher not eligible            | only owned unpublished candidate may fail                                      | FAILED                   |
+| Package input schema parse fails          | pre-candidate failure: Release/candidate unchanged | RETRY in current builder |
+| Encryption/ZIP construction fails         | pre-candidate failure: Release/candidate unchanged | RETRY |
+| Database/Key Service/R2 transient failure | only owned BUILDING candidate may fail; unclaimed/other owner unchanged | RETRY unless publication confirmed |
+| R2 succeeds but publication fails         | ownership-checked candidate cleanup; preserve published winner; defer unsafe cleanup | RETRY unless publication confirmed |
 | Duplicate terminal delivery               | no mutation                                                       | SUCCESS                  |
 
 ### HTTP
@@ -896,7 +940,8 @@ updated rows.
 - Claim/publication transactions are short.
 - Current approximately 2 MiB limit permits bounded in-memory package construction; asset support
   must move to streaming/temp-file construction.
-- One reserved Static ID and UUID-sharded object key are reused across build retries.
+- One published Static ID remains final; attempts use separate UUID-sharded keys without
+  holding database locks during encryption/upload. Temporary failed candidates are cleaned best-effort.
 - History is paginated and indexed.
 - No Redis lock, outbox, or generic job table is added.
 
@@ -944,8 +989,9 @@ and `contentHash`; its package service accepts those stored values as immutable 
 - ProductRelease contains protected `wrappedKey` and wrapping `keyNonce`, but no plaintext key,
   workflow nonce, manifest, Runtime IR, input schema, capability, object-key, or duplicated
   release-request columns.
-- Product Release reserves one Static record before upload, uses the existing UUID-sharded key
-  generator, and reuses that reservation across retries.
+- Each attempt reserves a new Static ID/key before upload. Publication and cleanup match the
+  owning `packageStaticId`; a late attempt cannot overwrite bytes, clear the pointer, fail or
+  delete a published winner. Only one Static/object is referenced by the published Release.
 - Published Release has Static-backed private ZIP and immutable package hash.
 - Release publication never changes Product status, `currentReleaseId`, or Product audit fields.
 - Current-Release selection changes only the pointer and Product audit fields for an eligible

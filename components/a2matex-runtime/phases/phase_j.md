@@ -2,91 +2,96 @@
 
 ## Overview
 
-Phase J gives Launcher a protected Product Run path alongside Studio's
-Development API. Runtime reads an installed .a2m ZIP, verifies immutable package
-identity and Backend authorization, opens the session-bound key envelope,
-decrypts/validates Runtime IR in memory, and reuses the G/H engine.
-
-The installed encrypted package may remain on disk. Plaintext workflow and
-transient private/content keys are held only for their authorized lifetime;
-cleanup belongs to every owning step. Session preparation and protected start
-are separate APIs. J10 cannot expose execution before the authorization and
-hard-expiry gate is ready.
+Phase J adds a protected Product API family beside Studio's Development APIs.
+Launcher first reads an installed package's public input schema, then prepares
+an authorization session only after the customer confirms Run. Backend issues
+a signed lease and a session-encrypted key envelope. Runtime verifies them,
+decrypts in RAM, and reuses the existing G/H engine.
 
 ```mermaid
 flowchart TD
-    C[J1 approved Production transport/policy fixtures] --> P[J9 prepare API using J2-J4 package/session components]
-    L[Launcher native client] --> P
-    P --> B[Backend customer/Release authorization and wrapped key]
-    B --> A[J10 start API using J5-J8 lease/envelope/RAM loading/gate]
-    A -->|Verified| E[Existing G/H engine and checkpoints]
-    A -->|Rejected| F[Generic failure; no node dispatch; cleanup]
-    E --> R[J11 renewal and J12 state/signals]
-    E -->|Hard expiry| X[J8 checkpoint/pause and release protected memory]
-    X --> U[J13 fresh authorization and safe resume]
-    U --> A
-    R --> T[J14 real Backend and J15 Launcher acceptance]
+    C[J1 Production contracts and fixtures] --> P[J2-J3 package access and verification]
+    P --> S[J4 public input-schema API]
+    S --> F[Launcher renders the package-bound form]
+    F --> A[J5 sessions and J10 preparation API]
+    A --> B[Separate Backend authorization task]
+    B --> V[J6-J9 lease, envelope, RAM load and attempt gate]
+    V --> R[J11 protected start and safe Product projections]
+    V -->|Invalid| X[Safe failure, no node dispatch and cleanup]
+    R --> N[J12 renewal and J13 public state and events]
+    N -->|Hard expiry| E[Pause and release protected workflow and keys]
+    E --> U[J14 fresh-session reauthorization and live resume]
+    U --> R
+    N --> T[J15 Backend integration and J16 Launcher acceptance preparation]
+    T --> M[Separate manual Linux and Windows acceptance]
 ```
 
-**Status** — J1–J15 are planned. The current POST /runs is Development only.
-Exact Production paths/DTOs/error codes are not invented by this index; J1
-approves them before implementation. Backend and Launcher counterparts are
-explicit dependencies, not implied delivered features.
+**Status:** J1's [contract specification](../j_protected_execution/j1_production_contracts.md)
+and test-only protocol fixtures are delivered. J2–J16 code and acceptance remain
+planned. No Production endpoint or Backend lease issuer exists merely because
+J1 defines it. The current POST /runs remains Development-only.
 
-## Steps and specifications
+## One execution order and platform ownership
 
-| Step | One responsibility                         | Direct prerequisites                           | Observable checkout                                                                                                                     |
-| ---- | ------------------------------------------ | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| J1   | Production transport and policy contract   | Production authorization/key/package contracts | Approve session/start/renewal/status schemas, identity bindings, errors, disclosure, lifecycle signals, and cross-component fixtures.   |
-| J2   | Constrained package access and ZIP reading | J1, Backend package format                     | Resolve an approved installed .a2m reference and reject path escapes, invalid entries, and archive size/decompression violations.       |
-| J3   | Package identity and manifest verification | J2                                             | Detect modified package bytes, invalid manifests/hashes, and incompatible metadata before protected execution.                          |
-| J4   | Runtime authorization sessions             | J1/J3, B3/B5                                   | Generate ephemeral session keys/public metadata and bound pending-session lifetime, count, ownership, and cleanup.                      |
-| J5   | Execution-lease verification               | J1/J4, Backend signing fixtures                | Verify signatures, required claims, time bounds, session/public-key identity, and immutable package/release bindings without dispatch.  |
-| J6   | Key-envelope opening                       | J4–J5                                          | Open only the envelope bound to the accepted Runtime session/lease and retain no plaintext key outside its owned lifetime.              |
-| J7   | Protected workflow loading                 | J3/J6, G1                                      | Authenticate/decrypt in RAM, verify IR/schema consistency, validate exact IR, and return only approved Production disclosure.           |
-| J8   | Authorization attempt gate and hard expiry | J5/J7, H pause lifecycle                       | Prevent unauthorized attempt starts; checkpoint/pause safely at hard expiry and release protected plaintext/key material.               |
-| J9   | Production session-preparation API         | J1–J4                                          | Expose bounded package/session preparation with current local authentication and exact Launcher request/response examples.              |
-| J10  | Production start API                       | J5–J9, G12/H scheduler                         | Admit verified protected work through the existing engine/scheduler with correct replay, ownership, errors, and no plaintext transport. |
-| J11  | Lease renewal                              | J5/J8/J10, Backend renewal fixtures            | Accept valid advancing renewals without repeating workflow decryption or interrupting authorized execution.                             |
-| J12  | Authorization status and renewal signals   | J1/J4/J8/J11                                   | Expose approved state/renewal-required signals so Launcher can renew in time without exposing lease/key/plaintext material.             |
-| J13  | Reauthorization and resume                 | J4–J8/J10–J12, H11                             | Use a fresh authorization session after hard expiry and continue the same package from a confirmed checkpoint without action replay.    |
-| J14  | Backend authorization integration          | J1–J13; Backend owner                          | Verify a real entitled Release/package/key-envelope/lease round trip, renewal, denial, and session/package mismatch cases.              |
-| J15  | Launcher integration acceptance            | J14; Launcher owner                            | Run an installed product, renew, expire, reauthorize/resume, stop, and reopen its saved result using verified guides.                   |
+Follow [phase_j_implementation.md](../../../phase_j_implementation.md) **row by
+row**, including its intervening Backend, Launcher and manual tasks. The J
+numbers below belong only to Runtime; they are not cross-platform work packages.
+This J1–J16 index replaces the prior index. J4 is public schema reading;
+all new specifications and handoffs use the numbers below.
 
-## Security, lifetime, and integration gates
+| Step                                                      | Runtime responsibility                      | Ordered-plan step | Observable checkout                                                                                                                                                                                     |
+| --------------------------------------------------------- | ------------------------------------------- | ----------------: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [J1](../j_protected_execution/j1_production_contracts.md) | Production contracts                        |                 1 | Contract and protocol fixtures delivered; runtime implementation remains in later phases.                                                                                                               |
+| J2                                                        | Constrained package reading                 |                 5 | Planned. Read installed `.a2m` packages with bounded ZIP processing and safe package references.                                                                                                        |
+| J3                                                        | Manifest and package verification           |                 6 | Planned. Verify required entries, identities, hashes and compatibility.                                                                                                                                 |
+| J4                                                        | Package input-schema API                    |                 7 | Planned. Return the verified public input schema without authorization-session creation, decryption, run creation or ADB operations.                                                                    |
+| J5                                                        | Authorization sessions                      |                10 | Planned. Generate ephemeral keys, bind sessions to the package/owner and clean expired or abandoned sessions.                                                                                           |
+| J6                                                        | Lease verification                          |                14 | Planned. Verify signatures, trusted signing-key IDs, timestamps, package/session bindings and replay rules against Backend fixtures.                                                                    |
+| J7                                                        | Key-envelope opening                        |                16 | Planned. Validate envelope bindings and open it only with the matching Runtime session key.                                                                                                             |
+| J8                                                        | Protected workflow loading                  |                17 | Planned. Authenticate/decrypt in RAM, validate IR/schema consistency and clean protected material on failure.                                                                                           |
+| J9                                                        | Authorization gate and hard expiry          |                18 | Planned. Prevent unauthorized attempt starts; enforce remaining-time rules, safe checkpointing, expiry pause and protected-memory cleanup.                                                              |
+| J10                                                       | Session-preparation API                     |                19 | Planned. Expose the verified package/session preparation operation through the authenticated local API.                                                                                                 |
+| J11                                                       | Protected start API                         |                21 | Planned. Admit authorized packages through the existing engine. Implement start idempotency, Production provenance and protected-result disclosure across existing read APIs.                           |
+| J12                                                       | Renewal acceptance                          |                24 | Planned. Accept valid advancing renewals without repeated decryption or execution interruption.                                                                                                         |
+| J13                                                       | Authorization state and signals             |                25 | Planned. Expose approved renewal-required, active and expired state/signals without protected material.                                                                                                 |
+| J14                                                       | Reauthorization and resume                  |                29 | Planned. Create a fresh session, reload the same package and continue the live paused run after its confirmed checkpoint.                                                                               |
+| J15                                                       | Real Backend integration acceptance         |                32 | Planned. Run automated integration against real Backend-issued packages/authorization. Cover denial, tampering, mismatches, renewal, expiry and cleanup. Restore required missing regression harnesses. |
+| J16                                                       | Launcher integration acceptance preparation |                33 | Planned. Finalize verified Launcher integration guidance, Runtime-side acceptance support and Linux/Windows behavior checks.                                                                            |
 
-- Reuse the [package format](../../a2matex-backend/product_submission_release/product_release.md#6-zip-package-contract),
-  [Production authorization](../../../specifications/production_execution_authorization_v1.md),
-  and [key-security contract](../../../specifications/cryptographic_key_security.md).
-  J1 reconciles Runtime/Backend/Launcher transport, identity, disclosure,
-  expiry/recovery, and authorization-state/event extensions before coding.
-- J2/J3 use standard ZIP handling and bounded approved package references.
-  Runtime reads workflow.enc and verifies hashes/manifest/schema bindings;
-  an archive is never submitted to Studio authoring validation as a graph.
-- J4/J6/J7 implement cleanup with material creation/loading, including failed
-  admission, completion, cancellation, shutdown, pending-session expiry, and
-  hard authorization expiry. Do not postpone cleanup to J15 or promise secure
-  erasure beyond platform guarantees. No plaintext workflow/key persistence or
-  plaintext response to Launcher is allowed.
-- J8 enforces authorization at attempt boundaries and preserves the bounded
-  safe-result rule for already dispatched Android work. Hard expiry pauses with
-  the approved authorization state and drops protected execution material.
-  J13 uses a fresh session and verified package/checkpoint; it never replays an
-  uncertain side effect. Ordinary lease renewal reuses the active decrypted IR.
-- J9 may prepare a session without starting nodes. J10 is enabled only after
-  J5–J8 are verified. Fixture-based crypto tests are distinct from J14's actual
-  Backend round trip and J15's actual Launcher integration.
-- Backend owns entitlement/Release checks, signing, and wrapping. Launcher owns
-  download, customer authentication, authorization/renewal requests, forwarding,
-  and UI. Runtime owns verification, key lifetime, protected loading, deadlines,
-  execution, and safe cleanup. API families coexist without a global mode flag.
-  Local worker limits are resource bounds, not commercial device/lease limits.
+## Integration and security gates
+
+- J1 fixes exact [Product routes, types and policy](../j_protected_execution/j1_production_contracts.md#4-runtime-production-endpoint-inventory)
+  and matching Backend contracts. Separate Backend tasks implement immutable
+  package consistency, entitled download, lease persistence, issuance, envelopes
+  and renewal **before** their dependent Runtime/manual steps.
+- J2/J3 reuse the [three-entry package format](../../a2matex-backend/product_submission_release/product_release.md#6-zip-package-contract).
+  J4 exposes only its public schema and identity, without decryption or a lease.
+- J5/J7/J8 implement secret cleanup with material creation/opening/loading.
+  J9 enforces attempt budgets and hard expiry. J11 must not enable start before
+  J6–J9 and the Product privacy fences are implemented and verified.
+- J11 persists minimal provenance, not protected IR, keys, tokens or input maps.
+  Product snapshots/controls and J13 Product events have separate projections;
+  Development history/artifact/event APIs cannot bypass Product disclosure.
+  Reuse repositories/streaming/engine code, not a second database or broker.
+- Ordinary renewal reuses the active decrypted IR. J14 requires a fresh key,
+  advancing same-family authorization, the same package and confirmed live
+  checkpoint. It preserves live RAM execution state and never resumes old runs
+  after Runtime restart or blindly redispatches uncertain Android work.
+- Local session authentication, customer Backend authentication and signed
+  Product execution permission are distinct. There is no global mode flag,
+  commercial device ceiling or automatic hardware-based selection reduction.
+- Backend schema migrations are prepared/reviewed by the implementation task
+  and applied only by the user at the ordered manual database step.
 
 ## Completion and guides
 
-Update the [Launcher guide](../integration/launcher.md) and shared API reference
-with each delivered Production endpoint, including exact auth, request, success,
-denial, renewal, and lost-response behavior. J15 consolidates verified examples
-and end-to-end evidence; it does not begin guide writing. Include package/session
-mismatch, denial, expiry, renewal, reauthorization, owner shutdown, and restart.
-Only a real authorized installed product run completes the Production milestone.
+Update the [Launcher handoff](../integration/launcher.md) and shared API reference
+with each implemented endpoint, its exact requests/statuses/retry behavior and
+stated host evidence. J1 examples are contracts, not a runnable-build guide.
+J15 tests a real Backend exchange; J16 prepares final Launcher acceptance.
+The final manual row verifies the actual Launcher on Linux and Windows.
+Neither fixtures, cross-compilation nor documentation alone closes that gate.
+
+The shared business/security sources remain
+[Production authorization](../../../specifications/production_execution_authorization_v1.md)
+and [key security](../../../specifications/cryptographic_key_security.md).
