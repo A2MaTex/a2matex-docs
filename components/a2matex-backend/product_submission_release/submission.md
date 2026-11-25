@@ -26,10 +26,12 @@ flowchart LR
     H -->|one DB transaction| DB[(WorkflowRevision<br/>Submission with scanStatus QUEUED)]
     DB -->|commit first| K[Kafka topic<br/>submission.scan.requested]
     K --> W[Submission scan consumer]
-    W --> V{Validate and compile<br/>frozen snapshot}
-    V -->|passed + Runtime IR finalized| R[READY_FOR_REVIEW]
-    V -->|business findings: Admin only| R
-    V -->|technical failure| E[Scan ERROR + retry or DLQ]
+    W --> V{Validate frozen source}
+    V -->|FAILED_VALIDATION| R[READY_FOR_REVIEW]
+    V -->|valid| C{Compile validated workflow}
+    C -->|PASSED + Runtime IR finalized| R
+    C -->|FAILED_COMPILATION| R
+    W -->|technical failure| E[Scan ERROR + retry or DLQ]
     R -.->|deferred Review module| A[Admin decision]
     A -.->|deferred Release module| B[Build ProductRelease]
 ```
@@ -135,7 +137,7 @@ Owned by this module:
 
 ```text
 [create]       -> PENDING_SCAN
-PENDING_SCAN   -> READY_FOR_REVIEW   # automated scan completed, whether PASSED or FAILED
+PENDING_SCAN   -> READY_FOR_REVIEW   # automated scan completed, after success or a deterministic phase failure
 ```
 
 Owned by the Review module:
@@ -151,7 +153,8 @@ Publisher fixes mutable Product/Project Draft data after Admin feedback and crea
 Submission. The Review and Product Release specifications may read an approved Submission but must
 not rewrite its snapshots.
 
-A deterministic scan failure is not itself an Admin rejection. The scan becomes `FAILED`, its
+A deterministic scan failure requires an Admin decision. The scan becomes `FAILED_VALIDATION`
+or `FAILED_COMPILATION`, its
 findings remain Admin-only, and Submission becomes `READY_FOR_REVIEW` so an Admin can interpret the
 result and provide controlled feedback. A technical scan failure leaves Submission `PENDING_SCAN`
 and sets its internal scan status to `ERROR`, because no business result exists yet.
@@ -164,13 +167,14 @@ Submission after a previous approval.
 ### 3.2 Scan status
 
 ```text
-SubmissionScanStatus = QUEUED | RUNNING | PASSED | FAILED | ERROR
+SubmissionScanStatus = QUEUED | RUNNING | PASSED | FAILED_VALIDATION | FAILED_COMPILATION | ERROR
 ```
 
 - `QUEUED`: durable scan request exists but has not completed.
 - `RUNNING`: a consumer claimed the scan request.
 - `PASSED`: all required rules completed and no `ERROR` finding exists.
-- `FAILED`: rules completed and at least one deterministic `ERROR` finding exists.
+- `FAILED_VALIDATION`: validation produced error findings and IR generation was skipped.
+- `FAILED_COMPILATION`: validation passed, then compilation or compiled-output checks produced errors.
 - `ERROR`: infrastructure or unexpected scanner failure prevented a business result.
 
 Warnings do not fail a Submission. They remain visible to the Admin reviewer.
@@ -232,8 +236,9 @@ hash.
 unnecessary because the preceding record is the same `productId` with `number - 1`.
 
 The scan fields hold only the current automated scan. Technical retry history remains in structured
-logs. `scanResult` is populated only for a completed `PASSED` or `FAILED` business scan and is
-visible only through unrestricted Admin projections. `reviewedAt` and `reviewFeedback` are reserved
+logs. `scanResult` is populated for completed `PASSED`, `FAILED_VALIDATION`, or
+`FAILED_COMPILATION` scans and is visible only through unrestricted Admin projections.
+`reviewedAt` and `reviewFeedback` are reserved
 for the later Review module; `reviewFeedback` contains only Admin-authored content intentionally
 shown to the Publisher, never internal scan findings.
 
@@ -265,8 +270,9 @@ CREATE TYPE "SubmissionScanStatus" AS ENUM (
     'QUEUED',
     'RUNNING',
     'PASSED',
-    'FAILED',
-    'ERROR'
+    'ERROR',
+    'FAILED_VALIDATION',
+    'FAILED_COMPILATION'
 );
 
 CREATE TABLE "Submission" (
@@ -404,8 +410,12 @@ type SubmissionScanResultV1 = {
 Array order is the deterministic finding order; no `sortOrder` field is needed. The Backend enforces named maximum finding count, serialized result size, message length, and details size. The existing diagnostic limit of 100 is the initial finding-count limit. Findings must never contain complete node configuration, full Editor Graph, Runtime IR, tokens, or private URLs.
 
 `scanResult` is null for `QUEUED`, `RUNNING`, and technical `ERROR`. It is present for `PASSED` and
-business `FAILED`. Technical exception details stay in structured logs correlated by Submission ID,
-trace ID, and `scanAttempt`.
+business `FAILED_VALIDATION` or `FAILED_COMPILATION`. Technical exception
+details stay in structured logs correlated by Submission ID, trace ID, and `scanAttempt`.
+
+Scanner `0.4.0` counts evaluated checks in `totalRules` and checks without errors in `passed`.
+A full scan evaluates source integrity, snapshot integrity, assets, workflow validation, and
+compilation/finalization. Early returns include only evaluated checks.
 
 There is no `SubmissionScan`, `SubmissionScanFinding`, or `SubmissionReview` table in this module.
 The Review module writes the one terminal Admin decision into `Submission.status`,
@@ -453,22 +463,24 @@ The consumer owns all work whose result can be retried independently of Submissi
 2. Load Submission and compare the payload `scanAttempt` with its current counter.
 3. Return `SUCCESS` for a lower stale attempt, reject a higher impossible attempt to DLQ, and
    continue only when the values match.
-4. Return `SUCCESS` immediately if `scanStatus` is already `PASSED` or `FAILED`.
+4. Return `SUCCESS` for terminal `PASSED`, `FAILED_VALIDATION`, or `FAILED_COMPILATION` scans.
 5. Claim matching `QUEUED`, retryable `ERROR`, or redelivered `RUNNING` work by setting
    `scanStatus = RUNNING` in a short transaction.
 6. Load the frozen Workflow Revision source and Submission snapshots outside a database transaction.
-7. Run the existing Workflow Validation service against the frozen Editor Graph.
-8. When validation permits compilation, invoke the shared compiler with the frozen Editor Graph,
-   Input Schema, and Node Definition manifest, then strictly validate its Runtime IR output.
+7. Run source, snapshot, asset, and shared `WorkflowCompilerService.validateWorkflow()` checks
+   against frozen inputs. Validation errors return `FAILED_VALIDATION` before IR generation.
+8. Pass successful parsed inputs directly to `compileValidatedWorkflow()`, then check the generated
+   IR and final revision. Deterministic errors return `FAILED_COMPILATION`. Validation runs once.
 9. On successful compilation, conditionally write `runtimeIr` and final `contentHash` together only
    when both are null. A retry that finds both already finalized compares the canonical result and
    hash, then continues without overwriting them; a mismatch is a technical invariant error.
 10. Build one bounded `scanResult` object in memory. A deterministic validation or compilation
     failure is an Admin-only business finding and leaves the revision compilation fields null.
 11. If no `ERROR` finding exists, persist `scanStatus = PASSED` and `scanResult`.
-12. If an `ERROR` finding exists, persist `scanStatus = FAILED` and the Admin-only `scanResult`.
+12. Persist the scanner-returned `FAILED_VALIDATION` or `FAILED_COMPILATION` and Admin findings
+    when the corresponding phase returns content errors.
 13. For either completed business result, conditionally move Submission from `PENDING_SCAN` to
-    `READY_FOR_REVIEW` so an Admin—not the scanner—makes the review decision.
+    `READY_FOR_REVIEW` for an Admin review decision.
 14. Return `SUCCESS` for both completed business outcomes.
 
 For an unexpected database, catalog, or scanner failure, the handler records scan status `ERROR`
@@ -739,7 +751,8 @@ The route has no body. It is valid only when Submission is `PENDING_SCAN` and `s
   `scannerVersion` and `scanResult`, sets `scanStatus = QUEUED`, records the Admin in `updatedById`,
   commits, and publishes the new attempt.
 
-`RUNNING` returns a conflict. `PASSED` or `FAILED` is already a completed business result and cannot
+`RUNNING` returns a conflict. `PASSED`, `FAILED_VALIDATION`, and `FAILED_COMPILATION` are completed
+business results and cannot
 be retried. A Publisher cannot call or infer this operational recovery route. Admin uses scan
 findings when deciding whether to approve, reject, or request Publisher changes.
 
@@ -889,7 +902,7 @@ retryDelayMs: named module constant
 
 The consumer returns:
 
-- `SUCCESS` for an already completed scan, `PASSED`, or deterministic `FAILED` result;
+- `SUCCESS` for an already completed scan, `PASSED`, `FAILED_VALIDATION`, or `FAILED_COMPILATION`;
 - `RETRY` for transient/unexpected infrastructure failure; and
 - `FAILED` only for a permanently invalid or identity-mismatched message that must enter DLQ.
 
@@ -916,7 +929,7 @@ Required rule groups:
    - verify source hash format and frozen snapshot object shapes;
    - verify the Submission, Product snapshot, Project, and WorkflowRevision identities agree.
 2. **Editor Graph validation**
-   - call the existing reusable `WorkflowValidationService.validate(editorGraph)`;
+   - call shared `WorkflowCompilerService.validateWorkflow()` with frozen source and definitions;
    - map its deterministic errors/warnings into the bounded `scanResult.findings` array;
    - preserve safe node/edge/path details without storing the whole graph in a finding.
 3. **Runtime IR compilation and validation**
@@ -977,15 +990,15 @@ never full node config, full graph, Runtime IR, tokens, or private URLs.
 
 ### 11.2 Background outcomes
 
-| Condition                                                 | Scan/Submission result                                 | Queue result                              |
-| --------------------------------------------------------- | ------------------------------------------------------ | ----------------------------------------- |
-| Required rule produces one or more error findings         | `FAILED` / `READY_FOR_REVIEW`                          | `SUCCESS`                                 |
-| Validation or compilation produces deterministic findings | `FAILED`, Runtime IR remains null / `READY_FOR_REVIEW` | `SUCCESS`                                 |
-| Rules pass with no error findings                         | `PASSED` / `READY_FOR_REVIEW`                          | `SUCCESS`                                 |
-| Scan already `PASSED` or `FAILED`                         | unchanged                                              | `SUCCESS`                                 |
-| Temporary database/scanner failure                        | scan `ERROR`, Submission stays `PENDING_SCAN`          | `RETRY`                                   |
-| Permanently invalid/mismatched message                    | no unrelated mutation                                  | `FAILED` to DLQ                           |
-| Delivery retries exhausted                                | latest scan remains `ERROR` or `QUEUED`                | provider publishes DLQ and commits offset |
+| Condition                                                 | Scan/Submission result                                     | Queue result                              |
+| --------------------------------------------------------- | ---------------------------------------------------------- | ----------------------------------------- |
+| Validation produces deterministic findings                | `FAILED_VALIDATION`, Runtime IR null / `READY_FOR_REVIEW`  | `SUCCESS`                                 |
+| Compilation produces deterministic findings               | `FAILED_COMPILATION`, Runtime IR null / `READY_FOR_REVIEW` | `SUCCESS`                                 |
+| Rules pass with no error findings                         | `PASSED` / `READY_FOR_REVIEW`                              | `SUCCESS`                                 |
+| Scan already has a terminal business result               | retained                                                   | `SUCCESS`                                 |
+| Temporary database/scanner failure                        | scan `ERROR`, Submission stays `PENDING_SCAN`              | `RETRY`                                   |
+| Permanently invalid/mismatched message                    | no unrelated mutation                                      | `FAILED` to DLQ                           |
+| Delivery retries exhausted                                | latest scan remains `ERROR` or `QUEUED`                    | provider publishes DLQ and commits offset |
 
 ## 12. Security, privacy, and logging
 
@@ -1091,9 +1104,9 @@ assuming a clean database.
 
 ### Background behavior
 
-- A Submission reaches `READY_FOR_REVIEW` only after every required scan stage completes. The scan
-  is `PASSED` when every required rule passes and `FAILED` when it produces error findings; both
-  outcomes require an Admin decision.
+- A Submission reaches `READY_FOR_REVIEW` after a completed business scan. Success is `PASSED`.
+  Validation errors return `FAILED_VALIDATION` before compilation. Deterministic compilation errors
+  return `FAILED_COMPILATION`. All completed outcomes require an Admin decision.
 - Deterministic validation errors persist bounded Admin-only findings and move the Submission to
   `READY_FOR_REVIEW` without Kafka retry; they never automatically expose a rejection reason to the
   Publisher.

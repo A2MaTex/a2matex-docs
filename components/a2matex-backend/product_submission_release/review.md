@@ -74,7 +74,8 @@ This module does not own:
 - `REQUEST_CHANGES` and `REJECT` require non-empty feedback. `APPROVE` may omit feedback.
 - A completed `PASSED` scan with finalized Workflow Revision `runtimeIr` and `contentHash` may
   receive any decision.
-- A completed `FAILED` scan may receive `REQUEST_CHANGES` or `REJECT`, but not `APPROVE` in the MVP.
+- Completed `FAILED_VALIDATION` and `FAILED_COMPILATION` scans permit
+  `REQUEST_CHANGES` or `REJECT`. Approval requires `PASSED` in the MVP.
   Manual override is unsupported and would require a separate audited contract; Admin access does
   not imply it.
 - A technical scan `ERROR`, queued scan, or running scan cannot be reviewed because the Submission
@@ -219,11 +220,11 @@ type ReviewSubmissionInput = {
 
 The request object is strict. Decision-specific rules are:
 
-| Decision          | Required Submission state | Required scan status | Feedback               |
-| ----------------- | ------------------------- | -------------------- | ---------------------- |
-| `APPROVE`         | `READY_FOR_REVIEW`        | `PASSED`             | optional               |
-| `REQUEST_CHANGES` | `READY_FOR_REVIEW`        | `PASSED` or `FAILED` | required and non-empty |
-| `REJECT`          | `READY_FOR_REVIEW`        | `PASSED` or `FAILED` | required and non-empty |
+| Decision          | Required Submission state | Required scan status          | Feedback               |
+| ----------------- | ------------------------- | ----------------------------- | ---------------------- |
+| `APPROVE`         | `READY_FOR_REVIEW`        | `PASSED`                      | optional               |
+| `REQUEST_CHANGES` | `READY_FOR_REVIEW`        | `PASSED` or completed failure | required and non-empty |
+| `REJECT`          | `READY_FOR_REVIEW`        | `PASSED` or completed failure | required and non-empty |
 
 The service returns `SUCCESS_RESPONSE`; the global interceptor produces:
 
@@ -238,6 +239,9 @@ The service returns `SUCCESS_RESPONSE`; the global interceptor produces:
 
 The endpoint never returns the updated Submission. The existing detail endpoint owns fetching the
 record and applying the Admin or owner projection.
+
+A completed failure means `FAILED_VALIDATION` or `FAILED_COMPILATION`.
+Both new failure phases retain their findings for Admin review and are terminal for scanning.
 
 ### 5.2 Example: request changes
 
@@ -363,8 +367,8 @@ repair and an outbox are not part of this contract.
 | Same decision with different feedback                      | `409 Error.SubmissionReviewConflict`         | none     |
 | Missing feedback for request-changes/reject                | `422 Error.SubmissionReviewFeedbackRequired` | none     |
 | Feedback violates shape, bounds, or safe-content checks    | `422 Error.InvalidSubmissionReviewFeedback`  | none     |
-| Approval attempted for scan `FAILED`                       | `409 Error.SubmissionScanFailed`             | none     |
-| Scan is not a completed `PASSED` or `FAILED` business scan | `409 Error.SubmissionScanIncomplete`         | none     |
+| Approval attempted for a completed failure scan            | `409 Error.SubmissionScanFailed`             | none     |
+| Scan has no completed business outcome                     | `409 Error.SubmissionScanIncomplete`         | none     |
 | Product or Publisher no longer approval-eligible           | `409 Error.SubmissionNotEligibleForApproval` | none     |
 | Authorization missing or insufficient                      | existing `401` or `403` contract             | none     |
 | Database failure before commit                             | existing internal error contract             | rollback |
@@ -482,7 +486,7 @@ When implementation is approved, verification should cover:
 - request schema and feedback bounds;
 - exact permission and Admin-only behavior;
 - every lifecycle transition and invalid transition;
-- approval rejection for failed/incomplete scans;
+- approval rejection for both failure statuses and incomplete scans;
 - feedback visibility differences between Admin and Publisher Submission reads;
 - transaction rollback and immutable-field preservation;
 - concurrent decisions and identical retries;
