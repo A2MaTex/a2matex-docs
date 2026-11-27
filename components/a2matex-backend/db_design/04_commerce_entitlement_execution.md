@@ -225,104 +225,126 @@ download/execution cho đến khi Admin reactivation thành công.
 
 ## 5. Execution Lease
 
-### Trách nhiệm
+### Trách nhiệm và trạng thái triển khai
 
-`ExecutionLease` là authorization tạm thời cho một production execution của
-customer. Backend không gắn lease với installation/device và không giới hạn số
-lease đồng thời. Mỗi row là một lease family; Backend rotate signed lease ID và
-sequence trên cùng row khi renew. Signed token, key envelope và plaintext key
-không được lưu trong PostgreSQL.
+[Execution Authorization feature spec](../commerce_entitlement_execution/execution_authorization.md)
+là contract triển khai. Phần SQL dưới đây đã được đưa vào
+[20261126155128_add_execution_authorization/migration.sql](../../../../a2matex-be/prisma/migrations/20261126155128_add_execution_authorization/migration.sql)
+bằng Prisma create-only workflow. Sau khi user approve, **migration đã apply vào local PostgreSQL**,
+đã introspect schema.prisma và generate Prisma Client. Migration status up to date; actual tables có
+18 lease / 14 receipt columns. User-approved application evidence nằm trong feature spec section 5.4.
+Delivery trước Runtime J6 chỉ chuẩn bị persistence và internal initial issuer/fixtures sau khi user
+apply SQL. Public authorization/envelope, renewal và reauthorization triển khai ở các delivery sau.
 
-Trong signed claims, row `id` là `leaseFamilyId`, còn `currentLeaseId` là
-`leaseId` hiện tại.
+Một ExecutionLease row là một family cho **một RunGroup**, không phải một Android device. Row id là
+signed leaseFamilyId, executionId là Runtime RunGroup ID, currentLeaseId là grant đang có hiệu lực.
+Giữ userId và productId để query ownership/Product trực tiếp, cùng entitlementId để xác định access
+đã dùng. Service kiểm tra chúng khớp Entitlement và exact ProductRelease, không bỏ eligibility join
+chỉ vì đã có denormalized identity. Existing Entitlement.customerId map từ userId, không rename
+Entitlement/Order trong feature này.
+
+Cả hai entities extend Backend Base: id, createdAt, updatedAt và deletedAt. Không thêm delete/restore
+API. Uniqueness vẫn áp dụng cả row soft-deleted; không recycle execution/request identity.
+Không lưu signed token, envelope, plaintext key, Runtime private key, unsigned proposal hoặc JSON
+claims/eligibility snapshot. Family giữ durable business history; receipts có bounded retention.
 
 ```sql
-CREATE TYPE "ExecutionLeaseStatus" AS ENUM (
-    'ACTIVE',
-    'EXPIRED',
-    'REVOKED',
-    'COMPLETED'
+CREATE TYPE "ExecutionAuthorizationOperation" AS ENUM (
+    'START', 'RENEW', 'REAUTHORIZE'
+);
+
+CREATE TYPE "ExecutionAuthorizationRequestState" AS ENUM (
+    'RESERVED', 'COMMITTED'
 );
 
 CREATE TABLE "ExecutionLease" (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     "executionId" UUID NOT NULL UNIQUE,
-    "entitlementId" UUID NOT NULL REFERENCES "Entitlement" (id),
-    "customerId" UUID NOT NULL REFERENCES "User" (id),
-    "productId" UUID NOT NULL REFERENCES "Product" (id),
-    "productReleaseId" UUID NOT NULL REFERENCES "ProductRelease" (id),
-    "packageHash" TEXT NOT NULL,
+    "userId" UUID NOT NULL REFERENCES "User" (id) ON DELETE NO ACTION,
+    "productId" UUID NOT NULL REFERENCES "Product" (id) ON DELETE NO ACTION,
+    "entitlementId" UUID NOT NULL REFERENCES "Entitlement" (id) ON DELETE NO ACTION,
+    "productReleaseId" UUID NOT NULL REFERENCES "ProductRelease" (id) ON DELETE NO ACTION,
+    "packageHash" VARCHAR(64) NOT NULL,
     "runtimeSessionId" UUID NOT NULL,
-    "runtimeKeyThumbprint" TEXT NOT NULL,
-    "currentLeaseId" UUID NOT NULL UNIQUE DEFAULT gen_random_uuid(),
+    "runtimeKeyThumbprint" VARCHAR(64) NOT NULL,
+    "currentLeaseId" UUID NOT NULL UNIQUE,
     sequence INTEGER NOT NULL DEFAULT 1 CHECK (sequence > 0),
-    status "ExecutionLeaseStatus" NOT NULL DEFAULT 'ACTIVE',
-
-    -- Mock JSON: authorization decision snapshot; never contains keys/tokens.
-    -- {
-    --   "schemaVersion": "1.0",
-    --   "entitlementStatus": "ACTIVE",
-    --   "productStatus": "ACTIVE",
-    --   "releaseStatus": "PUBLISHED",
-    --   "packageHash": "sha256:..."
-    -- }
-    "grantSnapshot" JSONB NOT NULL,
-
-    "issuedAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
-    "notBefore" TIMESTAMPTZ NOT NULL,
+    "signingKeyId" VARCHAR(64) NOT NULL,
+    "issuedAt" TIMESTAMPTZ NOT NULL,
     "refreshAfter" TIMESTAMPTZ NOT NULL,
     "expiresAt" TIMESTAMPTZ NOT NULL,
-    "renewedAt" TIMESTAMPTZ,
-    "revokedAt" TIMESTAMPTZ,
-    "revokedReason" TEXT,
-    "completedAt" TIMESTAMPTZ,
+    "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
     "updatedAt" TIMESTAMPTZ,
+    "deletedAt" TIMESTAMPTZ,
 
     CONSTRAINT "ExecutionLease_period_check" CHECK (
-        "issuedAt" <= "notBefore"
-        AND "notBefore" < "refreshAfter"
-        AND "refreshAfter" < "expiresAt"
-    ),
-    CONSTRAINT "ExecutionLease_grantSnapshot_object_check"
-        CHECK (jsonb_typeof("grantSnapshot") = 'object'),
-    CONSTRAINT "ExecutionLease_revoked_fields_check" CHECK (
-        status <> 'REVOKED'
-        OR ("revokedAt" IS NOT NULL AND "revokedReason" IS NOT NULL)
+        "issuedAt" < "refreshAfter" AND "refreshAfter" < "expiresAt"
     )
 );
 
-CREATE INDEX "ExecutionLease_active_entitlement_idx"
-ON "ExecutionLease" ("entitlementId", "expiresAt")
-WHERE status = 'ACTIVE';
+CREATE TABLE "ExecutionAuthorizationRequest" (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    "userId" UUID NOT NULL REFERENCES "User" (id) ON DELETE NO ACTION,
+    "requestId" UUID NOT NULL,
+    operation "ExecutionAuthorizationOperation" NOT NULL,
+    "requestFingerprint" VARCHAR(64) NOT NULL,
+    state "ExecutionAuthorizationRequestState" NOT NULL DEFAULT 'RESERVED',
+    "ownerToken" UUID,
+    "reservedUntil" TIMESTAMPTZ,
+    "leaseFamilyId" UUID REFERENCES "ExecutionLease" (id) ON DELETE NO ACTION,
+    "leaseId" UUID,
+    "retainUntil" TIMESTAMPTZ NOT NULL,
+    "createdAt" TIMESTAMPTZ NOT NULL DEFAULT now(),
+    "updatedAt" TIMESTAMPTZ,
+    "deletedAt" TIMESTAMPTZ,
 
+    CONSTRAINT "ExecutionAuthorizationRequest_user_request_key"
+        UNIQUE ("userId", "requestId"),
+    CONSTRAINT "ExecutionAuthorizationRequest_state_check" CHECK (
+        (state = 'RESERVED' AND "ownerToken" IS NOT NULL AND "reservedUntil" IS NOT NULL
+            AND "leaseFamilyId" IS NULL AND "leaseId" IS NULL)
+        OR
+        (state = 'COMMITTED' AND "ownerToken" IS NULL AND "reservedUntil" IS NULL
+            AND "leaseFamilyId" IS NOT NULL AND "leaseId" IS NOT NULL)
+    )
+);
+
+CREATE INDEX "ExecutionAuthorizationRequest_retainUntil_idx"
+ON "ExecutionAuthorizationRequest" ("retainUntil");
 ```
 
-Issue/renew phải update `currentLeaseId`, `sequence`, `refreshAfter` và
-`expiresAt` atomically; renew dùng row lock/idempotency để không cấp hai sequence
-khác nhau cho cùng request. Backend signs claims from this row and wraps the
-release content key for `runtimeKeyThumbprint`. Runtime verifies locally;
-Launcher never receives plaintext workflow key. Contract đầy đủ:
-[Production Execution Authorization v1](../../../specifications/production_execution_authorization_v1.md).
+Service validate UUID/hash/key, timestamp precision/bounds và cross-record identity; DB giữ PK/FK,
+uniqueness, positive INTEGER sequence và state pairing. Không có trigger hay crypto validation DB.
+Signed releaseId map từ productReleaseId; signed notBefore luôn bằng issuedAt nên không lưu thêm cột.
+Grant times lưu UTC whole seconds, sequence không vượt 2,147,483,647.
 
-### J1 transport and same-family persistence clarification
+### Atomic issue và replay
 
-[Runtime J1](../../a2matex-runtime/j_protected_execution/j1_production_contracts.md)
-defines the exact shared wire contract. `executionId` is allocated by Runtime
-preparation before admission and equals the eventual RunGroup ID. The unique
-ExecutionLease row remains the same family across fresh-session reauthorization:
-advance sequence and replace session/key bindings and current grant timestamps
-(`issuedAt`, `notBefore`, `refreshAfter`, `expiresAt`) atomically after current
-eligibility checks; do not create a second row for the same executionId.
+Transaction 1 check eligibility/reserve receipt, rồi build/sign candidate trong RAM ngoài transaction.
+Delivery envelope sau này cũng unwrap/wrap key ngoài transaction trước final commit. Transaction 2
+recheck current eligibility/time/owner/base grant rồi commit family và receipt atomically. Không có
+persisted proposal stage. Không return signature/envelope trước successful commit.
 
-The separate Backend persistence task must also create bounded request receipts
-unique by `(customerId, requestId)` for issue/renew/reauthorize. A receipt stores
-operation, normalized request fingerprint, family/claims/signing-key metadata,
-reservation ownership and retention deadline, never a token, envelope or key.
-Replay cannot extend authorization or return a superseded grant; crypto runs
-outside row-lock transactions. J1 section 5.4 specifies the lifecycle. This is
-planned schema, not an applied migration. Only the user applies the reviewed
-SQL migration at the ordered manual database step. No ExecutionReport or
-installation/device-limit implementation is required for Runtime Phase J.
+Receipt chỉ giữ leaseFamilyId và leaseId. Replay require cùng authenticated user, fingerprint/operation,
+non-deleted family/receipt và receipt.leaseId = family.currentLeaseId; reconstruct exact claims/kid từ
+family hiện tại. Grant fields không được sửa nếu currentLeaseId không đổi. Nếu đã superseded hoặc
+expired/denied thì reject; không cần historical claims JSON hay duplicate signingKeyId trên receipt.
+Không lưu raw tokens/envelopes. Giữ old signing key đủ cho current retained grant replay.
+
+RENEW/REAUTHORIZE giữ expected base grant trong RAM/request, final CAS phải khớp currentLeaseId/sequence
+trước khi advance. REAUTHORIZE giữ nguyên family/execution/user/access/Product/Release/hash và rotate
+session/key; normal renewal giữ session/key. Runtime quản lý actual run state, hard-expiry pause và
+terminal/live-owner guards; Backend không thêm COMPLETED/EXPIRED status vào family để giả lập state đó.
+Entitlement revoke và Product/Release moderation vẫn block new issuance/replay/renewal theo current checks.
+
+Reservation deadline 60 giây và opaque owner UUID fence late attempts. RESERVED receipt giữ đến
+reservation deadline + 300 giây; COMMITTED receipt giữ đến signed expiry + 300 giây. Cleanup mỗi phút
+lấy tối đa 500 expired receipts, gồm soft-deleted receipts, bằng bounded operation. Không soft-delete
+receipts vô thời hạn; không xóa family/history. Các unique keys không dùng deletedAt partial filter.
+
+Chỉ user apply reviewed SQL migration rồi introspect/generate client theo SQL-first workflow.
+Không sửa existing Entitlement/Order data, không tạo ExecutionReport/device/installation licensing
+schema trong migration này. Các query index khác chỉ thêm khi có actual query consumer.
 
 ## 6. Execution Report
 
@@ -423,6 +445,7 @@ Product
 ├── OrderItem[] ── Order
 ├── Entitlement[]
 │   └── ExecutionLease[] ── ProductRelease
+│       ├── ExecutionAuthorizationRequest[]
 │       └── ExecutionReport
 └── ProductReport[]
 ```

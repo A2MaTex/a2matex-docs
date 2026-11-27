@@ -21,18 +21,15 @@ sequenceDiagram
     Note over App,R: Closing the owner uses the private shutdown pipe instead
 ```
 
-**Implemented and Linux-verified in H13 on 2026-11-23.** Controlled two-device
-HTTP/SQLite tests and the actual built-agent managed process harness exercise
-Pause, Resume, Cancel and a subsequent fresh run. Windows cross-compilation is
-separate from native Windows evidence; real Android control acceptance is not
-claimed by those controlled tests.
+**The action endpoint is available.** Test Pause, Resume, Cancel and a fresh run
+through the actual owner app. Verify real Android and native Windows behavior
+separately; controlled Linux tests and cross-builds do not establish those outcomes.
 
 This is the shared route reference for both client developers. Use
 [managed process ownership](managed_runtime.md) and
 [local authentication on Linux/Windows](local_authentication.md) for startup,
 credential retrieval and readiness. [Studio](studio.md) uses current plaintext
-Test Runs; [Launcher](launcher.md) will use the same group controls once Phase J
-provides protected package admission. This endpoint does not authorize a product.
+Test Runs; [Launcher](launcher.md) will use the same group controls once protected package admission is available. This endpoint does not authorize a product.
 
 ## 1. Endpoint and request
 
@@ -102,7 +99,7 @@ without its matching live worker owner cannot be resumed from SQLite.
 ## 3. Complete response examples
 
 
-These illustrative responses use the implemented H13 DTOs. IDs, timestamps and cursors are examples; use the actual values from your run.
+These illustrative responses use the Runtime action DTOs. IDs, timestamps and cursors are examples; use the actual values from your run.
 For readability they use one selected device; multi-device bodies have the same
 shape and include all selected members. Cursors are illustrative Runtime-wide
 watermarks, never per-action IDs or progress percentages.
@@ -235,7 +232,7 @@ saved snapshot. Do not auto-repeat the action: a late duplicate after an
 intervening opposite action can be a new action. RUNNING alone cannot reveal
 every pending intent. For an explicit new user choice, submit that current choice.
 If Runtime died, the owner client may replace it under the managed lifecycle;
-D6 marks unfinished work INTERRUPTED, and no old action or RAM is reconstructed.
+Runtime marks unfinished work INTERRUPTED on the next startup, and no old action or RAM is reconstructed.
 
 ## 5. Linux curl example
 
@@ -318,7 +315,7 @@ acceptance must still be performed on a Windows host.
 
 1. Complete the [local-auth Postman setup](local_authentication.md#postman-on-linux-or-windows).
    Keep API_BASE_URL and SESSION_TOKEN current; do not add `/api/v1` twice.
-2. Compile/start the readable [H4 Delay workflow](../../../../a2matex-runtime/examples/h4/README.md)
+2. Compile/start the readable [multi-device Delay workflow](../../../../a2matex-runtime/examples/h4/README.md)
    with one or two actual READY serials. Set each delayMs to 5000 for this manual
    scenario; retain the group's response ID. Compilation itself performs no action.
 3. Probe `GET {{API_BASE_URL}}/runtime-info`. Then POST
@@ -355,7 +352,7 @@ server alive. Closing the owning app or choosing Shut down Runtime sends the
 private `shutdown\n` command and waits for process exit; it is not POST CANCEL.
 Do not restart Runtime automatically after explicit user shutdown.
 
-Runtime supplies this API; Studio/Launcher own their UI integration. Phase I
-owns SSE/attempt history and fuller execution inspectors. Phase J still owns
-Launcher protected `.a2m` package authorization/start. H14 controlled process acceptance is now verified separately; H15 independent-device
-and native-platform acceptance remains outside H13 delivery.
+Runtime supplies the HTTP API; Studio and Launcher implement their own controls.
+Use [attempt history and event streaming](managed_runtime.md#node-attempt-history-api)
+to reconcile saved state. Launcher protected `.a2m` authorization/start is not yet
+available; Development run actions do not supply that authorization.

@@ -48,3 +48,36 @@ Consumers vendor the pinned test bytes locally, check the digest, and do not
 depend on a sibling Plan checkout. After acceptance this set is immutable;
 change vectors/expectations by adding a new set version. Existing A8 v1–v3
 fixtures and wire format versions are unchanged.
+
+The implemented schema-inspection HTTP contract now accepts only `packageRef` and
+`launcherVersion`; IDs are derived, and the actual ZIP hash is returned rather
+than supplied. Some unsigned HTTP selection examples in this immutable bundle
+retain the older redundant ID/hash shape. They are not current schema-request
+examples. Use the [J4 specification](../../j4_package_input_schema_api.md) and
+Launcher guide for the current transport. ZIP, manifest, encryption and signed
+vectors remain unchanged; their expected cryptographic digests still apply.
+
+## Current lease-claim compatibility
+
+The 2026-11-26 authorization design uses `userId` in the closed signed claim set.
+This accepted v1 bundle signs `customerId`. Its bytes/digest remain unchanged,
+but those signed leases are **not positive acceptance inputs for current J6**.
+No compatibility alias is introduced. The Backend issuer delivery before J6 must
+produce a newly signed v2 set with current claims/requests, kid/public key and
+fixed-clock positive, negative and replay cases. Include rejection of the old
+customerId field. Changing decoded JSON without re-signing invalidates a lease.
+The [v2 set](../v2/README.md) is now delivered through the Backend signing provider
+with synthetic identities and passing Backend digest/signature checks. Runtime
+J6 consumption and full Backend package/customer exchange remain pending.
+Archive/AES/OAEP vectors remain useful for their unchanged byte contracts.
+
+### Historical package location examples
+
+The immutable v1 JSON contains the earlier three-segment Product/Release/filename
+references and default directory spelling. They are historical transport examples,
+not current accepted requests. Current J1/J2/J4 use the OS Documents
+`a2matex/products` root and `<productId>/<local filename>.a2m`, normally
+`<productId>/package.a2m`; Release identity comes from the validated manifest.
+Consumer tests install the unchanged ZIP bytes at that new local location. The
+ZIP/manifest/encryption fixture bytes and their digest are not changed by this
+filesystem-layout update.

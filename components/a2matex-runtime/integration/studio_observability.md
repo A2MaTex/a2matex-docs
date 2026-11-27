@@ -1,12 +1,11 @@
-# Studio I5–I7 integration handoff
+# Studio execution monitoring and controls
 
 ## Overview
 
-This is the single Studio developer handoff for live execution monitoring
-**I5**, saved attempt/screenshot inspection **I6**, and run/process controls
-**I7**. The Runtime APIs already exist. Studio's Electron Main process owns
+This guide covers live execution monitoring, saved attempt/screenshot inspection,
+and run/process controls for the Studio developer. The Runtime APIs already
+exist. Studio's Electron Main process owns
 authentication, HTTP and the Runtime child; React receives typed view data.
-The Runtime team supplies these documents and inspects Studio read-only.
 
 The publisher starts a Test Run through the existing compile/admit flow.
 Studio reads its saved snapshot and subscribes after that snapshot's cursor.
@@ -17,9 +16,9 @@ do not themselves change execution outcomes or restart a healthy Runtime.
 ```mermaid
 flowchart TD
     A[Existing compile and Test Run admission] --> S[Saved run snapshot and cursor]
-    S --> O[I5 native SSE observer and reconnect]
-    S --> I[I6 selected-device history and screenshot preview]
-    S --> C[I7 Pause, Resume and Cancel whole group]
+    S --> O[Native SSE observer and reconnect]
+    S --> I[Selected-device history and screenshot preview]
+    S --> C[Pause, Resume and Cancel whole group]
     O --> V[Typed React execution view]
     I --> V
     C -->|Response then committed observation| V
@@ -27,31 +26,26 @@ flowchart TD
     X[Explicit Shut down Runtime or Stop and exit] --> G[Suppress automatic work first]
     G --> D[Dispose observers, reads and previews]
     D --> P[Existing private owner shutdown and confirmed exit]
-    V --> T[I8 review and E2E after user pulls implementation - deferred]
 ```
 
-**Status:** implementation handoff only. Studio was inspected read-only on
-2026-11-24 at revision `dd7c604172e7712d3de7dff6db9a1e3d84b1dba0`.
-No Studio/Runtime code was edited or built for this delivery. Proposed methods,
-channels and files below are not already installed features. The user will
-pull the Studio implementation and request its review/E2E under I8 later.
+**Implementation baseline:** Studio source was inspected on 2026-11-24 at
+revision `dd7c604172e7712d3de7dff6db9a1e3d84b1dba0`. Recheck the current checkout
+before implementing; method/channel/file names identified as proposed below
+are integration instructions, not a claim that those features already exist.
 
 Read in order, or jump directly to:
 
 - [Shared source map and gaps](#1-shared-source-map-and-current-gaps).
 - [Common native/API rules](#2-shared-native-client-and-api-rules).
-- [I5 events and reconnect](#3-i5-live-events-and-reconnect).
-- [I6 history and screenshots](#4-i6-attempt-history-and-screenshot-inspection).
-- [I7 controls and shutdown](#5-i7-run-controls-and-owner-lifecycle).
-- [Delivery checklist and deferred I8](#6-delivery-checklist-and-deferred-i8).
+- [Live events and reconnect](#3-live-events-and-reconnect).
+- [History and screenshots](#4-attempt-history-and-screenshot-inspection).
+- [Controls and shutdown](#5-run-controls-and-owner-lifecycle).
+- [Integration checks and acceptance](#6-integration-checks-and-acceptance).
 
-Normative specs: [I5](../i_observability_apis/i5_studio_event_reconnect_integration.md),
-[I6](../i_observability_apis/i6_studio_execution_inspector.md),
-[I7](../i_observability_apis/i7_studio_lifecycle_controls.md).
-The general [Studio integration guide](studio.md) retains authoring/run-start
-usage; [managed ownership](managed_runtime.md), [local authentication](local_authentication.md)
-and [shared run actions](run_actions.md) remain common API references for both
-Studio and Launcher. There are no separate I5/I6/I7 handoff files to follow.
+Use the general [Studio integration guide](studio.md) for authoring and run start.
+[Managed ownership](managed_runtime.md), [local authentication](local_authentication.md)
+and [shared run actions](run_actions.md) provide the common API instructions for
+both Studio and Launcher.
 
 ## 1. Shared source map and current gaps
 
@@ -59,13 +53,13 @@ All paths are relative to `a2matex-ide/`. Linked files exist in the inspected
 checkout. Reuse them before adding modules; the table describes future changes,
 not edits performed by the Runtime team.
 
-| Existing source                                                                                                                                                                                                                                                                                    | Current behavior                                                                                 | Work across I5–I7                                                                                             |
+| Existing source                                                                                                                                                                                                                                                                                    | Current behavior                                                                                 | Required integration work                                                                                             |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
 | [runtime-process-manager.ts](../../../../a2matex-ide/electron/main/runtime/process/runtime-process-manager.ts)                                                                                                                                                                                     | Owns child/credentials, startup single-flight, actual readiness and replacement.                 | Main-only session generation, stop suppression, separate readiness recovery from operation retry.             |
 | [runtime-http-client.ts](../../../../a2matex-ide/electron/main/runtime/http/runtime-http-client.ts)                                                                                                                                                                                                | Axios JSON APIs including snapshots/attempts; 10-second ordinary timeout and 2 MiB response cap. | Dedicated stream, dedicated binary artifact read, action-specific 200/202/409 decoding.                       |
 | [create-runtime-services.ts](../../../../a2matex-ide/electron/main/runtime/create-runtime-services.ts)                                                                                                                                                                                             | Typed operations through the manager.                                                            | Compose observer, preview and action seams with the same owner.                                               |
 | [runtime-run-coordinator.ts](../../../../a2matex-ide/electron/main/runtime/run/runtime-run-coordinator.ts)                                                                                                                                                                                         | Compile/persist/admit, exact pending-start retry and active-run exit guard.                      | Accept relevant committed/control snapshots and retain uncertain controls without corrupting admission state. |
-| [runtime.types.ts](../../../../a2matex-ide/src/application/runtime/runtime.types.ts), [runtime.schema.ts](../../../../a2matex-ide/src/application/runtime/runtime.schema.ts), [runtime.error.ts](../../../../a2matex-ide/src/application/runtime/runtime.error.ts)                                 | Saved run/attempt DTOs, Zod schemas and safe RuntimeError metadata.                              | A6 event/live-view types, preview DTO and action disposition/conflict snapshot.                               |
+| [runtime.types.ts](../../../../a2matex-ide/src/application/runtime/runtime.types.ts), [runtime.schema.ts](../../../../a2matex-ide/src/application/runtime/runtime.schema.ts), [runtime.error.ts](../../../../a2matex-ide/src/application/runtime/runtime.error.ts)                                 | Saved run/attempt DTOs, Zod schemas and safe RuntimeError metadata.                              | Event/live-view types, preview DTO and action disposition/conflict snapshot.                               |
 | [register-runtime-handlers.ts](../../../../a2matex-ide/electron/main/ipc/register-runtime-handlers.ts)                                                                                                                                                                                             | Trusted-sender/ID validation and status/preparation publication.                                 | Narrow observer/preview/action handlers and sender-bound disposal.                                            |
 | [channels.ts](../../../../a2matex-ide/electron/shared/channels.ts), [preload](../../../../a2matex-ide/electron/preload/index.cts), [studio-host-api.ts](../../../../a2matex-ide/src/infrastructure/electron/studio-host-api.ts)                                                                    | Existing named bridge methods and specific-listener cleanup.                                     | Update all three together; no generic HTTP/IPC or credential export.                                          |
 | [useTestRunExecution.ts](../../../../a2matex-ide/src/presentation/features/test-run/useTestRunExecution.ts)                                                                                                                                                                                        | One-second snapshot poll; reloads all attempt pages for member `[0]`.                            | Native observation plus selected-page history, no competing whole-history poll.                               |
@@ -92,7 +86,7 @@ React, TypeScript, Axios and Zod are already declared.
 | STOPPING/STOPPED without persistent native suppression | Prevent automatic reconnect, validation or reads from relaunching after user stop, including renderer remount/late callbacks.                                                                                                                                                                                  |
 | Admission error schema rejects error-plus-snapshot     | Add action-specific validated 409 handling and preserve its snapshot through the bridge.                                                                                                                                                                                                                       |
 | Snapshot summary/device-array caps at 32               | Remove obsolete device ceiling from these decoders; Runtime has no such count policy. Keep consistency and transport validation. Inventory's separate 1,000 cap is also a Studio constraint to reconcile.                                                                                                      |
-| Start request is a one-device tuple                    | I5–I7 can read/control multi-device snapshots without expanding the start picker in this assignment. Do not assume `[0]`.                                                                                                                                                                                      |
+| Start request is a one-device tuple                    | The execution view can read/control multi-device snapshots without expanding the start picker in this assignment. Do not assume `[0]`.                                                                                                                                                                                      |
 | Managed Windows startup explicitly rejected            | Both [executable resolver](../../../../a2matex-ide/electron/main/runtime/process/runtime-executable.ts) and [pipe adapter](../../../../a2matex-ide/electron/main/runtime/process/runtime-pipes.ts) reject win32. Native Windows acceptance needs the Studio process/pipe prerequisite, not just a Runtime exe. |
 | Older Studio implementation notes                      | Some still say SSE/actions are unavailable. Use current Runtime contracts; Studio owner reconciles its internal notes.                                                                                                                                                                                         |
 
@@ -114,10 +108,10 @@ not restart old runs or restore their RAM scopes.
 | Actual readiness     | GET runtime-info                                              | 200 JSON; current owned session, compatibility checked separately.         |
 | Known-run snapshot   | GET runs/{runGroupId}                                         | 200 ExecutionSnapshot with consistent cursor; 404 means missing saved run. |
 | Active-run discovery | GET runs/active                                               | 200 snapshot or normal RESOURCE_NOT_FOUND.                                 |
-| I5 stream            | GET events                                                    | 200 SSE; optional Last-Event-ID header only.                               |
-| I6 history           | GET device-executions/{id}/attempts?afterSequence=0&limit=100 | 200 attempts/continuation JSON.                                            |
-| I6 PNG               | GET artifacts/{artifactId}                                    | 200 binary image/png.                                                      |
-| I7 control           | POST runs/{runGroupId}/actions                                | 202/200 root snapshot; 409 error plus snapshot.                            |
+| Live event stream            | GET events                                                    | 200 SSE; optional Last-Event-ID header only.                               |
+| Attempt history           | GET device-executions/{id}/attempts?afterSequence=0&limit=100 | 200 attempts/continuation JSON.                                            |
+| Screenshot PNG               | GET artifacts/{artifactId}                                    | 200 binary image/png.                                                      |
+| Run control           | POST runs/{runGroupId}/actions                                | 202/200 root snapshot; 409 error plus snapshot.                            |
 
 All use current native Bearer and the fixed trusted base URL. Bypass proxies,
 reject redirects and avoid body/query on GET except the two history parameters.
@@ -133,7 +127,9 @@ initiating WebContents. Old responses cannot overwrite a replacement child,
 newer owned run, selected view or action. Renderer disposal cancels only
 reads/subscriptions; accepted execution/actions remain Runtime-owned.
 
-## 3. I5 live events and reconnect
+<a id="3-i5-live-events-and-reconnect"></a>
+
+## 3. Live events and reconnect
 
 ### 3.1 Bootstrap, request and wire parsing
 
@@ -154,7 +150,7 @@ one Accept value is required. Omit Last-Event-ID only for an unselected monitor
 of new activity; omission does not replay saved history. Never send zero.
 An unexpected zero snapshot for a known saved run is a contract error.
 
-Example A8 frame; the final blank line terminates it:
+Example SSE frame; the final blank line terminates it:
 
 ```text
 id: 42
@@ -171,18 +167,18 @@ Heartbeat frame after about 15 idle seconds:
 ```
 
 Read incrementally, preserving split UTF-8, LF/CRLF lines and frame terminators.
-Never await/JSON-decode the entire connection. Validate the closed A6 union,
+Never await/JSON-decode the entire connection. Validate the closed event union,
 identity and payload; frame ID/type must match JSON cursor/type. Standard SSE
 multiline-data joining is acceptable before validation. Comments/empty frames
 produce no history or cursor; ignore unrecognized SSE fields and do not accept
-server retry hints as client policy. A6 unknown/malformed events are a safe
+server retry hints as client policy. Unknown/malformed events are a safe
 protocol error, not something to silently acknowledge or retry forever.
 
 Keep cursors as exact decimal strings (BigInt internally is an option), never
 JavaScript Number or attempt sequence. Gaps are valid. Process/filter an event
 before advancing the global cursor, including valid events from other runs.
 Already processed duplicates do not mutate twice. Incomplete EOF is not
-acknowledged. Bound one partial/frame buffer to 32 KiB for A6's 16 KiB JSON
+acknowledged. Bound one partial/frame buffer to 32 KiB for the 16 KiB event JSON
 plus framing; process large chunks of many complete frames incrementally.
 
 ### 3.2 Transport and bounded publication
@@ -261,7 +257,7 @@ event cursor; React must not discard them by comparing only SSE cursors.
 
 ### 3.3 Applying changes and snapshots
 
-| A6 event                       | View effect                                                                                              |
+| Runtime event                       | View effect                                                                                              |
 | ------------------------------ | -------------------------------------------------------------------------------------------------------- |
 | RUN_GROUP_STATE_CHANGED        | Matching group status; coalesced refresh for exact summary/timestamps.                                   |
 | DEVICE_EXECUTION_STATE_CHANGED | Matching member status/next position/error; no running highlight from nextNodeId alone.                  |
@@ -299,7 +295,7 @@ a newer C admission, regardless of cursor value. Route owned-group events to
 the native guard before selected-view filtering, with matching saved refreshes
 when needed. If observation is closed, reconcile the owned group on next-run/
 exit decisions; a failed read keeps the unresolved guard conservatively. The
-full ownership table is in I7 section 6; no background watcher is required.
+run-control rules in section 5 apply; no background watcher is required.
 
 Changing device keeps the stream; changing run restarts bootstrap and clears
 partial facts. Label node activity unsynchronized until a valid fact/loaded
@@ -323,7 +319,9 @@ Retry failed connections with one cancellable 1/2/4/8/15-second capped schedule,
 including repeated expiry repair. Reset after a valid event/heartbeat rather
 than 200 headers alone. Keep connection health distinct from run state.
 
-## 4. I6 attempt history and screenshot inspection
+<a id="4-i6-attempt-history-and-screenshot-inspection"></a>
+
+## 4. Attempt history and screenshot inspection
 
 ### 4.1 Selection, request and saved details
 
@@ -399,19 +397,19 @@ show node ID/source unavailable without compile/re-run.
 
 A RUNNING row at sequence 5 becomes terminal at sequence 5. Refresh its page's
 original boundary and upsert by ID; reading only afterSequence=5 misses the
-change. Preserve row selection. Relevant selected-device I5 changes invalidate
+change. Preserve row selection. Relevant selected-device event changes invalidate
 one page read with a dirty flag and 250 ms minimum refresh-start interval;
 heartbeats/unrelated members do not. At the tail, appended attempts invalidate
 continuation availability too.
 
-I1 pages have no event watermark. Capture a local selected-device change
+Attempt-history pages have no event watermark. Capture a local selected-device change
 revision when reading; if newer relevant facts arrive before application,
 do not overwrite them with the stale response. Refresh again. Keep saved
 DTOs separate from partial events, and never regress saved terminal rows to
 RUNNING during replay. Generation guards are mandatory even when cancellation
 is implemented; the existing getNodeAttempts bridge has no cancel argument.
 
-Without I5, serialized one-second selected-page polling is an acceptable
+Before the event observer is connected, serialized one-second selected-page polling is an acceptable
 temporary path for active members. Do not run both paths. Refresh once when
 paused/terminal then suspend; observed Resume/manual Refresh can restart it.
 Read errors preserve same-selection rows visibly stale with Retry. Selection
@@ -419,8 +417,8 @@ change clears old output and invalidates callbacks.
 
 After reconnect/expiry/new session, rebuild against the current member snapshot.
 The first 100 rows may not contain the current running attempt: remain visibly
-unsynchronized until I5 or a loaded row establishes it. Automatic tail scans,
-latest-first/search APIs and full-history caches are deferred.
+unsynchronized until an event or a loaded row establishes it. Automatic tail scans,
+latest-first/search APIs and full-history caches are not part of this integration.
 
 ### 4.3 Discover and fetch a committed screenshot
 
@@ -481,7 +479,9 @@ History/preview errors stay separate from execution outcome. A 404 image keeps
 its successful attempt/reference. A 500, wrong MIME or decode failure never
 marks the workflow failed or undoes a success.
 
-## 5. I7 run controls and owner lifecycle
+<a id="5-i7-run-controls-and-owner-lifecycle"></a>
+
+## 5. Run controls and owner lifecycle
 
 ### 5.1 Scope, exact request and response shapes
 
@@ -528,7 +528,7 @@ in-flight intent and the current session/group/submission generation.
 #### Restore pending controls on subscribe and reopen
 
 The shared observation envelope and initialView must contain `controlState`,
-not just saved execution status. Use this local model from the I7 spec:
+not just saved execution status. Use this local model:
 
 | Field                          | Required local meaning                                                                                           |
 | ------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
@@ -548,12 +548,12 @@ panel during pending Pause and reopen while SQLite still says RUNNING. It
 must restore Pause requested with Resume disabled, not infer IDLE from SQLite.
 
 Native control transitions publish through the same bounded view channel even
-without an SSE event, including a lost submitRunAction IPC response. I5 can
-initially populate IDLE before I7 actions are enabled, but the DTO and startup
-ordering must already exist. Later I7 uses SUBMITTING before send, PENDING for
+without an SSE event, including a lost submitRunAction IPC response. The observer can
+initially populate IDLE before action controls are enabled, but the DTO and startup
+ordering must already exist. The action controller uses SUBMITTING before send, PENDING for
 202, UNCERTAIN for an unknown result and RESOLVED with its explicit resolution.
 Saved run state remains separate; observed cancellation never proves cleanup
-retirement. The I7 spec defines the exact DTO and transition rules.
+retirement. The control state and reconciliation rules in this section apply to every entry point.
 
 Only the current group/session/submissionVersion callback can settle an intent.
 A superseding Cancel gets a new version; a delayed Pause reply cannot clear
@@ -581,7 +581,7 @@ Closing a view does not roll back an action or erase Main's unresolved intent.
 Keep native intent/exit guard for its original group; old replies cannot clear
 a newer Cancel or modify another selected run. Route relevant response/read
 snapshots through coordinator reconciliation without letting an older watermark
-regress the I5 view or advance its processed cursor. A historical inspected
+regress the observed view or advance its processed cursor. A historical inspected
 group must not replace the current active group's owner state; use the matching
 ownership rules in section 3.3 rather than unconditional runById side effects.
 
@@ -609,7 +609,7 @@ CANCELLED. Preserve natural success/failure winners and terminal siblings.
 Pause lets the active Delay/action/retry delay finish before parking; it does
 not freeze Delay. Resume preserves this live process's RAM variables only.
 
-Use I5 observation/by-ID reconciliation. Without it, one serialized 500 ms
+Use event observation and by-ID snapshot reconciliation. Without it, one serialized 500 ms
 by-ID check while confirmation is needed is sufficient; no second permanent
 poller. Stop on observed outcome, visible read failure, view disposal or owner
 stop, retaining Main intent where reconciliation remains necessary. A local
@@ -639,7 +639,7 @@ Implement one guarded native stop flow:
    window, Runtime and run. Route window close, system Quit and before-quit
    through one decision without duplicate prompts/recursive shutdown.
 2. Set native automatic-work suppression synchronously before cancelling any
-   reader or clearing a session. Gate I5 reconnect, I6 refresh/preview, queued
+   reader or clearing a session. Gate observer reconnect, history refresh/preview, queued
    controls and automatic workflow validation, including renderer remounts.
 3. Invalidate generations and dispose read tasks/timers/previews/publications.
    An accepted action remains owned by Runtime while shutdown handles it.
@@ -673,21 +673,23 @@ operations use ERROR. Do not log tokens, PNG/output bodies, workflow contents,
 raw native errors or private device data. Do not expose public shutdown,
 raw shell/ADB controls or a generic command bridge.
 
-## 6. Delivery checklist and deferred I8
+<a id="6-delivery-checklist-and-deferred-i8"></a>
 
-### 6.1 Reviewable Studio implementation slices
+## 6. Integration checks and acceptance
 
-| Order                | Deliverable                                                                                | Focused evidence                                                                              |
+### 6.1 Implementation checklist
+
+| Component            | Deliverable                                                                                | Focused evidence                                                                              |
 | -------------------- | ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
 | Shared prerequisites | Local session identity, stop gate and non-replaying mutation seam; safe bridge extensions. | Replacement, stale-callback, explicit-stop and mutation-once tests.                           |
-| I5                   | Parser/stream, selected-run reducer, bounded publication and React binding.                | I5-01 through I5-19, including snapshot race/expiry and no redispatch.                        |
-| I6                   | Selected page/details, native PNG read, bridge and preview cleanup.                        | I6-01 through I6-14, including same-sequence updates and PNG above 2 MiB.                     |
-| I7                   | Action DTO/HTTP/bridge, intent/buttons, centralized shutdown/close.                        | I7-01 through I7-16, including conflict snapshots, uncertain outcomes and cleanup/exit races. |
+| Event observer       | Parser/stream, selected-run reducer, bounded publication and React binding.                | Snapshot/event races, cursor expiry, reconnect and no redispatch.                        |
+| History and previews | Selected page/details, native PNG read, bridge and preview cleanup.                        | Same-sequence attempt updates, paging and PNG above 2 MiB.                     |
+| Run controls         | Action DTO/HTTP/bridge, intent/buttons, centralized shutdown/close.                        | Conflict snapshots, uncertain outcomes and cleanup/exit races. |
 
 Discuss test additions through the Studio team's workflow. Its Vitest config
 defines unit/contract/integration/component test patterns; the inspected
 checkout contains tests/setup.ts, not an assumed complete test suite. Reuse
-Runtime A8 fixtures/controlled streams and clocks; no Android is needed for
+Controlled Runtime event fixtures, streams and clocks; no Android is needed for
 pure parser/DTO/race cases. After implementation run the existing scripts:
 
 ```bash
@@ -697,7 +699,7 @@ npm run lint
 npm run build:desktop
 ```
 
-These are instructions, not commands executed during this documentation task.
+Run these checks against the Studio implementation before handoff.
 
 ### 6.2 Manual checks for the Studio developer
 
@@ -730,10 +732,10 @@ do not substitute a standalone connection file. Use actual READY ADB targets.
 
 Use controlled fixtures for race/retention/transfer faults. Never corrupt user
 SQLite/artifacts or add production prune/fault endpoints for a demo. Existing
-manual references: [I4 stream](../../../../a2matex-runtime/examples/i4/README.md),
-[I1 history](../../../../a2matex-runtime/examples/i1/README.md),
-[G20 PNG](../g_workflow_engine/g20_artifact_api.md#10-manual-acceptance-with-postman)
-and [H13 actions](run_actions.md#7-postman-scenario-and-expected-history).
+manual references: [event stream](../../../../a2matex-runtime/examples/i4/README.md),
+[attempt history](../../../../a2matex-runtime/examples/i1/README.md),
+[PNG download](managed_runtime.md#postman-on-linux-or-windows)
+and [run actions](run_actions.md#7-postman-scenario-and-expected-history).
 Standalone tests diagnose APIs but do not prove Studio-managed ownership.
 
 Include the handoff-gap regression scenarios explicitly:
@@ -750,22 +752,17 @@ Include the handoff-gap regression scenarios explicitly:
   The initial view restores Main's intent before buttons enable; a stale
   Pause response cannot settle a newer Cancel.
 
-### 6.3 I8 review occurs after the implementation is pulled
+### 6.3 End-to-end acceptance handoff
 
-Use the [I8 gateway review and acceptance spec](../i_observability_apis/i8_studio_end_to_end_acceptance.md)
-for entry conditions, the read-only gateway review checklist, business scenarios,
-22 acceptance criteria and evidence/reporting rules. Every I8 criterion remains
-NOT RUN until that verification session. This remains the single I5–I7 developer
-handoff; I8 has an acceptance specification rather than another client guide.
+After implementing the integration, record Studio and Runtime revisions, host OS,
+focused test results, actual-app/device scenarios, expected versus observed
+behavior and open defects. Verify process ownership and readiness, compile/start,
+live events and reconnect, history and PNG previews, Pause/Resume/Cancel, and
+owner shutdown through the actual Studio application. API-only tests do not
+establish that the UI and native bridge work together.
 
-The user will pull the Studio code and explicitly request the I8 review and
-end-to-end acceptance later. This delivery does not implement or execute I8.
-Do not mark I5–I7 client code or I8 complete from these plans/API tests.
-
-At that later review, refresh the source baseline and return Studio/Runtime
-revisions, host OS, focused test results, actual-app/device scenarios,
-expected/observed data and open defects. Recheck current code rather than
-treating the inspected revision in this guide as current implementation.
+Recheck the current source; the inspected revision in this guide is a starting
+point, not evidence of the implementation being delivered.
 Record Linux and native Windows evidence separately. Windows managed startup
 is presently rejected in Studio and needs its own prerequisite before native
 acceptance; Runtime Windows cross-builds or curl examples are insufficient.

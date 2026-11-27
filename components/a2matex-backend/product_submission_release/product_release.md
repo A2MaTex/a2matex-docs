@@ -609,8 +609,8 @@ Static
 `PRODUCT_RELEASE_STATIC_PREFIX` is a shared constant. The R2 object key does not need an `.a2m`
 suffix; `originalFileName` and `contentType` preserve the download filename and media type.
 The planned customer-download response includes that exact name as `fileName`.
-Launcher preserves it under `<productId>/<installedReleaseId>/` inside its selected
-package directory; this local layout does not change R2 keys or archive contents.
+Launcher may store a different safe local basename (normally `package.a2m`)
+under `<productId>/` inside its selected `a2matex/products` directory; this local layout does not change R2 keys or archive contents.
 See [Runtime J1](../../a2matex-runtime/j_protected_execution/j1_production_contracts.md#3-installed-package-identity-and-public-schema)
 for the planned directory header, portable filename validation and local replacement policy.
 
@@ -669,6 +669,59 @@ and actual R2 download verification. Existing source tests are reused by request
 no new race test, fixture generator or demo program is added. Real PostgreSQL/R2
 race acceptance and the actual Backend-generated package fixture remain pending
 until that guide is executed; protocol-only J1 vectors are not that evidence.
+
+### 7.3 Customer package download — Backend Step 3
+
+The existing `ProductModule` now exposes the protected customer route:
+
+```http
+GET /api/v1/products/{productId}/package-download?releaseId=<optional UUID>
+Authorization: Bearer <Backend customer access token>
+```
+
+Use the configured API prefix in actual deployments. Product ID and optional
+Release ID are lowercase UUID v4; unknown/repeated query fields fail global Zod
+validation. Omission selects only `currentReleaseId`. An explicit older Release
+must be published, non-disabled and belong to the same Product. Its eligibility
+is not inferred from filenames or client-supplied Static IDs.
+
+The service verifies the active CUSTOMER identity and existing usable entitlement,
+then resolves the Release and undeleted Static metadata. It validates the exact
+portable server filename, lowercase SHA-256, `application/zip`, a positive file
+size up to 4 MiB and the private `products/` object-key prefix. An existing
+HEAD-backed object check precedes presigning. This adds no package streaming,
+unzip, decryption, content-key access or execution permission to the API.
+
+Success is HTTP 200 with `Cache-Control: no-store` and the normal Backend
+`{data,statusCode}` envelope. Inner fields are exactly `package` (Product ID,
+Release ID, version and package hash), `fileName`, decimal-string
+`packageSizeBytes`, temporary `downloadUrl` and UTC `expiresAt`.
+The filename remains `Static.originalFileName`; Launcher preserves it under its
+chosen Product/Release folders. Expiry uses existing `FILE_DOWNLOAD_URL_TTL`.
+See [J1's exact request, response and error contract](../../a2matex-runtime/j_protected_execution/j1_production_contracts.md#51-customer-download).
+
+Missing/expired/revoked entitlement or inactive customer returns 403
+`Error.ExecutionAuthorizationDenied`. Invalid/missing Release/package/file/object
+returns 404 `Error.ProductPackageUnavailable` after entitlement checks. Storage/
+signing failures return 503 `Error.ExecutionAuthorizationUnavailable`; malformed
+query/UUID fields use existing 422 validation. Archived Products remain usable
+for entitled customers; deleted/suspended Products are denied. Permission,
+authentication and unexpected failures retain existing Backend responses.
+
+The unscoped route permission belongs to CUSTOMER. The existing permission seed
+finds the new controller and synchronizes Admin only; the operator must grant the
+route to CUSTOMER through existing Role management with cache invalidation.
+Admin role alone is not entitlement bypass. This implementation does not execute
+permission seeds, change roles, apply a migration or add dependencies.
+
+The route is in existing `ProductController`; `ProductService` handles the request
+with small access/metadata/presigning helpers and queries live in `ProductRepo`.
+DTOs, schemas, errors and constants extend their existing Product files.
+`ProductModule` imports the existing Entitlement module; no package-specific file
+set, controller/module or AppModule registration is added. Source regression tests are reused by
+request; live customer/permission/R2 verification is pending Step 4. Follow the
+[Launcher Backend-download walkthrough](../../a2matex-runtime/integration/launcher.md#backend-package-download)
+for Postman and acceptance cases; Product execution remains later Phase J work.
 
 ## 8. Publication transaction
 
@@ -1011,7 +1064,6 @@ and `contentHash`; its package service accepts those stored values as immutable 
 ## 15. Deferred work
 
 - Asset-inclusive packages and large-file streaming build.
-- Customer package Download Authorization/presigned delivery.
 - Runtime key envelope and execution-lease implementation.
 - Package signing beyond SHA-256 and authenticated API delivery.
 - Staged/canary rollout and automatic health rollback.

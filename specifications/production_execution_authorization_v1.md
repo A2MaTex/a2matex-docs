@@ -124,19 +124,30 @@ For every immutable Product Release, Backend:
    the existing Backend workflow `nonce` is distinct from `contentKeyNonce`;
 6. uploads the encrypted package to object storage.
 
+Backend Step 3 implements `GET /products/{productId}/package-download`, using
+normal customer authentication/permissions, active CUSTOMER eligibility and the
+existing Entitlement service. Omitted Release ID resolves only the selected current
+Release; explicit IDs must be published, non-disabled and belong to the Product.
+The endpoint checks private file metadata/object existence and reuses the storage
+presigner. It does not unwrap a key or invoke execution authorization. Exact DTOs,
+errors, permission assignment and live acceptance are in
+[J1 section 5.1](../components/a2matex-runtime/j_protected_execution/j1_production_contracts.md#51-customer-download).
+Runtime package APIs and actual Launcher integration remain later tasks.
+
 Launcher downloads the encrypted package after entitlement-based download
 authorization and verifies `packageHash`. The planned customer download response
-includes `fileName` from `Static.originalFileName`; Launcher preserves that name.
+includes `fileName` from `Static.originalFileName`; Launcher may choose a different
+local safe basename, normally `package.a2m`, and records that actual name.
 R2 still uses its private UUID-sharded object key. Launcher installs under its
-selected root as `<productId>/<installedReleaseId>/<productSlug>-<releaseVersion>.a2m`.
-The default root is the OS Documents folder plus `A2MaTeX/launcher/product-packages`;
+selected root as `<productId>/<fileName>` with a `.a2m` basename.
+The default root is the OS Documents folder plus `a2matex/products`;
 Launcher may offer a different user-selected directory. The package remains encrypted on disk.
 
 For the MVP, Launcher selects one installed Release per Product through its local
 installation record, compares its ID with Backend's selected current Release,
 and downloads/verifies a replacement before switching. Do not update/move/delete
 a package used by a preparing session or active/paused run. After activation,
-delete the old Release folder; no permanent local multi-version cache is required.
+remove only the previous package/temporary backup, preserving other Product-folder files; no permanent local multi-version cache is required.
 Backend Release history and retained Runtime execution records are independent
 of that local file cleanup.
 
@@ -170,9 +181,15 @@ Runtime admits the run only after it verifies:
 
 Launcher sends the selected absolute root in `X-A2MaTeX-Package-Directory`,
 percent-encoding its UTF-8 bytes as specified by J1. In the JSON body,
-`packageRef` is `<productId>/<installedReleaseId>/<productSlug>-<releaseVersion>.a2m`;
-`installedReleaseId` equals the body's `releaseId`. Supply the expected Product/
-Release/hash and preserved filename from authenticated Backend download metadata.
+`packageRef` is `<productId>/<fileName>` with a safe `.a2m` basename;
+Product ID comes from its folder and is matched against the manifest. Release
+ID/version come from the validated manifest; the installation record stores the
+chosen local filename, normally `package.a2m`. The schema
+inspection body contains only `packageRef` and `launcherVersion`: no IDs or hash.
+It reports the actual ZIP hash after internal content/compatibility checks; it
+does not attest Backend origin. Launcher verifies download length/SHA-256 before
+installation. Later session preparation binds the expected selected-package hash;
+signed Backend authorization must authenticate that package before execution.
 The header is required for schema, preparation, initial start and fresh-session
 reauthorization acceptance. Preparation freezes the normalized root and selection;
 start/reauthorization must match them. Other Product calls may carry it without
@@ -180,7 +197,7 @@ reopening packages or changing session identity. Never send this local header to
 Backend/R2. Reject malformed/repeated directory headers, unsafe relative paths,
 traversal, symlink/reparse escapes, URLs or an unverified replacement file. The
 user-selected absolute root is allowed; absolute paths inside `packageRef` are not. J4 exposes only the
-verified public input schema and package identity, without decryption, Backend
+internally checked public input schema, package identity and actual hash, without decryption, Backend
 communication or authorization-session creation. J10 preparation generates
 executionId before authorization; the admitted RunGroup ID equals executionId.
 
@@ -229,7 +246,7 @@ The lease is a compact signed token with these required claims:
 | `sequence`               | Strictly increasing grant number, beginning at `1`; advances on renewal and fresh-session reauthorization |
 | `executionId`            | Runtime-prepared identity, equal to the eventual RunGroup ID |
 | `entitlementId`          | Entitlement used for the decision                                |
-| `customerId`             | Authorized customer                                              |
+| `userId`                 | Authorized user                                              |
 | `productId`              | Authorized Product                                               |
 | `releaseId`              | Exact immutable Product Release                                  |
 | `packageHash`            | Exact encrypted package                                          |
@@ -247,6 +264,10 @@ projections are UTC RFC 3339 millisecond strings. The time invariant is:
 ```text
 issuedAt <= notBefore < refreshAfter < expiresAt
 ```
+
+The new signed identity claim is userId. Existing v1 signed fixture payloads
+use customerId and remain historical; a re-signed v2 set is required before
+Runtime J6 acceptance. Existing Entitlement/Order column names are unchanged.
 
 Backend owns duration/renewal configuration and caps finite grants at entitlement
 expiry. J1's defaults are 1,800 seconds with a 600-second scheduled renewal lead;
@@ -288,10 +309,20 @@ attestation and TPM-backed keys are deferred hardening.
 ## 7. Renewal and retry
 
 Launcher owns Backend communication because it owns the customer login session.
-The family/receipt model and Backend/Runtime renewal DTOs are fixed by J1. One
-family retains one unique executionId. Request receipts retain safe decision
-metadata, not signed tokens/envelopes. Changed request content conflicts;
-retries do not advance deadlines or sequence again.
+The family/receipt model and Backend/Runtime DTOs are fixed by J1 and the
+[Backend authorization spec](../components/a2matex-backend/commerce_entitlement_execution/execution_authorization.md).
+One family retains one unique executionId (the RunGroup across selected devices).
+It stores direct userId/productId plus entitlementId and exact Release binding,
+current grant/session/key, signing-key ID and deadlines. Both tables extend
+Backend Base including deletedAt, without delete/restore endpoints. No family
+status, eligibility snapshot or separate notBefore column is needed: derive
+signed notBefore from issuedAt. Current eligibility/expiry checks govern grants.
+Receipts store request identity/fingerprint and matching family/lease ID, not
+claims snapshots, signatures, envelopes or duplicated key metadata. Only the
+current matching grant may replay; changed input or superseded receipts conflict.
+Two transactions surround in-memory signing/envelope construction, with final
+eligibility/ownership checks and atomic family/receipt commit. No unsigned
+proposal is persisted. Retries never advance deadlines or sequence again.
 Runtime owns the authoritative local deadline and enforcement.
 
 ```mermaid

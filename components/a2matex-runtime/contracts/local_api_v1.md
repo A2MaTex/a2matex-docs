@@ -87,8 +87,10 @@ exact routes/DTOs, Backend response differences and safe Product projections
 are defined in J1; Development request/response shapes below remain unchanged.
 J1's planned package calls use `X-A2MaTeX-Package-Directory` for a percent-encoded
 absolute Launcher-selected root and JSON `packageRef` for
-`<productId>/<installedReleaseId>/<productSlug>-<releaseVersion>.a2m`.
-The filename is preserved from Backend download metadata. See
+`<productId>/<fileName>`, using a safe local `.a2m` basename, normally
+`package.a2m`. Product ID is matched to the folder; Release identity comes from
+the validated manifest. The default root is the OS Documents folder plus
+`a2matex/products`; Launcher resolves redirected Documents on both hosts. See
 [J1 package location and replacement rules](../j_protected_execution/j1_production_contracts.md#3-installed-package-identity-and-public-schema)
 for required-header operations, Windows/Linux encoding, containment, frozen
 session roots and single-installed-Release updates. This adds no filesystem
@@ -519,7 +521,7 @@ and contain exact A5 NodeAttempt projections:
 `nextAfterSequence` is the last returned sequence when another page exists and
 is null otherwise. Unknown query parameters are rejected.
 
-I1 is implemented and Linux-verified. Its [shared client reference](../integration/managed_runtime.md#node-attempt-history-api--i1)
+I1 is implemented and Linux-verified. Its [shared client reference](../integration/managed_runtime.md#node-attempt-history-api)
 defines strict query decoding, active-attempt refresh, errors and Screenshot-ID
 discovery. The [I1 spec/evidence](../i_observability_apis/i1_node_attempt_history_api.md)
 records implementation scope and platform/regression limits. Attempt sequence

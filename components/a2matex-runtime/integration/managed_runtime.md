@@ -98,12 +98,11 @@ is no longer relevant to the app, such as validation of an older draft.
 
 ## Failure and shutdown
 
-H14 now verifies the Linux controlled shutdown/recovery path using the actual
-agent, H13 actions and persistent dispatch journals: clean stop cancels unfinished
-work; owner loss/forced exit leaves remaining work to become INTERRUPTED before
-the next readiness handoff; neither restart nor replay dispatches old actions.
-See the [inspectable H14 walkthrough](../../../../a2matex-runtime/examples/h14/README.md).
-Native Windows and independent real Android acceptance remain separate gates.
+A clean owner stop cancels unfinished work before Runtime exits. After a crash
+or forced exit, remaining work becomes INTERRUPTED before the next readiness
+handoff. Restarting Runtime never dispatches old actions again. Verify these
+paths with the [shutdown walkthrough](../../../../a2matex-runtime/examples/h14/README.md)
+and your app's close/quit controls on each supported host.
 
 | Signal | Parent behavior |
 |---|---|
@@ -111,14 +110,14 @@ Native Windows and independent real Android acceptance remain separate gates.
 | Child exits with another code before readiness, sends a malformed record, or exceeds the startup deadline | Report startup failure. Close the pipes and ensure the child exits. |
 | Child exits unexpectedly, the control channel breaks, or the readiness probe fails | Discard that child's URL and token. For pending work, stop any surviving child and confirm exit within a deadline, then start one shared replacement and probe its fresh session. A failed replacement ends the attempt for all waiting requests. |
 | User selects **Shut down Runtime** or exits the owning app | Suppress automatic launch, clear the session, send the exact bytes `shutdown\n` on the command pipe, and await process exit before displaying **Stopped**. Use bounded termination if the process fails to exit. Only an explicit Runtime action clears suppression. |
-| Parent disappears | Closing the command pipe produces EOF in the child and triggers bounded cleanup. D6 handles unfinished execution records at the next start. |
+| Parent disappears | Closing the command pipe produces EOF in the child and triggers bounded cleanup. Unfinished execution records are marked INTERRUPTED at the next start. |
 | API operation returns diagnostics or an ordinary error | Surface the result while retaining the healthy session. |
 
 A transport failure after sending a request can leave an unknown outcome.
 Validation and compilation can be retried after the session is ready again.
-For a future run-start retry, reuse the original request ID and exact payload.
-Active-run cancellation through H6 and the execution endpoints still require
-their own verification.
+For an uncertain run-start response, reuse the original request ID and exact
+payload. Use the [run-action guide](run_actions.md) for Cancel, Pause and Resume;
+HTTP Cancel keeps Runtime alive, while owner shutdown exits the process.
 
 To reproduce the verified Linux lifecycle from the Runtime repo, run
 `make build`, then
@@ -133,8 +132,8 @@ Build request URLs from the ready message. For example, an `apiBaseUrl`
 ending in `/api/v1` becomes `{apiBaseUrl}/runtime-info`. Append the route
 suffix once. Local responses carry `Cache-Control: no-store`. The [shared lifecycle-action guide](run_actions.md)
 documents implemented group controls for both client developers. The
-[I1 history reference](#node-attempt-history-api--i1) supplies committed node outputs.
-[I4 event streaming](#execution-event-stream--i4) supplies continuous committed
+[attempt-history reference](#node-attempt-history-api) supplies committed node outputs.
+[event streaming](#execution-event-stream) supplies continuous committed
 state changes and cursor-based reconnect through the same native client.
 
 ### GET /api/v1/health
@@ -199,7 +198,7 @@ signals outside this HTTP error envelope.
 
 ### Device inventory API
 
-Both [E7 routes](../e_device_subsystem/e7_device_api.md) are available on the
+Both device routes are available on the
 Runtime build. Each request uses the owning app's current `apiBaseUrl` and
 bearer token. Send no query parameters
 or body, including on refresh. For example, run these calls from an authorized
@@ -235,9 +234,63 @@ for the 20-second refresh budget and process cleanup. If the child exits
 during the operation, apply the managed readiness and replacement flow
 before the next request. A replacement child starts with an empty list.
 
+## Package input-schema API
+
+`POST /api/v1/product-packages/input-schema` is available for Launcher to display
+an installed Product's input form. It does not start a workflow or contact Backend.
+Follow the [Launcher form guide](launcher.md#read-the-installed-packages-input-schema)
+for complete Postman, Linux and Windows examples and installation requirements.
+
+Send current local Runtime Bearer, `Content-Type: application/json`, and exactly
+one `X-A2MaTeX-Package-Directory` containing the once percent-encoded absolute
+native package root. Do not use a Backend token. The body is exactly:
+
+```json
+{
+  "packageRef": "11111111-1111-4111-8111-111111111111/package.a2m",
+  "launcherVersion": "0.1.0"
+}
+```
+
+The relative reference is `<productId>/<local filename>.a2m`, normally ending
+in `package.a2m`, and uses `/` on both hosts. The directory header names the
+products root (OS Documents plus `a2matex/products` by default). Launcher resolves
+redirected Documents, including OneDrive. Product ID is matched against the
+folder; Release ID/version come from the validated manifest. No separate IDs, request hash, input values
+or upload are accepted. Require one UTF-8 JSON object of at most 4 KiB, no query,
+no duplicate/extra fields or nonempty Content-Encoding. The existing raw ZIP and
+combined expanded-content budgets are 4 MiB and 2 MiB.
+
+HTTP 200 returns `{package: {productId, releaseId, version, packageHash}, inputSchema}`
+with no Backend wrapper. The schema uses the reduced input-schema vocabulary.
+The hash identifies the exact current ZIP; it does not attest original Backend
+origin. Launcher checks download length/SHA-256 before installing. Inspection
+checks package containment, manifest identity/member hashes, schema, versions
+and capabilities offline, without leases, decryption, sessions or execution writes.
+An older compatible installed Release does not require a newest-version lookup.
+Keep the form associated with the returned package identity/hash.
+
+| HTTP | Code | Meaning |
+| --- | --- | --- |
+| 400 | `INVALID_REQUEST` | Invalid transport, body, location/reference/header or Launcher version. |
+| 401 | `UNAUTHORIZED` | Missing/invalid local session; authenticate before package access. |
+| 404 | `RESOURCE_NOT_FOUND` | Installed file/directory missing or unsupported route/method. |
+| 413 | `PAYLOAD_TOO_LARGE` | Request body exceeds 4 KiB. |
+| 422 | `VALIDATION_FAILED` | Invalid package, manifest, member hashes, identity or schema. |
+| 422 | `RUNTIME_INCOMPATIBLE` | Runtime/Launcher version or required capability unsupported. |
+| 503 | `INTERNAL_ERROR` | Temporarily unavailable/cancelled read; retryable true. |
+| 500 | `INTERNAL_ERROR` | Unexpected server failure; retryable false. |
+
+Failures use the standard generic error envelope; no raw filesystem details,
+protected workflow or validation report is disclosed. All responses are no-store.
+Runtime's own version is taken from its build, not this body; a `0.0.0-dev` build
+cannot satisfy strict package version requirements. Prepared sessions and
+protected start/monitoring APIs are still unavailable. Existing Development APIs
+retain their current behavior.
+
 ## Run snapshot APIs
 
-G13 exposes two ordinary JSON reads. They return immediately during a run or
+Runtime exposes two ordinary JSON reads. They return immediately during a run or
 after completion; they do not wait for completion or stream logs. Both require
 the current bearer token, take no query parameters or body, and return
 `Cache-Control: no-store` for both success and errors.
@@ -254,7 +307,7 @@ ID still returns the older run.
 
 ### Snapshot response
 
-HTTP 200 returns the direct A7 object below. This example is a queued run;
+HTTP 200 returns the direct snapshot object below. This example is a queued run;
 RUNNING is already the group's status before its first device starts.
 
 ```json
@@ -294,10 +347,10 @@ RUNNING is already the group's status before its first device starts.
 
 | Field | Client interpretation |
 |---|---|
-| `cursor` | Decimal string containing the Runtime-wide event watermark read with this snapshot. Preserve it as a string; it is not progress percentage or this run's attempt count. Use it when subscribing after an authoritative snapshot through [I4](#execution-event-stream--i4). |
+| `cursor` | Decimal string containing the Runtime-wide event watermark read with this snapshot. Preserve it as a string; it is not progress percentage or this run's attempt count. Use it when subscribing after an authoritative snapshot through [the event stream](#execution-event-stream). |
 | `runGroup` | Saved identity, originating request ID, status, UTC millisecond timestamps, and device counts. All summary fields remain present even when zero. |
 | `deviceExecutions` | All admitted devices in admission order, with status, saved position, timestamps and terminal error. Reads include the complete stored membership, without a fixed device-count guard. Optional fields are explicitly null. |
-| `nextNodeId` | Saved A5 execution position; it may be an active node, retry node, or pending successor. It is not a separate live-handler measurement. |
+| `nextNodeId` | Saved execution position; it may be an active node, retry node, or pending successor. It is not a separate live-handler measurement. |
 | `terminalError` | Null or the existing safe `{code,message,retryable}` error. It contains no raw ADB output or workflow values. |
 
 The state, device list, derived summary, and cursor come from one SQLite read
@@ -396,9 +449,9 @@ Expected checks: active/saved state returns 200, idle active returns 404,
 
 ### Optional saved-result fixture without Android
 
-G14 now provides the [public start route](#workflow-start-api). To inspect
+Runtime provides the [public start route](#workflow-start-api). To inspect
 only saved cancellation data without an Android device,
-reuse the Git-ignored G12 smoke from the repository root. Stop any other owner
+use the optional local smoke tool, if present, from the repository root. Stop any other owner
 of that demo store first. It prints a group ID and cancels its queued run before
 releasing SQLite. Keep that printed RunGroup ID for the requests above.
 
@@ -425,18 +478,15 @@ go build -buildvcs=false -o .\bin\a2matex-runtime.exe .\cmd\agent
 Wait for Runtime readiness, then use a second terminal/Postman. On Windows, set
 that same LOCALAPPDATA override in the second terminal before locating its
 connection file; the variable is local to each terminal. Linux's state override
-does not change its B5 connection-file selection. Read fresh credentials from
+does not change its connection-file location. Read fresh credentials from
 this running agent, not from the exited smoke tool. The normal Runtime database
 is separate; the smoke's data stays in its readable `state` folder.
 
 By-ID must return the saved CANCELLED group/device, and active must return
 404. The demo SQLite node_attempts table remains empty; attempt history is not
-a field in the snapshot response. The built Linux agent was verified using a temporary
-copy of this smoke database: the snapshot calls and clean process shutdown left
-all row/event counts unchanged. The Linux curl helper was also exercised against
-that build. Active-to-terminal reads and concurrent checkpoint/cursor consistency
-are covered by real-SQLite authenticated router tests; native Windows acceptance
-remains pending.
+a field in the snapshot response. Reading or replaying saved data must not add
+attempts or events. Repeat the saved-result and shutdown checks on each supported
+host, including native Windows.
 
 ## Workflow start API
 
@@ -446,8 +496,8 @@ Use this endpoint when the publisher presses **Test Run** in Studio. It accepts
 compiled Runtime IR and an ordered array of selected devices with per-device inputs, persists admission, hands the
 execution to the Runtime owner, and returns a snapshot. The HTTP response waits
 for admission/handoff, not workflow completion. Execution continues after the
-request disconnects. H4 admits the complete non-empty selection, with no fixed device-count ceiling.
-Production package/path admission remains Phase J.
+request disconnects. Runtime admits the complete non-empty selection, with no fixed device-count ceiling.
+Production package/path admission is not yet available.
 
 Set Variable is executable through this same API. A newly created run receives
 empty Flow/Global RAM scopes; Studio sends no variable seed map or persistence
@@ -456,23 +506,23 @@ and `bindings.value` supplies the scalar before compilation. Assignment becomes
 visible after its successful node checkpoint; its node output is `{}`. Missing
 reads follow STOP/ERROR_BRANCH, and variables are released after all group workers and callbacks
 join. Replay neither creates scopes nor executes again. Runtime restart
-interrupts unfinished work and restores no variables. Multi-device scheduling is implemented in H4;
+interrupts unfinished work and restores no variables. Multi-device scheduling is available;
 HTTP Pause/Resume/Cancel is implemented; use the [action guide](run_actions.md).
-Wait Variable remains deferred. Use the
-[G18 manual example](../../../../a2matex-runtime/examples/g18/README.md)
-for the complete compile/start/poll scenario and SQLite evidence.
+Wait Variable is not yet supported. Use the
+[Set Variable and Switch example](../../../../a2matex-runtime/examples/g18/README.md)
+for the complete compile/start/poll scenario and expected saved results.
 
 Screenshot is also executable through this API when Runtime Info advertises
 `android.screenshot` with the same handler key. It supports FULL_SCREEN,
 ABSOLUTE_PIXELS, and SCREEN_PERCENT through the existing catalog fields.
 Successful output is only the committed artifactId; the PNG file and metadata
 are stored by the Runtime. Run snapshots remain status-only and do not gain
-image bytes or node-output fields. A replay takes no new capture. G20 now
+image bytes or node-output fields. A replay takes no new capture. Runtime
 provides [authenticated PNG downloads](#screenshot-artifact-download-api)
-when the artifactId is known. [I1 history](#node-attempt-history-api--i1) now
+when the artifactId is known. [Attempt history](#node-attempt-history-api)
 exposes committed attempt outputs and Screenshot IDs without SQL. The older
-[G19/G20 walkthrough](../../../../a2matex-runtime/examples/g19/README.md) retains
-its optional developer-only SQL inspection; use the I1 API for client integration.
+[screenshot walkthrough](../../../../a2matex-runtime/examples/g19/README.md) retains
+its optional developer-only SQL inspection; use the attempt-history API for client integration.
 
 | Request setting | Exact value |
 |---|---|
@@ -517,7 +567,7 @@ sequenceDiagram
 Before starting, the owned Runtime must pass authenticated readiness, support
 the compiled workflow's version/handlers, and see every selected device READY.
 Studio first compiles the captured graph/schema and refreshes device selection;
-admission still performs its own fresh E6 check.
+admission still performs its own fresh device-readiness check.
 
 For manual Linux testing from the Runtime repository root:
 
@@ -539,7 +589,7 @@ $env:A2MATEX_RUNTIME_ADB_EXECUTABLE_PATH = Join-Path $HOME 'Documents\platform-t
 These are standalone examples. Desktop integration uses the [managed launch](#start-the-child),
 not shell commands or a Postman environment script. Each restart supplies new
 credentials. The shared version/ADB-default refactor is not implemented;
-`0.0.0-dev` can serve authoring/read requests but G1 rejects execution with
+`0.0.0-dev` can serve authoring/read requests but run admission rejects execution with
 `422 RUNTIME_INCOMPATIBLE`. The current catalog requires at least `0.1.0` for
 this example. Check the actual `runtimeVersion` from Runtime Info.
 
@@ -776,8 +826,8 @@ The ten-second example eventually returns HTTP 200 with:
 Use the by-ID route to retain this result. `GET /runs/active` returns 404 when
 there is no active group; that does not delete the completed run. A broken GET
 or 500 response is a read failure, not proof of a terminal workflow outcome.
-[Paged attempt history](#node-attempt-history-api--i1) and the
-[I4 event stream](#execution-event-stream--i4) are implemented.
+[Paged attempt history](#node-attempt-history-api) and the
+[event stream](#execution-event-stream) are implemented.
 
 ### Replay response: HTTP 200 OK
 
@@ -809,7 +859,7 @@ intent until a response resolves it; never silently replace it on a timeout.
 
 ### Error responses and Studio actions
 
-Failure bodies contain the A6 error and optionally G1 validation diagnostics.
+Failure bodies contain the standard error envelope and optional workflow validation diagnostics.
 They do not contain a partial successful snapshot or arbitrary inventory.
 Readiness rejection includes the typed unavailableDevices array described below.
 For example, HTTP 409 is:
@@ -891,26 +941,24 @@ when the graph is validated/compiled.
 The single-device example settles with one group, one device, three SUCCEEDED attempts, and
 13 events attributable to that group. Outputs are {}, {"durationMs":10000},
 and {}. GET/replay cause no additional writes; an active worker can independently
-advance while a request is served. Use the [G14 SQL queries](../g_workflow_engine/g14_start_run_api.md#13-manual-acceptance-scenario)
-and the actual running Runtime's SQLite store, not another smoke database.
+advance while a request is served. Observe progress through snapshot, attempt
+history and event APIs; clients do not need direct SQLite access.
 
 Closing the HTTP connection does not cancel owned execution. Intentional owner
-shutdown settles unfinished work through G11 before SQLite closes. Crash/forced
-exit uses D6 INTERRUPTED recovery on restart, without automatic action replay.
+shutdown settles unfinished work before SQLite closes. Crash/forced
+exit marks unfinished work INTERRUPTED on restart, without automatic action replay.
 HTTP Pause/Resume/Cancel is implemented; see the [action guide](run_actions.md).
-Attempt history is implemented under [I1](#node-attempt-history-api--i1) and SSE
-under [I4](#execution-event-stream--i4). The app's Stop and exit action
+Attempt history is implemented through [the history API](#node-attempt-history-api) and SSE
+through [the event API](#execution-event-stream). The app's Stop and exit action
 uses the private owner channel.
 
-Built-agent Linux checks with live Waydroid already passed 201/200/409/400/422
-behavior, three successful attempts/13 events, replay with no writes, intentional
-cancellation, and crash/restart interruption without redispatch. Existing
-managed-process ownership checks also pass. Native Windows has cross-build
-evidence only; Windows examples still require native acceptance.
+Verify admission, replay, intentional cancellation and crash/restart interruption
+with your app-managed process. Native Windows needs its own execution checks;
+a cross-build does not establish native acceptance.
 
 ### Multi-device request and observations
 
-H4 is implemented. Use the complete readable
+Use the complete readable
 [two-device start file](../../../../a2matex-runtime/examples/h4/start-run.json)
 and [compile graph](../../../../a2matex-runtime/examples/h4/compile-workflow.json),
 with the [Postman/SQLite walkthrough](../../../../a2matex-runtime/examples/h4/README.md).
@@ -951,9 +999,11 @@ readiness errors, intentional shutdown and restart without redispatch, using
 controlled ADB and isolated SQLite. This is not independent real-Android or
 native Windows acceptance. Production encrypted-package start remains pending.
 
-### Device disconnect after admission — H5
+<a id="device-disconnect-after-admission--h5"></a>
 
-Runtime now makes one bounded transport observation after a nonzero ADB command
+### Device disconnect after admission
+
+Runtime makes one bounded transport observation after a nonzero ADB command
 result. A missing selected serial becomes `DEVICE_DISCONNECTED`; observed offline,
 unauthorized or other unavailable states retain their corresponding device codes.
 These execution errors are non-retryable. Only that device stops; siblings keep
@@ -966,7 +1016,7 @@ For a disconnected member, the error object is:
 ```
 
 The group can remain RUNNING with one FAILED member until its siblings finish,
-then derive FAILED. This is different from H4's pre-admission 422 rejection:
+then derive FAILED. This is different from pre-admission 422 rejection:
 the run already exists, so inspect its saved snapshot rather than expect a new
 HTTP error from the original POST. Do not automatically resubmit under a fresh
 requestId, repeat the failed action or resume a reconnected member.
@@ -974,19 +1024,17 @@ requestId, repeat the failed action or resume a reconnected member.
 Successful commands add no observation. There is no background watcher: loss
 during Delay/RAM-only work is noticed only by a later failing ADB operation.
 An unsuccessful diagnosis preserves the original command failure; an expired
-attempt follows timeout rules. See the [H5 manual scenario and evidence](../h_multi_device_execution/h5_device_disconnect_handling.md).
-H15 adds approved focused transport classification/context tests and actual-agent
-two-device disconnect isolation; Linux controlled checks pass. Independent real
-Android/native Windows disconnect observations remain pending. The
-[combined H15 pack](../../../../a2matex-runtime/examples/h15/README.md) provides
-readable graphs, commands, snapshots, SQLite/journal/PNG inspection and live steps.
-It also verifies existing start/poll/artifact and Pause/Resume/Cancel APIs together;
-this adds no new API. Required live acceptance and the named G22 regression gate
-remain open; see the [H15 criterion report](../h_multi_device_execution/h15_combined_multi_device_acceptance.md#14-implementation-and-verification-evidence--2026-11-23).
+attempt follows timeout rules. Use the
+[combined API walkthrough](../../../../a2matex-runtime/examples/h15/README.md)
+to check independent device results, artifacts and group controls. Repeat
+transport/disconnect checks with actual target devices and native Windows;
+controlled Linux tests alone do not establish those outcomes.
 
-## Group lifecycle-action API — H13
+<a id="group-lifecycle-action-api--h13"></a>
 
-`POST {apiBaseUrl}/runs/{runGroupId}/actions` now supports PAUSE, RESUME and
+## Group lifecycle-action API
+
+`POST {apiBaseUrl}/runs/{runGroupId}/actions` supports PAUSE, RESUME and
 CANCEL with the current bearer token. See the shared [action API guide](run_actions.md)
 for exact DTOs, complete 200/202/409 responses, errors, Linux curl, Windows
 PowerShell, Postman and polling/reconnect rules. This route is Linux-verified
@@ -996,15 +1044,16 @@ control acceptance remains separate.
 Pause/Resume retains live workers and Flow/Global RAM. Cancel interrupts the
 current group, joins cleanup and leaves Runtime alive for another run. Stop and
 exit still uses the private owner pipe and awaits process exit. Runtime restart
-never resumes the old execution. Wait Variable remains deferred under H6–H8.
+never resumes the old execution. Wait Variable remains unsupported.
 
-## Node-attempt history API — I1
+<a id="node-attempt-history-api--i1"></a>
 
-I1 exposes the committed steps of one device execution. It is implemented and
-Linux-verified on 2026-11-24 using real router/SQLite workflow tests, Screenshot
-retrieval and a built agent serving retained synthetic history across two
-sessions. The latter requires no Android device. Windows cross-build and native
-Windows execution are separate evidence; native execution remains unverified.
+## Node-attempt history API
+
+This endpoint exposes the committed steps of one device execution, including
+saved outputs. No Android device is needed to inspect retained history. Use the
+saved DeviceExecution ID and current Runtime session. Verify native Windows
+behavior separately; a cross-build alone is not native acceptance.
 
 ```http
 GET {apiBaseUrl}/device-executions/{deviceExecutionId}/attempts?afterSequence=0&limit=100
@@ -1036,12 +1085,12 @@ number of devices admitted to a run.
 
 HTTP 200 returns exactly `attempts` and `nextAfterSequence`. Each attempt has
 id/deviceExecutionId, sequence/nodeId/attemptNumber, status, startedAt,
-finishedAt, output and error. Timestamps use A1 UTC millisecond strings; null
+finishedAt, output and error. Timestamps use UTC millisecond strings; null
 fields remain explicit. Status is RUNNING, SUCCEEDED, FAILED, TIMED_OUT,
 CANCELLED or INTERRUPTED. A retry is a distinct attempt with its own ID and
 sequence; keep its attemptNumber and do not collapse by nodeId.
 
-For example, reading a completed H15 run with `afterSequence=7&limit=1` can return:
+For example, reading a completed run with `afterSequence=7&limit=1` can return:
 
 ```json
 {
@@ -1084,8 +1133,8 @@ afterSequence while refreshing, and upsert by attempt ID. A short-run inspector
 can refresh from zero; page through long history without an unbounded full-history
 loop. Stop polling when the view closes or the terminal run's displayed history
 has been refreshed. Cancelled HTTP reads do not cancel the workflow. Continuous
-event delivery is available through [I4](#execution-event-stream--i4), with
-Studio reconciliation owned by I5. This attempt page has no event watermark.
+event delivery is available through [the event stream](#execution-event-stream), with
+Studio reconciliation described in the [monitoring guide](studio_observability.md#3-live-events-and-reconnect). This attempt page has no event watermark.
 
 ### Errors and Screenshot discovery
 
@@ -1113,9 +1162,9 @@ and Launcher must not query SQLite for ID discovery.
 In Postman, set DEVICE_EXECUTION_ID manually from your actual run snapshot.
 Create GET `{{API_BASE_URL}}/device-executions/{{DEVICE_EXECUTION_ID}}/attempts`
 with Params afterSequence=0 and limit=1, Body none and Bearer SESSION_TOKEN.
-For the completed H4 Start/Delay/End graph, expect sequences1,2,3 over three
+For the completed Start/Delay/End graph, expect sequences1,2,3 over three
 pages with continuation1,2,null. Increasing afterSequence to3 gives empty200.
-Use the [complete I1 walkthrough](../../../../a2matex-runtime/examples/i1/README.md)
+Use the [attempt-history walkthrough](../../../../a2matex-runtime/examples/i1/README.md)
 for compilation/start, active refresh, negative cases and Screenshot preview.
 
 On Linux, using the `runtime_connection` array loaded by the
@@ -1141,17 +1190,11 @@ Invoke-RestMethod -Uri "$($Connection.apiBaseUrl)/device-executions/$DeviceExecu
 ```
 
 The PowerShell example is a client reference, not native Windows acceptance.
-I1 has focused handler, compiled two-device SQLite/API, retained built-agent,
-retry/recovery and G20 bridge evidence. The known missing G22/H14/H15 Python
-harnesses still fail the full regression suite; I1 does not repair those packs
-or close Phase H/live-device gates. See the
-[I1 evidence record](../i_observability_apis/i1_node_attempt_history_api.md#12-implementation-and-verification-evidence--2026-11-24).
-
 ## Screenshot artifact download API
 
 ### GET /api/v1/artifacts/{artifactId}
 
-Implemented in G20 for a committed Screenshot PNG. This is a read-only binary
+Use this endpoint to read a committed Screenshot PNG. This is a read-only binary
 request, independent of whether its workflow is still running, completed,
 failed, cancelled, or interrupted. Downloads need no connected Android device
 or ADB executable and never capture again or change run state.
@@ -1168,12 +1211,12 @@ or ADB executable and never capture again or change run state.
 Use the existing actual-readiness gate before sending. On restart, obtain the
 new session token; the same historical artifact ID remains valid if its stored
 row/file survive. Runtime Info's supportedNodes list advertises executable
-nodes, not API routes. Use a build containing G20 for downloads.
+nodes, not API routes. Use a build that includes this artifact-download endpoint.
 
 **ID discovery:** POST/GET run snapshots remain status-only. Read the selected
-device's [I1 attempt history](#node-attempt-history-api--i1), then take the
+device's [attempt history](#node-attempt-history-api), then take the
 SUCCEEDED Screenshot output.artifactId. Studio/Launcher need no SQLite lookup.
-A known ID is sufficient for G20; no file path is accepted.
+A known artifact ID is sufficient; no file path is accepted.
 
 ### Response and failure handling
 
@@ -1211,7 +1254,7 @@ preview never changes the committed Screenshot result or run status.
 
 ### Postman on Linux or Windows
 
-1. Start a G20 Runtime build. Follow the [authentication guide](local_authentication.md)
+1. Start a Runtime build that includes artifact downloads. Follow the [authentication guide](local_authentication.md)
    to obtain its actual apiBaseUrl and current session token.
 2. Run the [Screenshot example](../../../../a2matex-runtime/examples/g19/README.md)
    and obtain its committed artifact_id using the manual read-only query.
@@ -1228,16 +1271,19 @@ preview never changes the committed Screenshot result or run status.
 
 The native client owns readiness/authentication and binary fetching. Pass
 bytes or a managed asset handle/object URL to the UI; keep the token native.
-A bare image URL cannot attach the required Bearer header. I1 now supplies
-committed output IDs; the Studio inspector/automatic preview UI remains I6.
+A bare image URL cannot attach the required Bearer header. Attempt history supplies
+committed output IDs; implement automatic preview in the Studio inspector as
+described in the [monitoring guide](studio_observability.md#4-attempt-history-and-screenshot-inspection).
 
-## Execution event stream — I4
+<a id="execution-event-stream--i4"></a>
+
+## Execution event stream
 
 **Implemented and Linux-verified.** Use `GET {apiBaseUrl}/events` to receive
 committed execution-state changes continuously. This is one Runtime-wide stream,
 not a request to run a workflow, a per-device feed or operational log output.
 Keep the same connection across run completion when the app still needs updates.
-I5 owns the actual Studio reconnect/view implementation; this section defines
+Studio implements its reconnect/view behavior using the [monitoring guide](studio_observability.md); this section defines
 the available Runtime API for both native client developers.
 
 ### Request and response contract
@@ -1281,15 +1327,15 @@ data: {"cursor":"42","type":"NODE_ATTEMPT_STATE_CHANGED","occurredAt":"2026-11-2
 
 ```
 
-`data` is complete single-line A6 JSON. `id` equals `data.cursor` and `event`
+`data` is complete single-line event JSON. `id` equals `data.cursor` and `event`
 equals `data.type`. Possible types are `RUN_GROUP_STATE_CHANGED`,
 `DEVICE_EXECUTION_STATE_CHANGED`, `NODE_ATTEMPT_STATE_CHANGED` and
-`NODE_RETRY_SCHEDULED`; see [A6 payloads](../contracts/event_error_v1.md).
+`NODE_RETRY_SCHEDULED`; see [event payloads](../contracts/event_error_v1.md).
 Optional correlation fields remain absent on events that do not require them.
 Filter by run/device/attempt IDs in the native client, then update the correct
 graph node. A device's nextNodeId is a candidate position, not proof that its
 attempt has started; an attempt RUNNING event supplies that evidence. Snapshot
-and I1 history remain the authoritative ways to repair/inspect a view.
+and attempt history remain the authoritative ways to repair/inspect a view.
 
 After about 15 seconds without successful output, an idle connection receives:
 
@@ -1331,7 +1377,7 @@ event. Cursors can have gaps and are not progress percentages.
 To bootstrap a known run view, read its authoritative snapshot and subscribe
 with that snapshot's cursor. Events committed between the GET and subscription
 are replayed. For a fresh stream with no snapshot/cursor, omission intentionally
-skips historical rows. When several views are monitored, I5 owns reconciliation
+skips historical rows. When several views are monitored, the native client owns reconciliation
 of all relevant views after expiry; do not repair one view while assuming the
 global cursor makes every other cached view current.
 
@@ -1374,32 +1420,10 @@ Accept header `text/event-stream`, no body/query and initially no Last-Event-ID.
 The request remains open. No Android target is needed to observe idle heartbeats.
 Leave it open over 40 seconds, then run the existing compile/start flow in a
 second tab to observe correlated node/device/group events. Disconnecting this
-GET leaves the run active. Use [the readable I4 walkthrough](../../../../a2matex-runtime/examples/i4/README.md)
+GET leaves the run active. Use [the event-stream walkthrough](../../../../a2matex-runtime/examples/i4/README.md)
 for the complete sequence and expected checks.
 
-Linux evidence includes real HTTP/SQLite replay of more than 100 events, live
-commits, expiry, frame/error/deadline races, direct shutdown with blocked output,
-and an actual managed agent with three real heartbeats over 45 seconds, fresh
-sessions and owner shutdown/loss. Native Windows and Studio/Launcher UI remain
-unverified. Known missing G22/H14/H15 scripts remain a full-suite gate; they are
-not repaired by this endpoint. Operational logs and Phase J package admission
-remain outside this stream.
-
-## Adding an API in later phases
-
-Before handing off an API, update the guide for the app that calls it and mark
-its implementation and verification status. Add shared routes here and link
-to them from both app guides. Use the relevant Runtime contract as the source
-for the wire format. Each API section should cover:
-
-- The calling app, user action, native process responsibility, and prerequisites.
-- Method, path, authentication, headers, query parameters, request body,
-  limits, and a runnable example.
-- Response fields and examples for success, invalid input, and applicable errors.
-- Side effects, correlation IDs, compatibility checks, retry and idempotency
-  rules, and what to do if Runtime exits mid-request.
-- For streaming APIs, how to reconnect, resume from a cursor, or read a snapshot.
-- The acceptance checks run against the Runtime build and any host-specific gaps.
-
-When the launch protocol, shutdown behavior, or readiness rules change,
-update this shared guide and check both app flows against the new behavior.
+Verify cursor replay, expiry handling, heartbeats, disconnect and owner shutdown
+in the actual app on each supported host. Native Windows and Studio/Launcher UI
+behavior require their own acceptance. Operational logs and protected Product
+package admission are separate from this execution-state stream.

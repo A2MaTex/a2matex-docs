@@ -5,15 +5,14 @@
 One native Runtime client serves Studio validation and compilation. The first
 authoring request can start Runtime. Subsequent requests reuse the owned
 process and check readiness before sending HTTP. This guide covers the current
-authoring, multi-device Test Run, saved-run snapshots, I1 attempt history and
-H13 lifecycle-action APIs.
-Wait Variable remains deferred under H6–H8.
+authoring, multi-device Test Run, saved-run snapshots, attempt history and
+lifecycle-action APIs. Wait Variable is not yet supported.
 
 For the Studio developer, use the single
-[I5–I7 integration handoff](studio_observability.md): events/reconnect, saved
+[execution monitoring and control guide](studio_observability.md): events/reconnect, saved
 attempts/screenshots, and run/process controls in one source-mapped guide.
-Studio was inspected read-only; the handoff does not implement client code.
-The user will pull the implementation and request I8 review/E2E later.
+Implement the native bridge and UI behavior described there, then verify them
+with the actual Studio-managed Runtime.
 
 ```mermaid
 flowchart LR
@@ -24,7 +23,7 @@ flowchart LR
     R -->|Startup fails| X[Display startup error]
     A --> D[Show diagnostics or cache current IR]
     D --> T[POST /runs with selected READY devices]
-    T --> P[G13 poll committed progress/result]
+    T --> P[Poll committed progress and result]
 ```
 
 ## Validate and compile
@@ -50,7 +49,7 @@ Keep **Shut down Runtime** available while Studio owns the process. Suspend
 automatic validation after explicit shutdown. The user can explicitly request
 a Runtime operation to start it again. During an active run group, closing
 Studio should offer **Stop and exit** or **Stay open**. Stop and exit sends the
-private shutdown command and waits for G11 cancellation/child exit; it does not
+private shutdown command and waits for run cancellation and child exit; it does not
 use the HTTP run-action API. Group Cancel keeps Runtime alive; Stop and exit does not.
 
 ## Current API inventory and examples
@@ -159,13 +158,13 @@ When the publisher opens the picker to prepare a draft test run, use the
 native client's per-request readiness check and refresh the device list.
 Use the cached read to render a snapshot already obtained in the same
 session. Provide a **Refresh devices** action for after the publisher
-connects or authorizes a device. See the [shared E7 requests and responses](managed_runtime.md#device-inventory-api).
+connects or authorizes a device. See the [shared device requests and responses](managed_runtime.md#device-inventory-api).
 
 Use `adbSerial` as the selection key. Enable selection for `READY` entries and
 show the reason for unavailable ones. After a successful refresh, retain
 selections that are still ready and flag any that disappeared or became
 unavailable. If refresh fails, an already displayed list can remain visible
-with its refresh failure. The draft run API invokes E6 to recheck live readiness at admission.
+with its refresh failure. The draft run API rechecks live device readiness at admission.
 Allow one or more selected READY devices. Capture each exact serial with its
 own workflow input object; do not silently deduplicate or filter the selection.
 
@@ -193,30 +192,30 @@ current native-owned Bearer token, and no query parameters. The entire request
 is limited to 4 MiB, and runtimeIr to 1 MiB. Validation/compilation do not execute
 Android commands; a newly admitted POST /runs does.
 
-Set Variable is now executable when Runtime Info advertises its exact pair.
+Set Variable is executable when Runtime Info advertises its exact pair.
 Render one node with scope `FLOW` or `RUN_GROUP`, a name, and its value binding.
 The Runtime creates empty RAM scopes for a new run; Studio supplies no variable
 store DTO. Its output is `{}`, so it offers no Set Variable output field to
 later nodes. Flow/Global bindings read current named values; absent values fail
 through the node's error policy. These values disappear when the run finishes
-or Runtime exits. Follow the [G18 example](../../../../a2matex-runtime/examples/g18/README.md)
+or Runtime exits. Follow the [Set Variable and Switch example](../../../../a2matex-runtime/examples/g18/README.md)
 to test Set Variable → Switch through the existing APIs. Multi-device scheduling is implemented; live
 HTTP Pause/Resume/Cancel is implemented; [integrate the action route](run_actions.md).
-Wait Variable remains deferred.
+Wait Variable is not yet supported.
 
-Screenshot Test Run is now supported when the exact Screenshot pair appears
+Screenshot Test Run is supported when the exact Screenshot pair appears
 in Runtime Info. Render its selected mode from the catalog: FULL_SCREEN has
 no coordinate bindings; pixel/percentage regions require their four literal
 start/end coordinates. Later nodes may bind the declared artifactId output
 after the Screenshot succeeds. That ID is neither image data nor a local
 path. GET run snapshots still expose state, not per-node output or images.
-G20 now supports [authenticated PNG downloads](managed_runtime.md#screenshot-artifact-download-api)
-by known artifactId. [I1 history](#inspect-node-attempts-and-screenshots--i1) now
+Runtime supports [authenticated PNG downloads](managed_runtime.md#screenshot-artifact-download-api)
+by known artifactId. [Attempt history](#inspect-node-attempts-and-screenshots)
 delivers committed attempt outputs/artifact IDs; do not query SQLite from Studio. Use the
-[G19/G20 example](../../../../a2matex-runtime/examples/g19/README.md) for manual
+[screenshot example](../../../../a2matex-runtime/examples/g19/README.md) for manual
 compile/start/poll, ID lookup, and download verification. Advertising Screenshot
 in Runtime Info establishes node support, not REST route availability in an
-older build; integrate against the verified G20 build.
+older build; use a Runtime build that includes the artifact-download endpoint.
 
 To display a known artifact, the native bridge must check actual Runtime
 readiness, attach the current Bearer token, GET `/artifacts/{artifactId}` with
@@ -422,19 +421,18 @@ RunGroup ID; a deliberate new intent after completion gets a new UUID/group.
 Include intentional owner shutdown during a delay and reopening the saved
 terminal result in Studio's integration acceptance.
 
-Attempt history is implemented under I1 and [SSE state events](#live-execution-events--i4)
-under I4. Operational logs are separate. H13 exposes
+Attempt history and [SSE state events](#live-execution-events) are available.
+Operational logs are separate. Runtime exposes
 [Pause/Resume/Cancel over HTTP](run_actions.md). Studio uses the existing group ID,
 current bearer and exact action body; keep accepted actions pending locally,
 poll the by-ID snapshot, and reconcile 409/lost responses without automatic
 mutation retries. The shared guide provides complete examples for its developer.
-The [I7 client section](studio_observability.md#5-i7-run-controls-and-owner-lifecycle)
-and [I7 spec](../i_observability_apis/i7_studio_lifecycle_controls.md) define
+The [client control instructions](studio_observability.md#5-run-controls-and-owner-lifecycle) define
 the action bridge, conflict/uncertain-outcome handling, buttons and guarded
 shutdown/exit integration. HTTP Cancel keeps Runtime alive; owner shutdown
 suppresses automatic work and waits for process exit.
-Multi-device Test Run is implemented in H4. Phase H's [expansion checklist](../g_workflow_engine/g14_start_run_api.md#15-phase-h-expansion-checklist)
-records the delivered picker/admission/scheduling changes.
+For multi-device Test Runs, preserve the complete selection and render each
+device execution independently.
 
 ## Run progress and saved results
 
@@ -465,18 +463,19 @@ A snapshot 404 after successful readiness is a data result and does not request
 Runtime relaunch. Handle read failures separately from the last displayed run
 state; a 500 or broken connection is not evidence that the workflow succeeded,
 failed, or disappeared. Use the shared owner/session replacement policy for an
-actual readiness failure. I1 provides paginated attempts and I4 provides
-[continuous state events](#live-execution-events--i4). Group controls use the [implemented H13 action API](run_actions.md). Shared snapshot tests and built-agent checks
+actual readiness failure. Runtime provides paginated attempts and
+[continuous state events](#live-execution-events). Group controls use the [run-action API](run_actions.md). Shared snapshot tests and built-agent checks
 pass on Linux; native Windows usage is documented but not executed here.
 
-## Live execution events — I4
+<a id="live-execution-events--i4"></a>
 
-The Runtime endpoint is implemented and Linux-verified. Studio's event client
-and UI reconciliation remain I5, and the inspector remains I6. Use the
-[I5 section of the shared Studio handoff](studio_observability.md#3-i5-live-events-and-reconnect) for source locations and client
+## Live execution events
+
+The Runtime endpoint is available. Implement Studio's event client and UI
+reconciliation using the [live-event instructions](studio_observability.md#3-live-events-and-reconnect) for source locations and client
 implementation steps, the
-[complete shared SSE reference](managed_runtime.md#execution-event-stream--i4)
-and [readable I4 demo](../../../../a2matex-runtime/examples/i4/README.md) as the
+[complete shared SSE reference](managed_runtime.md#execution-event-stream)
+and [event-stream demo](../../../../a2matex-runtime/examples/i4/README.md) as the
 integration contract rather than reading service implementation details.
 
 1. After the native owner client's actual readiness check, open one GET
@@ -487,7 +486,7 @@ integration contract rather than reading service implementation details.
 2. For a known run, load the authoritative snapshot and pass its `cursor` as
    Last-Event-ID so events between snapshot and subscription are replayed. If
    following only new activity, omit the header; old history is not replayed.
-3. Parse complete SSE frames. The JSON data is an existing A6 event, and its
+3. Parse complete SSE frames. The JSON data follows the execution-event contract, and its
    cursor/type match the frame id/event. Filter using run/device/attempt IDs,
    not node ID alone. The same graph can run on several devices.
 4. Apply the event before saving the connection's processed cursor as a
@@ -496,7 +495,7 @@ integration contract rather than reading service implementation details.
 5. On reconnect use that processed cursor. Repeated events after ambiguous
    delivery must update the same record, not create another attempt or dispatch
    an action. If snapshots refresh while events are buffered, avoid applying
-   an older buffered state over the newer watermarked view. I5 owns that client
+   an older buffered state over the newer watermarked view. Studio implements that client
    reconciliation and its tests.
 
 | Event | Studio use |
@@ -536,15 +535,16 @@ Disconnect, start another run, and reconnect with the last processed cursor to
 see retained later events without repeating commands. The shared guide has
 exact Linux/Windows curl commands, frames, errors and host verification limits.
 
-## Inspect node attempts and screenshots — I1
+<a id="inspect-node-attempts-and-screenshots--i1"></a>
 
-Use the [shared I1 API reference](managed_runtime.md#node-attempt-history-api--i1)
+## Inspect node attempts and screenshots
+
+Use the [shared attempt-history API reference](managed_runtime.md#node-attempt-history-api)
 and [Postman walkthrough](../../../../a2matex-runtime/examples/i1/README.md).
-The Runtime endpoint is implemented and Linux-verified; the Studio inspector UI
-remains I6. History can be used independently of the implemented I4 event stream.
+The Runtime endpoint is available. Implement the Studio inspector as described
+below. History can be used independently of the event stream.
 
-The [I6 implementation spec](../i_observability_apis/i6_studio_execution_inspector.md)
-and [I6 section of the shared Studio handoff](studio_observability.md#4-i6-attempt-history-and-screenshot-inspection) define the client work.
+Follow the [inspector integration instructions](studio_observability.md#4-attempt-history-and-screenshot-inspection).
 Reuse the existing getNodeAttempts bridge, replace full-history reloads with
 selected-page reads, and add a dedicated binary preview operation. The current
 Studio JSON client has a 2 MiB response cap; artifact retrieval needs its own
@@ -570,10 +570,10 @@ Studio JSON client has a 2 MiB response cap; artifact retrieval needs its own
    returns `{}`; scope maps are not exposed by history.
 5. Show HTTP/read failures separately from execution errors. Known empty history
    is200; unknown execution404. Neither restarts work. A cancelled page request
-   cancels that read only; Pause/Resume/Cancel remain separate H13 actions.
+   cancels that read only; Pause/Resume/Cancel remain separate run actions.
 
 Windows client examples are in the shared guide; native Windows UI/Runtime
-acceptance remains unverified. See the I1 evidence record for the separate Phase H/G22 regression gates.
+acceptance must be verified on a native Windows host.
 
 ## Device selection and execution capacity
 
@@ -589,16 +589,16 @@ selection changes. There is no per-request concurrency field or settings API.
 Hardware determines practical capacity; actual byte/schema/deadline failures
 still apply independently of device count.
 
-H4 public multi-device dispatch is implemented. Use the
-[readable H4 example](../../../../a2matex-runtime/examples/h4/README.md) to test
+Public multi-device dispatch is available. Use the
+[multi-device example](../../../../a2matex-runtime/examples/h4/README.md) to test
 201 admission, 200 replay, ordered per-device snapshots and whole-selection
 rejection. Show the group summary and every device's state; do not render only
 deviceExecutions[0]. Production package execution remains separate; group controls use
-[H13](run_actions.md). See the [H4 spec](../h_multi_device_execution/h4_public_multi_device_start.md).
+[the shared run-action API](run_actions.md).
 
 ## Device loss during a Test Run
 
-H5 diagnoses transport after a nonzero ADB process result. Render the affected
+Runtime diagnoses device transport after a nonzero ADB process result. Render the affected
 member's FAILED status and `terminalError` from the usual GET snapshot, including
 `DEVICE_DISCONNECTED`, `DEVICE_OFFLINE` or `DEVICE_UNAUTHORIZED`. Other members
 may still be RUNNING; preserve the complete list and derived group summary.
@@ -610,8 +610,6 @@ automatic resume on reconnect. Keep the original requestId for uncertain POST
 recovery; a replay never starts another execution. A deliberate new run after
 the active group finishes uses a fresh requestId and refreshed selection.
 
-See the [shared H5 behavior](managed_runtime.md#device-disconnect-after-admission--h5)
-and [manual acceptance scenario](../h_multi_device_execution/h5_device_disconnect_handling.md#11-manual-acceptance-after-implementation).
-H15 verifies Linux controlled two-device disconnect isolation and focused
-transport classification/deadline/cancellation checks. Live target acceptance
-remains pending; see the [combined acceptance pack](../../../../a2matex-runtime/examples/h15/README.md).
+Follow the [shared disconnect behavior](managed_runtime.md#device-disconnect-after-admission)
+and exercise it with the [combined API walkthrough](../../../../a2matex-runtime/examples/h15/README.md).
+Verify disconnect isolation with real target devices in your environment.

@@ -43,7 +43,7 @@ go run -buildvcs=false ./cmd/agent
 For an installed Windows executable, run `.\a2matex-runtime.exe` from its
 installation directory. Use the URL supplied by the running process for all
 requests, including when its listen address is overridden. See the
-[B5 session contract](../runtime_process_foundation/b5_local_authentication.md#session-contract).
+[managed readiness and authentication](managed_runtime.md#readiness-and-authentication).
 
 ## 2. Find the connection file
 

@@ -37,8 +37,9 @@ flowchart LR
 
 The Product package remains encrypted in R2, during Launcher transport, and on Launcher disk.
 The R2 object key is independent of the server's `Static.originalFileName`.
-Launcher preserves that filename under `<productId>/<installedReleaseId>/` in
-its selected directory. The local directory header/reference are location only;
+Launcher stores its chosen local filename (normally `package.a2m`) under
+`<productId>/` in the selected `a2matex/products` directory. Product ID is checked
+against the folder; Release ID/version come from the validated package manifest. The local directory header/reference are location only;
 authorization still binds the verified Product/Release/hash and Runtime session.
 Backend unwraps the Release content key only inside Key Service; Runtime receives that key only in
 an envelope encrypted for its ephemeral session public key.
